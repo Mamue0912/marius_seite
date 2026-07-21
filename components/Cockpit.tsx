@@ -179,10 +179,13 @@ export default function Cockpit({
   return (
     <>
       <div className="topbar">
-        <h1>Cockpit — Live Mail</h1>
+        <div className="brand">
+          <span className="mark" />
+          <h1>Cockpit</h1>
+        </div>
         <div className="spacer" />
         {statusView()}
-        {connected && <button className="btn small" onClick={manualSync}>Aktualisieren</button>}
+        {connected && <button className="btn small ghost" onClick={manualSync} aria-label="Aktualisieren" title="Aktualisieren">↻</button>}
         <button className="btn btn-primary small" onClick={() => setShowConnect((v) => !v)}>
           {connected ? "+ Postfach" : "Postfach verbinden"}
         </button>
@@ -219,7 +222,16 @@ export default function Cockpit({
           );
         })}
 
-        {connected && msgs.length === 0 && <div className="empty">Noch keine E-Mails geladen. Drücke „Aktualisieren".</div>}
+        {connected && msgs.length === 0 && status?.syncing && (
+          <div className="bucket">{[0, 1, 2, 3].map((i) => <div className="sk-card" key={i} />)}</div>
+        )}
+        {connected && msgs.length === 0 && !status?.syncing && (
+          <div className="empty">
+            <div className="ic">✦</div>
+            Für heute ist alles ruhig.
+            <div className="sub">Keine neuen E-Mails im Posteingang.</div>
+          </div>
+        )}
       </div>
 
       <div className={"scrim" + (drawer ? " open" : "")} onClick={() => !drawer?.sending && setDrawer(null)} />

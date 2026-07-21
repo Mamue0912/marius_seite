@@ -1,9 +1,16 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Cockpit — Outlook Live",
-  description: "Live-Outlook-Postfach mit intelligentem Antwort-Assistenten"
+  title: "Cockpit",
+  description: "Persönliches Cockpit mit Live-Postfach und Antwort-Assistent"
+};
+
+export const viewport: Viewport = {
+  themeColor: "#0b0b0f",
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover"
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
