@@ -11,7 +11,7 @@ export function supabaseServer() {
       getAll() {
         return cookieStore.getAll();
       },
-      setAll(items) {
+      setAll(items: { name: string; value: string; options?: any }[]) {
         try {
           items.forEach(({ name, value, options }) => cookieStore.set(name, value, options));
         } catch {

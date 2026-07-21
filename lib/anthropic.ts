@@ -49,9 +49,11 @@ async function parseJson<T>(system: string, user: string, schema: any): Promise<
     max_tokens: 2000,
     system,
     messages: [{ role: "user", content: user }],
-    // Strukturierte Ausgabe → garantiert parsebares JSON.
-    output_config: { format: { type: "json_schema", schema } } as any
-  });
+    // Strukturierte Ausgabe → garantiert parsebares JSON. output_config wird
+    // vom SDK im Request-Body durchgereicht; das Cast umgeht nur die Typprüfung
+    // der installierten SDK-Version.
+    output_config: { format: { type: "json_schema", schema } }
+  } as any);
   const text = res.content.map((b: any) => (b.type === "text" ? b.text : "")).join("");
   return JSON.parse(text) as T;
 }
