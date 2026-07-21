@@ -1,0 +1,1366 @@
+<title>Cockpit — Persönliches Taskboard</title>
+<style>
+  :root {
+    --bg: #F6F6F7;
+    --surface: #FFFFFF;
+    --surface-2: #FBFBFC;
+    --sunken: #F1F1F3;
+    --ink: #1E2024;
+    --ink-2: #3C3F46;
+    --muted: #74777E;
+    --faint: #9C9FA6;
+    --line: #E7E7EA;
+    --line-2: #EFEFF1;
+    --accent: #5A63D8;
+    --accent-soft: #EEF0FD;
+    --accent-ink: #3E46B8;
+    /* semantic (getrennt vom Akzent) */
+    --urgent: #D6455A; --urgent-soft: #FCECEF;
+    --high: #C77A1B;   --high-soft: #FBF1E2;
+    --mid: #4C7FB8;    --mid-soft: #ECF2F9;
+    --low: #5E8C6A;    --low-soft: #EDF4EF;
+    --ok: #3E9E6E;
+    --shadow-sm: 0 1px 2px rgba(20,22,28,.05);
+    --shadow: 0 1px 3px rgba(20,22,28,.06), 0 8px 24px rgba(20,22,28,.06);
+    --shadow-lg: 0 12px 48px rgba(20,22,28,.18);
+    --r: 10px; --r-lg: 14px;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Consolas, monospace;
+  }
+  :root[data-theme="dark"] {
+    --bg: #16171A; --surface: #1D1E22; --surface-2: #212226; --sunken: #26272C;
+    --ink: #ECEDEF; --ink-2: #C6C8CD; --muted: #9A9DA4; --faint: #74777E;
+    --line: #2C2E33; --line-2: #26272B;
+    --accent: #7E86EC; --accent-soft: #262844; --accent-ink: #A6ACF4;
+    --urgent: #EC7080; --urgent-soft: #35232699; --urgent-soft: #3A2529;
+    --high: #E0A64D; --high-soft: #352C1E;
+    --mid: #6FA6DB; --mid-soft: #1E2A36;
+    --low: #74B58A; --low-soft: #1E2C24;
+    --ok: #63C495;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,.3);
+    --shadow: 0 1px 3px rgba(0,0,0,.35), 0 8px 24px rgba(0,0,0,.35);
+    --shadow-lg: 0 16px 54px rgba(0,0,0,.55);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--bg); }
+  .app {
+    font-family: var(--sans);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+    display: grid;
+    grid-template-columns: 244px 1fr;
+    min-height: 100vh;
+  }
+  button { font-family: inherit; }
+
+  /* ---------- Sidebar ---------- */
+  .sidebar {
+    background: var(--surface);
+    border-right: 1px solid var(--line);
+    display: flex; flex-direction: column;
+    padding: 16px 12px;
+    gap: 6px;
+    position: sticky; top: 0; height: 100vh;
+    overflow-y: auto;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; padding: 6px 8px 14px; }
+  .brand .mark {
+    width: 26px; height: 26px; border-radius: 7px; flex: none;
+    background: linear-gradient(150deg, var(--accent), #7d84ea);
+    display: grid; place-items: center;
+  }
+  .brand .mark::after { content: ""; width: 11px; height: 11px; border-radius: 3px; border: 2px solid #fff; }
+  .brand b { font-size: 14.5px; font-weight: 650; letter-spacing: -.01em; }
+  .brand small { display: block; color: var(--faint); font-size: 11px; font-weight: 500; margin-top: -1px; }
+
+  .nav-label {
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--faint); font-weight: 650; padding: 12px 8px 5px;
+  }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    width: 100%; text-align: left;
+    border: 0; background: transparent; cursor: pointer;
+    color: var(--ink-2); font-size: 13.5px; font-weight: 500;
+    padding: 8px 8px; border-radius: 8px;
+    transition: background-color .12s, color .12s;
+  }
+  .nav-item:hover { background: var(--sunken); }
+  .nav-item.active { background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
+  .nav-item .ic { width: 15px; height: 15px; flex: none; opacity: .85; }
+  .nav-item .count {
+    margin-left: auto; font-size: 11px; font-variant-numeric: tabular-nums;
+    background: var(--sunken); color: var(--muted);
+    padding: 1px 7px; border-radius: 999px; font-weight: 600;
+  }
+  .nav-item.active .count { background: #fff3; color: var(--accent-ink); }
+  :root[data-theme="dark"] .nav-item.active .count { background: #ffffff14; }
+
+  .filt-group { padding: 4px 4px 2px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    border: 1px solid var(--line); background: var(--surface);
+    color: var(--ink-2); font-size: 12px; font-weight: 500;
+    padding: 5px 9px; border-radius: 999px; cursor: pointer; margin: 3px 3px 0 0;
+    transition: all .12s;
+  }
+  .chip:hover { border-color: var(--accent); }
+  .chip.on { background: var(--accent-soft); border-color: transparent; color: var(--accent-ink); font-weight: 600; }
+  .chip .dotc { width: 7px; height: 7px; border-radius: 50%; }
+
+  .sync-mini {
+    margin-top: auto; border: 1px solid var(--line); border-radius: var(--r);
+    background: var(--surface-2); padding: 10px 11px; font-size: 11.5px; color: var(--muted);
+  }
+  .sync-mini .row { display: flex; align-items: center; gap: 7px; padding: 2px 0; }
+  .sdot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .sdot.off { background: var(--faint); }
+  .sdot.on { background: var(--ok); }
+  .sdot.err { background: var(--urgent); }
+
+  /* ---------- Main ---------- */
+  .main { min-width: 0; display: flex; flex-direction: column; }
+  .topbar {
+    position: sticky; top: 0; z-index: 20;
+    background: color-mix(in srgb, var(--bg) 82%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+    padding: 12px 24px;
+    display: flex; align-items: center; gap: 14px;
+  }
+  .topbar h2 { margin: 0; font-size: 17px; font-weight: 650; letter-spacing: -.02em; }
+  .topbar .sub { color: var(--muted); font-size: 12.5px; margin-top: 1px; }
+  .spacer { flex: 1; }
+  .search {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 9px; padding: 7px 11px; min-width: 180px;
+  }
+  .search input { border: 0; background: transparent; outline: none; color: var(--ink); font-size: 13px; width: 100%; }
+  .search input::placeholder { color: var(--faint); }
+  .btn {
+    display: inline-flex; align-items: center; gap: 7px;
+    border: 1px solid var(--line); background: var(--surface);
+    color: var(--ink); font-size: 13px; font-weight: 550;
+    padding: 8px 13px; border-radius: 9px; cursor: pointer;
+    transition: border-color .15s, background-color .15s, transform .08s;
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn:active { transform: translateY(1px); }
+  .btn-primary { background: var(--accent); color: #fff; border-color: transparent; }
+  .btn-primary:hover { filter: brightness(1.06); border-color: transparent; }
+  .btn.icon { padding: 8px; width: 36px; justify-content: center; }
+
+  .content { padding: 20px 24px 60px; max-width: 1180px; width: 100%; }
+
+  /* demo banner */
+  .demo-strip {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--high-soft); border: 1px solid color-mix(in srgb, var(--high) 30%, transparent);
+    color: var(--ink-2); border-radius: var(--r); padding: 9px 13px; font-size: 12.5px;
+    margin-bottom: 18px;
+  }
+  .demo-strip b { color: var(--ink); }
+  .demo-strip .tag {
+    font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+    background: var(--high); color: #fff; padding: 2px 7px; border-radius: 5px; flex: none;
+  }
+  :root[data-theme="dark"] .demo-strip .tag { color: #201a10; }
+  .demo-strip button {
+    margin-left: auto; border: 0; background: transparent; color: var(--accent-ink);
+    font-weight: 600; font-size: 12.5px; cursor: pointer; white-space: nowrap;
+  }
+  .demo-strip.real { background: var(--low-soft); border-color: color-mix(in srgb, var(--low) 32%, transparent); }
+  .demo-strip.real .tag { background: var(--low); }
+  :root[data-theme="dark"] .demo-strip.real .tag { color: #10201700; color: #0f1a13; }
+
+  .section-title { font-size: 13px; font-weight: 650; color: var(--ink); margin: 26px 2px 12px; letter-spacing: -.01em; display: flex; align-items: center; gap: 8px; }
+  .section-title:first-child { margin-top: 4px; }
+  .section-title .hint { font-weight: 500; color: var(--faint); font-size: 12px; }
+
+  /* summary tiles */
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .tile {
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg);
+    padding: 14px 15px; box-shadow: var(--shadow-sm); position: relative; overflow: hidden;
+  }
+  .tile .k { font-size: 11.5px; color: var(--muted); font-weight: 550; display: flex; align-items: center; gap: 6px; }
+  .tile .v { font-size: 27px; font-weight: 680; letter-spacing: -.02em; margin-top: 7px; font-variant-numeric: tabular-nums; line-height: 1; }
+  .tile .cap { font-size: 11.5px; color: var(--faint); margin-top: 6px; }
+  .tile.alert .v { color: var(--urgent); }
+  .tile.warn .v { color: var(--high); }
+  .tile .stripe { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
+  .tile.alert .stripe { background: var(--urgent); }
+  .tile.warn .stripe { background: var(--high); }
+  .tile.info .stripe { background: var(--accent); }
+
+  .grid-2 { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; align-items: start; }
+
+  /* focus */
+  .focus-card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg);
+    padding: 6px; box-shadow: var(--shadow-sm);
+  }
+  .focus-item { display: flex; gap: 12px; padding: 13px 12px; border-radius: var(--r); cursor: pointer; transition: background-color .12s; }
+  .focus-item:hover { background: var(--surface-2); }
+  .focus-item + .focus-item { border-top: 1px solid var(--line-2); }
+  .focus-rank { font-size: 12px; font-weight: 700; color: #fff; background: var(--accent); width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; flex: none; margin-top: 1px; }
+  .focus-body { min-width: 0; flex: 1; }
+  .focus-body .t { font-size: 14px; font-weight: 600; letter-spacing: -.01em; }
+  .focus-body .why { font-size: 12px; color: var(--muted); margin-top: 3px; line-height: 1.45; }
+  .focus-meta { display: flex; gap: 8px; margin-top: 7px; flex-wrap: wrap; }
+
+  /* generic list card */
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); overflow: hidden; }
+  .panel .ph { padding: 12px 15px; border-bottom: 1px solid var(--line-2); font-size: 12.5px; font-weight: 650; display: flex; align-items: center; justify-content: space-between; }
+  .mini-row { display: flex; gap: 11px; align-items: flex-start; padding: 11px 15px; cursor: pointer; transition: background-color .12s; }
+  .mini-row:hover { background: var(--surface-2); }
+  .mini-row + .mini-row { border-top: 1px solid var(--line-2); }
+  .mini-when { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--muted); min-width: 58px; font-weight: 600; padding-top: 1px; }
+  .mini-when .rel { color: var(--faint); font-weight: 500; display: block; font-size: 10.5px; }
+  .mini-main { min-width: 0; flex: 1; }
+  .mini-main .t { font-size: 13.5px; font-weight: 550; }
+  .mini-main .s { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+
+  /* badges */
+  .badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 10.5px; font-weight: 650; padding: 2px 8px; border-radius: 999px;
+    letter-spacing: .01em; white-space: nowrap;
+  }
+  .badge .d { width: 6px; height: 6px; border-radius: 50%; }
+  .prio-dringend { background: var(--urgent-soft); color: var(--urgent); }
+  .prio-dringend .d { background: var(--urgent); }
+  .prio-hoch { background: var(--high-soft); color: var(--high); }
+  .prio-hoch .d { background: var(--high); }
+  .prio-mittel { background: var(--mid-soft); color: var(--mid); }
+  .prio-mittel .d { background: var(--mid); }
+  .prio-niedrig { background: var(--low-soft); color: var(--low); }
+  .prio-niedrig .d { background: var(--low); }
+  .src {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 10.5px; font-weight: 600; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; background: var(--surface-2);
+  }
+  .src .sq { width: 7px; height: 7px; border-radius: 2px; }
+  .src-reminders .sq { background: #E8863C; } .src-notes .sq { background: #E9C23E; }
+  .src-outlook .sq { background: #2C6BD8; } .src-calendar .sq { background: #9B59C7; }
+  .src-manual .sq { background: var(--faint); }
+  .src-web .sq { background: #F5B301; } .src-icloud .sq { background: #3B93E8; }
+  .due { font-size: 11px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .due.over { color: var(--urgent); }
+  .due.today { color: var(--high); }
+
+  /* ---------- Board ---------- */
+  .board-wrap { overflow-x: auto; padding-bottom: 8px; }
+  .board { display: grid; grid-auto-flow: column; grid-auto-columns: 288px; gap: 14px; align-items: start; }
+  .col { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-lg); display: flex; flex-direction: column; max-height: 74vh; }
+  .col.drop { outline: 2px dashed var(--accent); outline-offset: -2px; background: var(--accent-soft); }
+  .col-h { display: flex; align-items: center; gap: 8px; padding: 11px 13px; position: sticky; top: 0; }
+  .col-h .ct { font-size: 12.5px; font-weight: 650; }
+  .col-h .cc { font-size: 11px; color: var(--muted); background: var(--sunken); border-radius: 999px; padding: 1px 7px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .col-h .cdot { width: 8px; height: 8px; border-radius: 3px; }
+  .col-body { padding: 0 9px 10px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
+    padding: 11px 12px; cursor: grab; box-shadow: var(--shadow-sm);
+    transition: border-color .12s, box-shadow .12s, transform .08s;
+  }
+  .card:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); box-shadow: var(--shadow); }
+  .card:active { cursor: grabbing; }
+  .card.dragging { opacity: .4; }
+  .card.over-due { border-left: 3px solid var(--urgent); }
+  .card .c-top { display: flex; align-items: center; gap: 6px; margin-bottom: 7px; flex-wrap: wrap; }
+  .card .c-title { font-size: 13.5px; font-weight: 600; letter-spacing: -.01em; line-height: 1.3; }
+  .card .c-desc { font-size: 11.5px; color: var(--muted); margin-top: 4px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .card .c-foot { display: flex; align-items: center; gap: 7px; margin-top: 9px; flex-wrap: wrap; }
+  .card .link-chip { font-size: 10.5px; color: var(--accent-ink); background: var(--accent-soft); border-radius: 5px; padding: 2px 6px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; }
+  .cat-tag { font-size: 10.5px; color: var(--muted); font-weight: 550; }
+  .card .est { font-size: 10.5px; color: var(--faint); font-variant-numeric: tabular-nums; margin-left: auto; }
+  .card.done .c-title { text-decoration: line-through; color: var(--muted); }
+
+  /* email buckets */
+  .mail-bucket { margin-bottom: 20px; }
+  .mail-bucket .bh { display: flex; align-items: center; gap: 8px; margin: 0 2px 9px; }
+  .mail-bucket .bh .bt { font-size: 12.5px; font-weight: 650; }
+  .mail-bucket .bh .bd { width: 8px; height: 8px; border-radius: 3px; }
+  .mail-bucket .bh .bc { font-size: 11px; color: var(--muted); background: var(--sunken); border-radius: 999px; padding: 1px 7px; font-weight: 600; }
+  .mails { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; }
+  .mail {
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
+    padding: 12px 13px; box-shadow: var(--shadow-sm); cursor: pointer;
+    transition: border-color .12s, box-shadow .12s;
+  }
+  .mail:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); box-shadow: var(--shadow); }
+  .mail .m-top { display: flex; align-items: center; gap: 8px; }
+  .mail .m-from { font-size: 12.5px; font-weight: 650; }
+  .mail .m-time { margin-left: auto; font-size: 10.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .mail .m-subj { font-size: 13px; font-weight: 550; margin-top: 5px; line-height: 1.3; }
+  .mail .m-sum { font-size: 11.5px; color: var(--muted); margin-top: 4px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .mail .m-foot { display: flex; align-items: center; gap: 7px; margin-top: 10px; flex-wrap: wrap; }
+  .mail .m-action { font-size: 11px; color: var(--ink-2); background: var(--sunken); border-radius: 6px; padding: 3px 8px; font-weight: 550; }
+  .mail .m-action b { color: var(--accent-ink); }
+  .deadline-chip { font-size: 10.5px; font-weight: 650; color: var(--urgent); background: var(--urgent-soft); border-radius: 5px; padding: 2px 7px; }
+
+  /* timeline */
+  .tl-group { margin-bottom: 20px; }
+  .tl-h { font-size: 12px; font-weight: 650; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin: 0 2px 10px; }
+  .event {
+    display: flex; gap: 14px; background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--r); padding: 13px 15px; box-shadow: var(--shadow-sm); cursor: pointer; margin-bottom: 9px;
+    transition: border-color .12s, box-shadow .12s;
+  }
+  .event:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); box-shadow: var(--shadow); }
+  .event .e-time { text-align: right; min-width: 62px; flex: none; }
+  .event .e-time .hh { font-size: 14px; font-weight: 680; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+  .event .e-time .rem { font-size: 10.5px; color: var(--faint); margin-top: 2px; }
+  .event .e-bar { width: 3px; border-radius: 3px; background: var(--accent); flex: none; }
+  .event.frist .e-bar { background: var(--urgent); }
+  .event .e-main { min-width: 0; flex: 1; }
+  .event .e-title { font-size: 13.5px; font-weight: 600; letter-spacing: -.01em; }
+  .event .e-meta { font-size: 11.5px; color: var(--muted); margin-top: 4px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .event .e-prep { font-size: 11.5px; color: var(--ink-2); margin-top: 7px; background: var(--surface-2); border-radius: 7px; padding: 6px 9px; }
+  .event .e-prep b { color: var(--muted); font-weight: 600; }
+
+  /* connections view */
+  .conn { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+  .conn-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 16px; box-shadow: var(--shadow-sm); }
+  .conn-card .ch { display: flex; align-items: center; gap: 10px; }
+  .conn-card .cico { width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center; font-size: 13px; font-weight: 700; color: #fff; flex: none; }
+  .conn-card .cname { font-size: 14px; font-weight: 650; }
+  .conn-card .cstate { font-size: 11.5px; font-weight: 600; margin-top: 1px; }
+  .conn-card .cstate.off { color: var(--faint); }
+  .conn-card .cstate.na { color: var(--urgent); }
+  .conn-card .cstate.on { color: var(--ok); }
+  .conn-card p { font-size: 12.5px; color: var(--muted); line-height: 1.55; margin: 12px 0 0; }
+  .conn-card .steps { font-size: 12px; color: var(--ink-2); margin: 10px 0 0; padding-left: 18px; line-height: 1.6; }
+  .conn-card .cbtns { display: flex; gap: 8px; margin-top: 14px; }
+  .btn[disabled] { opacity: .5; cursor: not-allowed; }
+  .note { font-size: 11.5px; color: var(--muted); background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 8px; padding: 10px 12px; line-height: 1.5; margin-top: 14px; }
+  .note b { color: var(--ink); }
+
+  .empty { text-align: center; color: var(--faint); font-size: 13px; padding: 40px 20px; }
+
+  /* drawer */
+  .scrim { position: fixed; inset: 0; background: rgba(15,16,20,.4); backdrop-filter: blur(2px); z-index: 50; opacity: 0; pointer-events: none; transition: opacity .2s; }
+  .scrim.open { opacity: 1; pointer-events: auto; }
+  .drawer {
+    position: fixed; top: 0; right: 0; height: 100vh; width: 420px; max-width: 92vw;
+    background: var(--surface); border-left: 1px solid var(--line); box-shadow: var(--shadow-lg);
+    z-index: 60; transform: translateX(102%); transition: transform .26s cubic-bezier(.4,0,.1,1);
+    display: flex; flex-direction: column;
+  }
+  .drawer.open { transform: none; }
+  .drawer .dh { padding: 16px 18px; border-bottom: 1px solid var(--line-2); display: flex; align-items: flex-start; gap: 10px; }
+  .drawer .dh .x { margin-left: auto; border: 0; background: var(--sunken); border-radius: 7px; width: 28px; height: 28px; cursor: pointer; color: var(--muted); font-size: 15px; flex: none; }
+  .drawer .db { padding: 16px 18px; overflow-y: auto; flex: 1; }
+  .drawer h3 { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: -.01em; line-height: 1.3; }
+  .field { margin-bottom: 16px; }
+  .field .fl { font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--faint); font-weight: 650; margin-bottom: 5px; }
+  .field .fv { font-size: 13.5px; color: var(--ink-2); line-height: 1.5; }
+  .seg { display: flex; gap: 4px; flex-wrap: wrap; }
+  .seg button { border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); font-size: 12px; font-weight: 550; padding: 6px 10px; border-radius: 7px; cursor: pointer; }
+  .seg button.sel { background: var(--accent-soft); border-color: transparent; color: var(--accent-ink); font-weight: 650; }
+  .drawer .df { padding: 12px 18px; border-top: 1px solid var(--line-2); display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn-danger { color: var(--urgent); }
+  .btn-danger:hover { border-color: var(--urgent); background: var(--urgent-soft); }
+
+  /* modal */
+  .modal { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; padding: 20px; opacity: 0; pointer-events: none; transition: opacity .2s; }
+  .modal.open { opacity: 1; pointer-events: auto; }
+  .modal .mbg { position: absolute; inset: 0; background: rgba(15,16,20,.4); backdrop-filter: blur(2px); }
+  .modal .mbox { position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-lg); width: 100%; max-width: 440px; padding: 20px 22px; transform: translateY(8px) scale(.98); transition: transform .2s; }
+  .modal.open .mbox { transform: none; }
+  .modal h3 { margin: 0 0 16px; font-size: 16px; font-weight: 650; }
+  label.fld { display: block; margin-bottom: 13px; }
+  label.fld .l { font-size: 11.5px; font-weight: 600; color: var(--muted); margin-bottom: 5px; display: block; }
+  .inp { width: 100%; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); border-radius: 8px; padding: 9px 11px; font-size: 13.5px; font-family: inherit; outline: none; }
+  .inp:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  select.inp { appearance: none; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .modal .mf { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+
+  /* toast */
+  .toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%) translateY(20px); background: var(--ink); color: var(--bg); font-size: 13px; font-weight: 550; padding: 11px 18px; border-radius: 10px; box-shadow: var(--shadow-lg); z-index: 90; opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  .mobile-nav { display: none; }
+
+  @media (max-width: 860px) {
+    .app { grid-template-columns: 1fr; }
+    .sidebar { display: none; }
+    .mobile-nav { display: flex; gap: 4px; overflow-x: auto; padding: 8px 12px; background: var(--surface); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 21; }
+    .mobile-nav .nav-item { width: auto; white-space: nowrap; }
+    .grid-2 { grid-template-columns: 1fr; }
+    .tiles { grid-template-columns: 1fr 1fr; }
+    .search { display: none; }
+    .content { padding: 16px 14px 60px; }
+    .topbar { padding: 11px 14px; }
+  }
+  @media (max-width: 480px) { .tiles { grid-template-columns: 1fr; } }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<div class="app" id="app">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="mark"></span>
+      <div><b>Cockpit</b><small>Persönliches Taskboard</small></div>
+    </div>
+    <nav id="nav"></nav>
+
+    <div class="nav-label">Kategorien</div>
+    <div class="filt-group" id="catFilters"></div>
+
+    <div class="nav-label">Priorität</div>
+    <div class="filt-group" id="prioFilters"></div>
+
+    <div class="sync-mini" id="syncMini"></div>
+  </aside>
+
+  <!-- Main -->
+  <div class="main">
+    <div class="mobile-nav" id="mobileNav"></div>
+    <div class="topbar">
+      <div>
+        <h2 id="viewTitle">Übersicht</h2>
+        <div class="sub" id="viewSub"></div>
+      </div>
+      <div class="spacer"></div>
+      <div class="search">
+        <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--faint)"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+        <input id="search" placeholder="Suchen…" />
+      </div>
+      <button class="btn btn-primary" id="addBtn">Neue Aufgabe</button>
+      <button class="btn icon" id="syncBtn" title="Jetzt synchronisieren" aria-label="Synchronisieren">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6"/></svg>
+      </button>
+      <button class="btn icon" id="themeBtn" title="Design wechseln" aria-label="Design wechseln">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+      </button>
+    </div>
+    <div class="content" id="content"></div>
+  </div>
+</div>
+
+<!-- Drawer -->
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-hidden="true"></aside>
+
+<!-- Add modal -->
+<div class="modal" id="modal">
+  <div class="mbg" id="modalBg"></div>
+  <div class="mbox">
+    <h3>Neue Aufgabe</h3>
+    <label class="fld"><span class="l">Titel</span><input class="inp" id="m_title" placeholder="Was ist zu tun?" /></label>
+    <label class="fld"><span class="l">Beschreibung</span><input class="inp" id="m_desc" placeholder="Optionaler Kontext" /></label>
+    <div class="row2">
+      <label class="fld"><span class="l">Kategorie</span><select class="inp" id="m_cat"></select></label>
+      <label class="fld"><span class="l">Priorität</span><select class="inp" id="m_prio"></select></label>
+    </div>
+    <div class="row2">
+      <label class="fld"><span class="l">Fällig (Tage ab heute)</span><input class="inp" id="m_due" type="number" placeholder="z. B. 0 = heute" /></label>
+      <label class="fld"><span class="l">Spalte</span><select class="inp" id="m_status"></select></label>
+    </div>
+    <div class="mf">
+      <button class="btn" id="m_cancel">Abbrechen</button>
+      <button class="btn btn-primary" id="m_save">Hinzufügen</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var el = function (t, c, h) { var e = document.createElement(t); if (c) e.className = c; if (h != null) e.innerHTML = h; return e; };
+  var esc = function (s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (m) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[m]; }); };
+
+  /* ---------- config ---------- */
+  var CATS = [
+    { k: "schule", label: "Schule", c: "#4C7FB8" },
+    { k: "bewerbung", label: "Bewerbungen & Karriere", c: "#5A63D8" },
+    { k: "sport", label: "Sport & Karate", c: "#3E9E6E" },
+    { k: "privat", label: "Privat", c: "#C77A1B" },
+    { k: "finanzen", label: "Finanzen", c: "#2FA3A3" },
+    { k: "reisen", label: "Reisen", c: "#9B59C7" },
+    { k: "projekte", label: "Projekte", c: "#D6455A" },
+    { k: "sonstiges", label: "Sonstiges", c: "#74777E" }
+  ];
+  var CATMAP = {}; CATS.forEach(function (c) { CATMAP[c.k] = c; });
+  var PRIOS = [
+    { k: "dringend", label: "Dringend", rank: 0 },
+    { k: "hoch", label: "Hoch", rank: 1 },
+    { k: "mittel", label: "Mittel", rank: 2 },
+    { k: "niedrig", label: "Niedrig", rank: 3 }
+  ];
+  var PRIOMAP = {}; PRIOS.forEach(function (p) { PRIOMAP[p.k] = p; });
+  var COLS = [
+    { k: "eingang", t: "Eingang", c: "#74777E" },
+    { k: "heute", t: "Heute", c: "#D6455A" },
+    { k: "woche", t: "Diese Woche", c: "#C77A1B" },
+    { k: "bearbeitung", t: "In Bearbeitung", c: "#5A63D8" },
+    { k: "warten", t: "Warte auf Rückmeldung", c: "#9B59C7" },
+    { k: "erledigt", t: "Erledigt", c: "#3E9E6E" }
+  ];
+  var COLMAP = {}; COLS.forEach(function (c) { COLMAP[c.k] = c; });
+  var SRC = {
+    reminders: "Apple Erinnerungen", notes: "Apple Notizen",
+    outlook: "Outlook", calendar: "Kalender", manual: "Manuell"
+  };
+  var SRCMAIL = { web: "web.de", icloud: "iCloud" };
+  var SNAPSHOT = "21.07.2026, 14:40";
+  var MAILBUCKETS = [
+    { k: "sofort", t: "Sofort beantworten", c: "#D6455A" },
+    { k: "heute", t: "Heute beantworten", c: "#C77A1B" },
+    { k: "woche", t: "Diese Woche beantworten", c: "#4C7FB8" },
+    { k: "spaeter", t: "Später beantworten", c: "#74777E" },
+    { k: "warten", t: "Warten auf Antwort", c: "#9B59C7" },
+    { k: "info", t: "Nur zur Information", c: "#3E9E6E" }
+  ];
+
+  /* ---------- demo data (offsets relative to today; clearly example data) ---------- */
+  function seed() {
+    var tasks = [
+      { id: "t1", title: "Analysis-Blatt 7 abgeben", desc: "Aufgabe 3 und 4 fehlen noch, Rest ist fertig.", cat: "schule", prio: "dringend", due: 0, time: "18:00", est: 90, status: "heute", src: "reminders", next: "Aufgabe 3 zu Ende rechnen", email: null, event: "e_lern" },
+      { id: "t2", title: "Bewerbung Praktikum Siemens absenden", desc: "Lebenslauf final, Anschreiben prüfen, dann per Portal hochladen.", cat: "bewerbung", prio: "dringend", due: 0, time: null, est: 45, status: "heute", src: "notes", next: "Anhänge kontrollieren und senden", email: "m1", event: null },
+      { id: "t3", title: "Zugticket nach Berlin buchen", desc: "Sparpreis prüfen, Hinfahrt Freitag früh.", cat: "reisen", prio: "hoch", due: 0, time: null, est: 20, status: "heute", src: "reminders", next: "Verbindung 09:12 buchen", email: null, event: "ev_reise" },
+      { id: "t4", title: "Bibliotheksbuch zurückgeben", desc: "Leihfrist bereits abgelaufen – Mahngebühr vermeiden.", cat: "sonstiges", prio: "mittel", due: -1, time: null, est: 15, status: "heute", src: "reminders", next: "Auf dem Heimweg abgeben", email: null, event: null },
+      { id: "t5", title: "Anschreiben überarbeiten", desc: "Zweiter Absatz zu allgemein, konkretes Projekt nennen.", cat: "bewerbung", prio: "hoch", due: 1, time: null, est: 40, status: "bearbeitung", src: "notes", next: "Absatz 2 neu formulieren", email: null, event: null },
+      { id: "t6", title: "Portfolio-Website: Startseite bauen", desc: "Hero-Bereich und Projektliste umsetzen.", cat: "projekte", prio: "mittel", due: 3, time: null, est: 120, status: "bearbeitung", src: "manual", next: "Layout der Projektkarten finalisieren", email: null, event: null },
+      { id: "t7", title: "Gürtelprüfung Karate anmelden", desc: "Anmeldeformular beim Trainer abgeben.", cat: "sport", prio: "hoch", due: 2, time: null, est: 10, status: "woche", src: "reminders", next: "Formular ausfüllen", email: null, event: "ev_pruef" },
+      { id: "t8", title: "Physik-Referat vorbereiten", desc: "Thema Halbleiter, 10 Minuten, Folien + Handout.", cat: "schule", prio: "mittel", due: 4, time: null, est: 150, status: "woche", src: "reminders", next: "Gliederung erstellen", email: "m6", event: "ev_frist" },
+      { id: "t9", title: "Steuerunterlagen sortieren", desc: "Belege 2025 zusammenstellen.", cat: "finanzen", prio: "niedrig", due: null, time: null, est: 60, status: "eingang", src: "notes", next: "Ordner anlegen", email: null, event: null },
+      { id: "t10", title: "Geburtstagsgeschenk für Mama", desc: "Ideen sammeln, Budget ca. 50 €.", cat: "privat", prio: "niedrig", due: 6, time: null, est: 30, status: "eingang", src: "manual", next: "Wunschliste durchsehen", email: null, event: null },
+      { id: "t11", title: "Arzttermin bestätigen", desc: "Praxis erwartet Rückmeldung bis heute Abend.", cat: "privat", prio: "mittel", due: 0, time: null, est: 5, status: "eingang", src: "outlook", next: "Kurz per Antwort bestätigen", email: "m5", event: null },
+      { id: "t12", title: "Rückmeldung Trainingszeiten an Trainer", desc: "Warte auf Bestätigung, ob Dienstag passt.", cat: "sport", prio: "mittel", due: 2, time: null, est: 5, status: "warten", src: "outlook", next: "Auf Antwort des Trainers warten", email: "m3", event: null },
+      { id: "t13", title: "Rückmeldung Personalabteilung Stadtwerke", desc: "Unterlagen nachgereicht, warte auf Bestätigung.", cat: "bewerbung", prio: "hoch", due: 3, time: null, est: 0, status: "warten", src: "outlook", next: "Auf Rückmeldung warten", email: "m2", event: null },
+      { id: "t14", title: "Klausuranmeldung Mathe", desc: "Über das Prüfungsportal angemeldet.", cat: "schule", prio: "hoch", due: -2, time: null, est: 10, status: "erledigt", src: "reminders", next: null, email: null, event: null },
+      { id: "t15", title: "Trainingsplan Woche eintragen", desc: "Einheiten in Kalender übernommen.", cat: "sport", prio: "niedrig", due: -1, time: null, est: 15, status: "erledigt", src: "manual", next: null, email: null, event: null }
+    ];
+
+    // Echte E-Mails – Momentaufnahme aus den Konten web.de und iCloud (nur gelesen).
+    var emails = [
+      { id: "m_frage", account: "web", from: "Ludwig Anders (DKV)", addr: "Ludwig.Anders@karate.de", subj: "WM-Vorbereitung Polen – Fragebogen & Trainingsplanung", sum: "Fragebogen zur individuellen Athletik-Vorbereitung für die WM in Polen – gemeinsam mit einem Elternteil ausfüllen (Google Forms). Erfasst Trainingsumfang, Wettkämpfe, Verletzungen und Ziele.", dateLabel: "17.07.2026, 17:04", bucket: "sofort", deadlineLabel: "Frist 23.07.2026", needsReply: true, answered: false, action: "Fragebogen mit Elternteil ausfüllen und bis 23.07. absenden", task: null, cat: "sport", hidden: false, real: true },
+      { id: "m_reise", account: "web", from: "Anke Hoyer (DKV)", addr: "anke.hoyer@karate.de", subj: "RE: An- und Abreise Kaderlehrgang Rheinfelden / Basel Open", sum: "Deine Flugdaten (Hamburg → Basel) sind vermerkt. Der Weitertransport ab Basel (evtl. Taxi) wird noch geklärt. Die offizielle Einladung folgt in Kürze.", dateLabel: "21.07.2026, 09:05", bucket: "warten", deadlineLabel: null, needsReply: false, answered: true, action: "Auf offizielle Einladung und Transfer-Details warten", task: null, cat: "sport", hidden: false, real: true },
+      { id: "m_github", account: "icloud", from: "GitHub", addr: "noreply@github.com", subj: "[GitHub] Please review this sign in", sum: "GitHub bittet, eine neue Anmeldung zu bestätigen. Prüfen, ob die Anmeldung von dir stammt.", dateLabel: "21.07.2026, 06:19", bucket: "heute", deadlineLabel: null, needsReply: false, answered: false, action: "Anmeldung prüfen – falls unbekannt, Passwort ändern", task: null, cat: "sonstiges", hidden: false, real: true },
+      { id: "m_quali", account: "web", from: "Heinke Eltze (DKV)", addr: "heinke.eltze@karate.de", subj: "Ergebnisse der Qualifikation zur WM Jugend/Junioren 2026 in Polen", sum: "Qualifikation bestätigt (Junioren U18). Vorbereitungslehrgang Rheinfelden 28.–30.08., Basel Open 29.–30.08. An-/Abreise ab/bis Frankfurt a.M.", dateLabel: "14.07.2026, 14:15", bucket: "info", deadlineLabel: null, needsReply: false, answered: true, action: "Zur Kenntnis – Teilnahme bereits zugesagt", task: null, cat: "sport", hidden: false, real: true },
+      { id: "m_airbnb", account: "icloud", from: "Airbnb", addr: "automated@airbnb.com", subj: "Buchung storniert: 5.–9. Aug. in Gotha", sum: "Deine Airbnb-Buchung in Gotha (5.–9. Aug.) wurde storniert. Rückerstattung laut Mail 0 €.", dateLabel: "14.07.2026, 14:19", bucket: "info", deadlineLabel: null, needsReply: false, answered: false, action: "Prüfen, ob Ersatzunterkunft nötig ist", task: null, cat: "reisen", hidden: false, real: true },
+      { id: "m_fahr", account: "icloud", from: "Academy Fahrschulen", addr: "no-reply@academy-fahrschulen.de", subj: "Deine Anmeldung bei Academy", sum: "Bestätigung deiner Anmeldung bei der Fahrschule.", dateLabel: "13.07.2026, 16:21", bucket: "info", deadlineLabel: null, needsReply: false, answered: false, action: "Zur Kenntnis", task: null, cat: "privat", hidden: false, real: true },
+      { id: "m_pp", account: "web", from: "PayPal", addr: "service@paypal.de", subj: "Du hast eine Zahlung erhalten", sum: "Automatische PayPal-Zahlungsbenachrichtigung.", dateLabel: "20.07.2026, 08:58", bucket: "info", deadlineLabel: null, needsReply: false, answered: false, action: "Automatische Benachrichtigung", task: null, cat: "finanzen", hidden: true, real: true },
+      { id: "m_apple", account: "icloud", from: "Apple", addr: "no_reply@email.apple.com", subj: "Ihre Käufe von Apple", sum: "Automatischer Kaufbeleg.", dateLabel: "13.07.2026, 15:26", bucket: "info", deadlineLabel: null, needsReply: false, answered: false, action: "Beleg", task: null, cat: "finanzen", hidden: true, real: true },
+      { id: "m_spotify", account: "icloud", from: "Spotify", addr: "no-reply@alerts.spotify.com", subj: "Dein Spotify Anmeldecode", sum: "Einmaliger Login-Code.", dateLabel: "10.07.2026, 12:31", bucket: "info", deadlineLabel: null, needsReply: false, answered: false, action: "Login-Code", task: null, cat: "sonstiges", hidden: true, real: true },
+      { id: "m_tiktok", account: "icloud", from: "TikTok", addr: "newsletter@service.tiktok.com", subj: "Newsletter-Benachrichtigung", sum: "Werbe-Newsletter.", dateLabel: "06.07.2026, 09:44", bucket: "info", deadlineLabel: null, needsReply: false, answered: false, action: "Newsletter", task: null, cat: "sonstiges", hidden: true, real: true }
+    ];
+
+    var events = [
+      { id: "ev_karate", title: "Karate-Training", day: 0, time: "16:00", end: "17:30", place: "Dojo Sporthalle Ost", cat: "sport", prep: "Gi und Getränk einpacken", task: null, email: null, type: "termin" },
+      { id: "e_lern", title: "Lerngruppe Mathe", day: 0, time: "18:30", end: "20:00", place: "Videoanruf", cat: "schule", prep: "Blatt 7 mitbringen", task: "t1", email: null, type: "termin" },
+      { id: "ev_gespraech", title: "Vorstellungsgespräch Siemens", day: 1, time: "10:00", end: "10:45", place: "Videoanruf (Teams)", cat: "bewerbung", prep: "Fragen vorbereiten, Unterlagen bereitlegen", task: "t2", email: "m1", type: "termin" },
+      { id: "ev_reise", title: "Zugfahrt nach Berlin", day: 2, time: "09:12", end: null, place: "Hauptbahnhof, Gleis 7", cat: "reisen", prep: "Ticket und Ausweis bereithalten", task: "t3", email: null, type: "termin" },
+      { id: "ev_frist", title: "Abgabefrist Physik-Referat", day: 4, time: "23:59", end: null, place: null, cat: "schule", prep: "Folien und Handout hochladen", task: "t8", email: "m6", type: "frist" },
+      { id: "ev_pruef", title: "Gürtelprüfung Karate", day: 9, time: "10:00", end: "13:00", place: "Landesdojo", cat: "sport", prep: "Anmeldung abgeben, Prüfungsprogramm üben", task: "t7", email: null, type: "termin" }
+    ];
+    return { tasks: tasks, emails: emails, events: events };
+  }
+
+  /* ---------- state ---------- */
+  var state = {
+    view: "uebersicht",
+    tasks: [], emails: [], events: [], demoEvents: [],
+    filterCats: {}, filterPrios: {},
+    search: "", showHidden: false,
+    theme: null, drawer: null,
+    cal: { status: "idle", error: null, updatedAt: null, calendars: [] }
+  };
+
+  function persist() {
+    try {
+      // Nur manuelle Aufgaben-Änderungen und Theme werden lokal gemerkt.
+      // E-Mails stammen aus der Momentaufnahme und werden nicht überschrieben.
+      localStorage.setItem("cockpit.v2", JSON.stringify({
+        tasks: state.tasks, theme: state.theme
+      }));
+    } catch (e) {}
+  }
+  function restore() {
+    var s = seed();
+    state.tasks = s.tasks; state.emails = s.emails; state.events = s.events;
+    state.demoEvents = s.events.slice();
+    try {
+      var raw = localStorage.getItem("cockpit.v2");
+      if (raw) {
+        var d = JSON.parse(raw);
+        if (Array.isArray(d.tasks)) state.tasks = d.tasks;
+        if (d.theme) state.theme = d.theme;
+      }
+    } catch (e) {}
+  }
+  function resetDemo() {
+    try { localStorage.removeItem("cockpit.v2"); } catch (e) {}
+    var s = seed();
+    state.tasks = s.tasks; state.emails = s.emails; state.events = s.events;
+    render(); toast("Beispieldaten zurückgesetzt");
+  }
+
+  /* ---------- date helpers ---------- */
+  var WD = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
+  var MO = ["Jan.", "Feb.", "März", "Apr.", "Mai", "Juni", "Juli", "Aug.", "Sept.", "Okt.", "Nov.", "Dez."];
+  function dateFromOffset(off) { var d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() + off); return d; }
+  function dueText(off) {
+    if (off == null) return "";
+    if (off === 0) return "Heute"; if (off === 1) return "Morgen"; if (off === -1) return "Gestern";
+    if (off < 0) return Math.abs(off) + " Tage überfällig";
+    var d = dateFromOffset(off); return WD[d.getDay()] + ", " + d.getDate() + ". " + MO[d.getMonth()];
+  }
+  function dueClass(off) { if (off == null) return ""; if (off < 0) return "over"; if (off === 0) return "today"; return ""; }
+
+  /* =========================================================
+     GOOGLE KALENDER (live) – über window.claude.mcp
+     ========================================================= */
+  var GCAL = "Google Calendar";
+
+  function mcpAvailable() {
+    return !!(window.claude && typeof window.claude === "object" && window.claude.mcp);
+  }
+
+  // Termin-Kategorie aus Titel/Ort ableiten, damit Farben & Labels passen.
+  function guessCat(text) {
+    var s = (text || "").toLowerCase();
+    if (/(karate|training|dojo|gürtel|wettkampf|turnier|\bopen\b|camp|liga|kata|kumite|sport|lehrgang|tennis|match|spiel)/.test(s)) return "sport";
+    if (/(schule|klausur|prüfung|referat|\babi\b|unterricht|mathe|physik|lern|hausaufgabe|klasse|vorlesung)/.test(s)) return "schule";
+    if (/(bewerbung|gespräch|interview|praktikum|vorstellung|assessment)/.test(s)) return "bewerbung";
+    if (/(zug|flug|bahn|reise|hotel|airbnb|urlaub|fahrt|abflug|ankunft|transfer|paris|basel)/.test(s)) return "reisen";
+    if (/(bank|steuer|rechnung|zahlung|konto|finanz|versicherung)/.test(s)) return "finanzen";
+    if (/(arzt|geburtstag|familie|freunde|essen|kino|party|zahnarzt|termin privat)/.test(s)) return "privat";
+    if (/(projekt|website|portfolio|deploy|release|meeting|call)/.test(s)) return "projekte";
+    return "sonstiges";
+  }
+
+  function pad2(n) { return (n < 10 ? "0" : "") + n; }
+  function isAllDayEv(ev) { return !!(ev.start && ev.start.date && !ev.start.dateTime); }
+  function parseGDate(part) { // "2026-07-29" oder "2026-07-29T00:00:00Z"
+    var d = String(part).slice(0, 10).split("-");
+    return new Date(Number(d[0]), Number(d[1]) - 1, Number(d[2]));
+  }
+  function dayOffset(dt) {
+    var t = new Date(); t.setHours(0, 0, 0, 0);
+    var a = new Date(dt); a.setHours(0, 0, 0, 0);
+    return Math.round((a - t) / 86400000);
+  }
+  function evTimeLabel(e) { return e.allDay ? "ganztägig" : e.time; }
+  function calNowLabel() {
+    var d = state.cal.updatedAt || new Date();
+    return pad2(d.getHours()) + ":" + pad2(d.getMinutes());
+  }
+  function userCalName() {
+    var c = (state.cal.calendars || [])[0];
+    return c ? (c.summary || c.id) : "verbunden";
+  }
+  function calErrText(code) {
+    switch (code) {
+      case "needs_reauth": return "neu verbinden (claude.ai → Connectors)";
+      case "server_not_connected": return "nicht verbunden";
+      case "selection_required": return "Kalender in claude.ai auswählen";
+      case "blocked_by_policy": return "durch Richtlinie blockiert";
+      case "server_unavailable": return "kurz nicht erreichbar";
+      default: return "konnte nicht geladen werden";
+    }
+  }
+
+  // Google-Event -> Cockpit-Event
+  function mapGEvent(ev, calId) {
+    var allDay = isAllDayEv(ev);
+    var start, end = null, endLabel = null, time = "00:00";
+    if (allDay) {
+      start = parseGDate(ev.start.date);
+      if (ev.end && ev.end.date) {
+        var e = parseGDate(ev.end.date); e.setDate(e.getDate() - 1); // Google-Enddatum ist exklusiv
+        if (e > start) endLabel = "bis " + e.getDate() + ". " + MO[e.getMonth()];
+      }
+    } else {
+      start = new Date(ev.start.dateTime);
+      time = pad2(start.getHours()) + ":" + pad2(start.getMinutes());
+      if (ev.end && ev.end.dateTime) {
+        var ed = new Date(ev.end.dateTime);
+        end = pad2(ed.getHours()) + ":" + pad2(ed.getMinutes());
+      }
+    }
+    return {
+      id: "g_" + (ev.id || Math.random().toString(36).slice(2)),
+      title: ev.summary || "(ohne Titel)",
+      day: dayOffset(start), time: time, allDay: allDay, end: end, endLabel: endLabel,
+      place: ev.location || null,
+      cat: guessCat((ev.summary || "") + " " + (ev.location || "")),
+      prep: null, task: null, email: null, type: "termin",
+      link: ev.htmlLink || null, live: true, calId: calId
+    };
+  }
+
+  function loadCalendar() {
+    if (!mcpAvailable()) { state.cal.status = "unavailable"; state.cal.error = null; render(); return; }
+    state.cal.status = "loading"; render();
+    window.claude.mcp.callTool(GCAL, "list_calendars", {}).then(function (res) {
+      var cals = ((res && res.payload && res.payload.calendars) || [])
+        .filter(function (c) { return c.id && c.id.indexOf("#holiday") < 0; });
+      if (!cals.length) cals = [{ id: "primary", summary: "Kalender" }];
+      state.cal.calendars = cals;
+      var start = new Date(); start.setHours(0, 0, 0, 0);
+      return Promise.all(cals.map(function (c) {
+        return window.claude.mcp.callTool(GCAL, "list_events", {
+          calendarId: c.id, startTime: start.toISOString(), orderBy: "startTime", pageSize: 50
+        }).then(function (r) { return (r && r.payload && r.payload.events) || []; },
+          function () { return []; });
+      })).then(function (lists) {
+        var out = [];
+        lists.forEach(function (list, i) {
+          list.forEach(function (ev) {
+            if (ev.status === "cancelled") return;
+            out.push(mapGEvent(ev, cals[i].id));
+          });
+        });
+        state.events = out;
+        state.cal.status = "live";
+        state.cal.error = null;
+        state.cal.updatedAt = new Date();
+        render();
+      });
+    }).catch(function (err) {
+      state.cal.status = "error";
+      state.cal.error = (err && err.code) || "upstream_error";
+      if (!state.events.length || (state.events[0] && state.events[0].live)) state.events = state.demoEvents.slice();
+      render();
+    });
+  }
+
+  /* ---------- filters ---------- */
+  function activeCatFilters() { return Object.keys(state.filterCats).filter(function (k) { return state.filterCats[k]; }); }
+  function activePrioFilters() { return Object.keys(state.filterPrios).filter(function (k) { return state.filterPrios[k]; }); }
+  function taskPasses(t) {
+    var cf = activeCatFilters(); if (cf.length && cf.indexOf(t.cat) < 0) return false;
+    var pf = activePrioFilters(); if (pf.length && pf.indexOf(t.prio) < 0) return false;
+    if (state.search) {
+      var q = state.search.toLowerCase();
+      if ((t.title + " " + (t.desc || "")).toLowerCase().indexOf(q) < 0) return false;
+    }
+    return true;
+  }
+  function visibleTasks() { return state.tasks.filter(taskPasses); }
+  function sortTasks(arr) {
+    return arr.slice().sort(function (a, b) {
+      var ao = (a.due != null && a.due < 0) ? 0 : 1, bo = (b.due != null && b.due < 0) ? 0 : 1;
+      if (ao !== bo) return ao - bo;
+      var ap = PRIOMAP[a.prio].rank, bp = PRIOMAP[b.prio].rank;
+      if (ap !== bp) return ap - bp;
+      var ad = a.due == null ? 999 : a.due, bd = b.due == null ? 999 : b.due;
+      return ad - bd;
+    });
+  }
+
+  /* ---------- stats ---------- */
+  function stats() {
+    var open = state.tasks.filter(function (t) { return t.status !== "erledigt"; });
+    var urgent = open.filter(function (t) { return t.prio === "dringend"; });
+    var over = open.filter(function (t) { return t.due != null && t.due < 0; });
+    var mails = state.emails.filter(function (m) { return !m.hidden && m.needsReply && !m.answered; });
+    var ev = upcomingEvents()[0];
+    return { open: open, urgent: urgent, over: over, mails: mails, nextEvent: ev };
+  }
+  function upcomingEvents() {
+    return state.events.slice().sort(function (a, b) {
+      if (a.day !== b.day) return a.day - b.day; return a.time.localeCompare(b.time);
+    }).filter(function (e) { return e.day >= 0; });
+  }
+
+  /* ---------- focus ---------- */
+  function focusReason(t) {
+    if (t.due != null && t.due < 0) return "Überfällig – je länger offen, desto mehr staut sich auf.";
+    if (t.prio === "dringend" && t.due === 0) return "Heute fällig und als dringend markiert.";
+    if (t.prio === "dringend") return "Als dringend eingestuft – sollte vor allem anderen laufen.";
+    if (t.due === 0) return "Heute fällig – danach kein Puffer mehr.";
+    if (t.prio === "hoch" && t.due != null && t.due <= 2) return "Wichtig und zeitnah fällig.";
+    if (t.est && t.est <= 20) return "Schnell erledigt – hohe Wirkung bei wenig Aufwand.";
+    return "Hohe Bedeutung für dein aktuelles Ziel.";
+  }
+  function focusTasks() {
+    var pool = state.tasks.filter(function (t) { return t.status !== "erledigt" && t.status !== "warten"; });
+    pool = sortTasks(pool);
+    return pool.slice(0, 3);
+  }
+
+  /* ---------- badges ---------- */
+  function prioBadge(p) { return '<span class="badge prio-' + p + '"><span class="d"></span>' + PRIOMAP[p].label + '</span>'; }
+  function srcBadge(s) { return '<span class="src src-' + s + '"><span class="sq"></span>' + SRC[s] + '</span>'; }
+  function mailSrc(m) { return '<span class="src src-' + m.account + '"><span class="sq"></span>' + (SRCMAIL[m.account] || m.account) + '</span>'; }
+
+  /* =========================================================
+     RENDER
+     ========================================================= */
+  var VIEWS = [
+    { k: "uebersicht", label: "Übersicht", icon: '<path d="M4 4h7v7H4zM13 4h7v4h-7zM13 10h7v10h-7zM4 13h7v7H4z"/>' },
+    { k: "board", label: "Taskboard", icon: '<path d="M4 4h4v16H4zM10 4h4v10h-4zM16 4h4v13h-4z"/>' },
+    { k: "mails", label: "E-Mails", icon: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>' },
+    { k: "termine", label: "Termine & Fristen", icon: '<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 3v3M16 3v3"/>' },
+    { k: "verbindungen", label: "Verbindungen", icon: '<path d="M9 15l6-6M8 8H6a3 3 0 0 0 0 6h2M16 16h2a3 3 0 0 0 0-6h-2"/>' }
+  ];
+
+  function render() {
+    renderNav(); renderFilters(); renderSyncMini();
+    var titles = {
+      uebersicht: ["Übersicht", "Dein Tag auf einen Blick"],
+      board: ["Taskboard", "Aufgaben nach Status – ziehen zum Verschieben"],
+      mails: ["E-Mails", "Wichtige Nachrichten, nach Dringlichkeit sortiert"],
+      termine: ["Termine & Fristen", "Chronologisch geordnet"],
+      verbindungen: ["Verbindungen", "Datenquellen einrichten"]
+    };
+    $("#viewTitle").textContent = titles[state.view][0];
+    $("#viewSub").textContent = titles[state.view][1];
+    var c = $("#content"); c.innerHTML = "";
+    if (state.view !== "verbindungen") c.appendChild(bannerFor(state.view));
+    if (state.view === "uebersicht") renderOverview(c);
+    else if (state.view === "board") renderBoard(c);
+    else if (state.view === "mails") renderMails(c);
+    else if (state.view === "termine") renderTermine(c);
+    else if (state.view === "verbindungen") renderVerbindungen(c);
+  }
+
+  function renderNav() {
+    var open = state.tasks.filter(function (t) { return t.status !== "erledigt"; }).length;
+    var mails = state.emails.filter(function (m) { return !m.hidden && m.needsReply && !m.answered; }).length;
+    var ev = upcomingEvents().length;
+    var counts = { board: open, mails: mails, termine: ev };
+    function build(host) {
+      host.innerHTML = "";
+      VIEWS.forEach(function (v) {
+        var b = el("button", "nav-item" + (state.view === v.k ? " active" : ""));
+        b.innerHTML = '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">' + v.icon + '</svg>' + v.label +
+          (counts[v.k] ? '<span class="count">' + counts[v.k] + '</span>' : '');
+        b.onclick = function () { state.view = v.k; closeDrawer(); render(); };
+        host.appendChild(b);
+      });
+    }
+    build($("#nav")); build($("#mobileNav"));
+  }
+
+  function renderFilters() {
+    var cf = $("#catFilters"); cf.innerHTML = "";
+    CATS.forEach(function (c) {
+      var b = el("button", "chip" + (state.filterCats[c.k] ? " on" : ""));
+      b.innerHTML = '<span class="dotc" style="background:' + c.c + '"></span>' + c.label;
+      b.onclick = function () { state.filterCats[c.k] = !state.filterCats[c.k]; render(); };
+      cf.appendChild(b);
+    });
+    var pf = $("#prioFilters"); pf.innerHTML = "";
+    PRIOS.forEach(function (p) {
+      var b = el("button", "chip" + (state.filterPrios[p.k] ? " on" : ""));
+      b.textContent = p.label;
+      b.onclick = function () { state.filterPrios[p.k] = !state.filterPrios[p.k]; render(); };
+      pf.appendChild(b);
+    });
+  }
+
+  function renderSyncMini() {
+    var h = $("#syncMini");
+    var cs = state.cal.status;
+    var calDot = cs === "live" ? "on" : (cs === "error" ? "err" : "off");
+    var calTxt = cs === "live" ? ("Google Kalender · live · " + calNowLabel() + " Uhr")
+      : cs === "loading" ? "Google Kalender · lädt…"
+      : cs === "error" ? "Google Kalender · Fehler"
+      : cs === "unavailable" ? "Google Kalender · nur in claude.ai"
+      : "Google Kalender · …";
+    h.innerHTML =
+      '<div style="font-weight:600;color:var(--ink-2);margin-bottom:6px;font-size:11px;">Synchronisierung</div>' +
+      '<div class="row"><span class="sdot on"></span>web.de · Momentaufnahme</div>' +
+      '<div class="row"><span class="sdot on"></span>iCloud Mail · Momentaufnahme</div>' +
+      '<div class="row"><span class="sdot ' + calDot + '"></span>' + calTxt + '</div>' +
+      '<div class="row"><span class="sdot off"></span>Apple Notizen · nicht verfügbar</div>' +
+      '<div style="margin-top:8px;font-size:10.5px;color:var(--faint);">E-Mails: Stand ' + SNAPSHOT + '</div>';
+  }
+
+  function bannerFor(view) {
+    var s = el("div", "demo-strip");
+    var b = el("button", null, "Details →");
+    b.onclick = function () { state.view = "verbindungen"; render(); };
+    var calLive = state.cal.status === "live";
+    if (view === "mails") {
+      s.className = "demo-strip real";
+      s.innerHTML = '<span class="tag">Echt</span><span><b>Echte E-Mails.</b> Momentaufnahme vom ' + SNAPSHOT + ' · Konten web.de + iCloud · nur gelesen, nichts wird gesendet oder verändert.</span>';
+    } else if (view === "termine") {
+      if (calLive) {
+        s.className = "demo-strip real";
+        s.innerHTML = '<span class="tag">Live</span><span><b>Termine live aus Google Kalender.</b> Stand ' + calNowLabel() + ' Uhr · nur gelesen. Aktualisieren mit dem Sync-Knopf oben rechts.</span>';
+      } else {
+        s.innerHTML = '<span class="tag">Demo</span><span><b>Beispieltermine.</b> Google Kalender ist hier gerade nicht verbunden – die Termine laden live, wenn du das Cockpit in claude.ai öffnest.</span>';
+      }
+    } else if (view === "uebersicht") {
+      if (calLive) {
+        s.className = "demo-strip real";
+        s.innerHTML = '<span class="tag">Live + Echt</span><span><b>Termine live aus Google Kalender</b>, <b>E-Mails echt</b> (Stand ' + SNAPSHOT + '). Aufgaben sind weiterhin Beispieldaten.</span>';
+      } else {
+        s.innerHTML = '<span class="tag">Gemischt</span><span><b>E-Mails sind echt</b> (Stand ' + SNAPSHOT + '). Aufgaben und Termine sind Beispieldaten.</span>';
+      }
+    } else {
+      s.innerHTML = '<span class="tag">Demo</span><span><b>Beispieldaten.</b> Aufgaben sind mit keiner Quelle verbunden.</span>';
+    }
+    s.appendChild(b);
+    return s;
+  }
+
+  /* ---------- Overview ---------- */
+  function renderOverview(c) {
+    var st = stats();
+    var tiles = el("div", "tiles");
+    var focus = focusTasks()[0];
+    var ne = st.nextEvent;
+    tiles.appendChild(tile("info", "Offene Aufgaben", st.open.length, "insgesamt aktiv"));
+    tiles.appendChild(tile(st.urgent.length ? "alert" : "info", "Dringend", st.urgent.length, "höchste Priorität"));
+    tiles.appendChild(tile(st.over.length ? "alert" : "info", "Überfällig", st.over.length, "Frist überschritten"));
+    tiles.appendChild(tile(st.mails.length ? "warn" : "info", "Wichtige E-Mails", st.mails.length, "unbeantwortet"));
+    c.appendChild(tiles);
+
+    var row = el("div", "tiles"); row.style.marginTop = "12px"; row.style.gridTemplateColumns = "1fr 1fr";
+    var nx = el("div", "tile info"); nx.innerHTML = '<span class="stripe"></span><div class="k">Nächster Termin</div>' +
+      (ne ? '<div style="font-size:15px;font-weight:650;margin-top:8px;letter-spacing:-.01em;">' + esc(ne.title) + '</div><div class="cap">' + dueText(ne.day) + ' · ' + evTimeLabel(ne) + (ne.allDay ? '' : ' Uhr') + (ne.place ? ' · ' + esc(ne.place) : '') + '</div>'
+        : '<div class="cap" style="margin-top:8px;">Keine anstehenden Termine</div>');
+    var wt = el("div", "tile warn"); wt.innerHTML = '<span class="stripe"></span><div class="k">Wichtigste Aufgabe heute</div>' +
+      (focus ? '<div style="font-size:15px;font-weight:650;margin-top:8px;letter-spacing:-.01em;">' + esc(focus.title) + '</div><div class="cap">' + focusReason(focus) + '</div>'
+        : '<div class="cap" style="margin-top:8px;">Alles erledigt</div>');
+    row.appendChild(nx); row.appendChild(wt);
+    c.appendChild(row);
+
+    // Mein Fokus
+    c.appendChild(sectionTitle("Mein Fokus", "Die nächsten drei Aufgaben – begründet priorisiert"));
+    var fc = el("div", "focus-card");
+    var ft = focusTasks();
+    if (!ft.length) fc.appendChild(el("div", "empty", "Keine offenen Aufgaben – gönn dir eine Pause."));
+    ft.forEach(function (t, i) {
+      var it = el("div", "focus-item");
+      it.innerHTML = '<div class="focus-rank">' + (i + 1) + '</div><div class="focus-body">' +
+        '<div class="t">' + esc(t.title) + '</div><div class="why">' + focusReason(t) + '</div>' +
+        '<div class="focus-meta">' + prioBadge(t.prio) +
+        (t.due != null ? '<span class="due ' + dueClass(t.due) + '">' + dueText(t.due) + '</span>' : '') +
+        '<span class="cat-tag">' + CATMAP[t.cat].label + '</span>' + srcBadge(t.src) + '</div></div>';
+      it.onclick = function () { openTask(t.id); };
+      fc.appendChild(it);
+    });
+    c.appendChild(fc);
+
+    // two columns: heute Termine + wichtige mails
+    var g = el("div", "grid-2"); g.style.marginTop = "22px";
+    // events today/next
+    var ep = el("div", "panel");
+    ep.appendChild(panelHead("Als Nächstes", "Termine & Fristen"));
+    var evs = upcomingEvents().slice(0, 5);
+    if (!evs.length) ep.appendChild(el("div", "empty", "Nichts geplant"));
+    evs.forEach(function (e) {
+      var r = el("div", "mini-row");
+      r.innerHTML = '<div class="mini-when">' + evTimeLabel(e) + '<span class="rel">' + dueText(e.day) + '</span></div>' +
+        '<div class="mini-main"><div class="t">' + esc(e.title) + '</div><div class="s">' +
+        (e.type === "frist" ? "Frist" : "Termin") + (e.place ? ' · ' + esc(e.place) : '') + '</div></div>';
+      r.onclick = function () { openEvent(e.id); };
+      ep.appendChild(r);
+    });
+    g.appendChild(ep);
+    // mails
+    var mp = el("div", "panel");
+    mp.appendChild(panelHead("Zu beantworten", "Wichtige E-Mails"));
+    var ms = state.emails.filter(function (m) { return !m.hidden && m.needsReply && !m.answered; }).slice(0, 5);
+    if (!ms.length) mp.appendChild(el("div", "empty", "Posteingang im Griff"));
+    ms.forEach(function (m) {
+      var r = el("div", "mini-row");
+      r.innerHTML = '<div class="mini-main"><div class="t">' + esc(m.subj) + '</div><div class="s">' + esc(m.from) +
+        (m.deadlineLabel ? ' · <span style="color:var(--urgent);font-weight:600;">' + esc(m.deadlineLabel) + '</span>' : '') + '</div></div>' +
+        '<div class="mini-when" style="min-width:auto;">' + mailSrc(m) + '</div>';
+      r.onclick = function () { openMail(m.id); };
+      mp.appendChild(r);
+    });
+    g.appendChild(mp);
+    c.appendChild(g);
+  }
+
+  function tile(kind, k, v, cap) {
+    var t = el("div", "tile " + kind);
+    t.innerHTML = '<span class="stripe"></span><div class="k">' + k + '</div><div class="v">' + v + '</div><div class="cap">' + cap + '</div>';
+    return t;
+  }
+  function sectionTitle(t, hint) { return el("div", "section-title", esc(t) + (hint ? ' <span class="hint">' + esc(hint) + '</span>' : '')); }
+  function panelHead(a, b) { return el("div", "ph", esc(a) + '<span style="color:var(--faint);font-weight:500;">' + esc(b) + '</span>'); }
+
+  /* ---------- Board ---------- */
+  function renderBoard(c) {
+    var wrap = el("div", "board-wrap"); var board = el("div", "board");
+    COLS.forEach(function (col) {
+      var items = sortTasks(visibleTasks().filter(function (t) { return t.status === col.k; }));
+      var cEl = el("div", "col"); cEl.dataset.col = col.k;
+      var h = el("div", "col-h");
+      h.innerHTML = '<span class="cdot" style="background:' + col.c + '"></span><span class="ct">' + col.t + '</span><span class="cc">' + items.length + '</span>';
+      cEl.appendChild(h);
+      var body = el("div", "col-body");
+      items.forEach(function (t) { body.appendChild(taskCard(t)); });
+      // dnd
+      cEl.addEventListener("dragover", function (e) { e.preventDefault(); cEl.classList.add("drop"); });
+      cEl.addEventListener("dragleave", function () { cEl.classList.remove("drop"); });
+      cEl.addEventListener("drop", function (e) {
+        e.preventDefault(); cEl.classList.remove("drop");
+        var id = e.dataTransfer.getData("text/plain"); moveTask(id, col.k);
+      });
+      cEl.appendChild(body); board.appendChild(cEl);
+    });
+    wrap.appendChild(board); c.appendChild(wrap);
+  }
+  function taskCard(t) {
+    var card = el("div", "card" + (t.status === "erledigt" ? " done" : "") + (t.due != null && t.due < 0 && t.status !== "erledigt" ? " over-due" : ""));
+    card.draggable = true; card.dataset.id = t.id;
+    var linked = "";
+    if (t.email && getMail(t.email)) linked += '<span class="link-chip">E-Mail</span>';
+    if (t.event && getEvent(t.event)) linked += '<span class="link-chip">Termin</span>';
+    card.innerHTML =
+      '<div class="c-top">' + prioBadge(t.prio) + srcBadge(t.src) + '</div>' +
+      '<div class="c-title">' + esc(t.title) + '</div>' +
+      (t.desc ? '<div class="c-desc">' + esc(t.desc) + '</div>' : '') +
+      '<div class="c-foot"><span class="cat-tag">' + CATMAP[t.cat].label + '</span>' +
+      (t.due != null ? '<span class="due ' + dueClass(t.due) + '">' + dueText(t.due) + '</span>' : '') +
+      linked + (t.est ? '<span class="est">' + t.est + ' min</span>' : '') + '</div>';
+    card.addEventListener("dragstart", function (e) { e.dataTransfer.setData("text/plain", t.id); card.classList.add("dragging"); });
+    card.addEventListener("dragend", function () { card.classList.remove("dragging"); });
+    card.addEventListener("click", function () { openTask(t.id); });
+    return card;
+  }
+  function moveTask(id, col) {
+    var t = getTask(id); if (!t || t.status === col) return;
+    t.status = col; if (col === "erledigt") t.done = true;
+    persist(); render();
+    toast("„" + t.title + "“ → " + COLMAP[col].t);
+  }
+
+  /* ---------- Mails ---------- */
+  function renderMails(c) {
+    var bar = el("div", "section-title");
+    bar.innerHTML = 'Posteingang <span class="hint">Newsletter, Werbung und Bestätigungen sind ausgeblendet</span>';
+    var toggle = el("button", "chip" + (state.showHidden ? " on" : ""));
+    toggle.style.marginLeft = "auto";
+    toggle.textContent = state.showHidden ? "Ausgeblendete verbergen" : "Ausgeblendete einblenden";
+    toggle.onclick = function () { state.showHidden = !state.showHidden; render(); };
+    bar.appendChild(toggle);
+    c.appendChild(bar);
+
+    var q = state.search.toLowerCase();
+    var mails = state.emails.filter(function (m) {
+      if (m.hidden && !state.showHidden) return false;
+      if (q && (m.from + " " + m.subj + " " + m.sum).toLowerCase().indexOf(q) < 0) return false;
+      return true;
+    });
+    var any = false;
+    MAILBUCKETS.forEach(function (bk) {
+      var list = mails.filter(function (m) { return m.bucket === bk.k; });
+      if (!list.length) return; any = true;
+      var g = el("div", "mail-bucket");
+      g.appendChild(el("div", "bh", '<span class="bd" style="background:' + bk.c + '"></span><span class="bt">' + bk.t + '</span><span class="bc">' + list.length + '</span>'));
+      var grid = el("div", "mails");
+      list.forEach(function (m) { grid.appendChild(mailCard(m)); });
+      g.appendChild(grid); c.appendChild(g);
+    });
+    if (!any) c.appendChild(el("div", "empty", "Keine E-Mails für diese Auswahl."));
+  }
+  function mailCard(m) {
+    var card = el("div", "mail");
+    var task = m.task ? getTask(m.task) : null;
+    card.innerHTML =
+      '<div class="m-top"><span class="m-from">' + esc(m.from) + '</span>' + mailSrc(m) + '<span class="m-time">' + esc(m.dateLabel) + '</span></div>' +
+      '<div class="m-subj">' + esc(m.subj) + '</div>' +
+      '<div class="m-sum">' + esc(m.sum) + '</div>' +
+      '<div class="m-foot">' +
+      (m.deadlineLabel ? '<span class="deadline-chip">' + esc(m.deadlineLabel) + '</span>' : '') +
+      (m.needsReply && !m.answered ? '<span class="badge prio-hoch"><span class="d"></span>Antwort nötig</span>' : '') +
+      (m.answered ? '<span class="badge prio-niedrig"><span class="d"></span>Beantwortet</span>' : '') +
+      (task ? '<span class="link-chip">Aufgabe verknüpft</span>' : '') +
+      '<span class="m-action">Nächster Schritt: <b>' + esc(m.action) + '</b></span></div>';
+    card.onclick = function () { openMail(m.id); };
+    return card;
+  }
+
+  /* ---------- Termine ---------- */
+  function renderTermine(c) {
+    var groups = [
+      { t: "Heute", f: function (e) { return e.day === 0; } },
+      { t: "Morgen", f: function (e) { return e.day === 1; } },
+      { t: "Diese Woche", f: function (e) { return e.day >= 2 && e.day <= 7; } },
+      { t: "Später", f: function (e) { return e.day > 7; } }
+    ];
+    var evs = upcomingEvents();
+    var any = false;
+    groups.forEach(function (g) {
+      var list = evs.filter(g.f); if (!list.length) return; any = true;
+      var grp = el("div", "tl-group");
+      grp.appendChild(el("div", "tl-h", g.t));
+      list.forEach(function (e) { grp.appendChild(eventRow(e)); });
+      c.appendChild(grp);
+    });
+    if (!any) c.appendChild(el("div", "empty", "Keine anstehenden Termine oder Fristen."));
+  }
+  function eventRow(e) {
+    var row = el("div", "event" + (e.type === "frist" ? " frist" : ""));
+    var rem = e.day === 0 ? "heute" : (e.day === 1 ? "morgen" : "in " + e.day + " Tagen");
+    var task = e.task ? getTask(e.task) : null;
+    var endMeta = e.allDay ? (e.endLabel ? '<span>' + esc(e.endLabel) + '</span>' : '')
+                           : (e.end ? '<span>bis ' + e.end + ' Uhr</span>' : '');
+    row.innerHTML =
+      '<div class="e-time"><div class="hh">' + evTimeLabel(e) + '</div><div class="rem">' + rem + '</div></div>' +
+      '<div class="e-bar"></div>' +
+      '<div class="e-main"><div class="e-title">' + esc(e.title) + (e.type === "frist" ? ' <span class="deadline-chip">Frist</span>' : '') + '</div>' +
+      '<div class="e-meta"><span>' + CATMAP[e.cat].label + '</span>' + (e.place ? '<span>' + esc(e.place) + '</span>' : '') +
+      endMeta + srcBadge(e.type === "frist" ? "outlook" : "calendar") + '</div>' +
+      (e.prep ? '<div class="e-prep"><b>Vorbereitung:</b> ' + esc(e.prep) + '</div>' : '') +
+      (task ? '<div class="e-prep" style="margin-top:6px;"><b>Aufgabe:</b> ' + esc(task.title) + '</div>' : '') +
+      '</div>';
+    row.onclick = function () { openEvent(e.id); };
+    return row;
+  }
+
+  /* ---------- Verbindungen ---------- */
+  function renderVerbindungen(c) {
+    var intro = el("div", "note");
+    intro.innerHTML = '<b>So funktioniert das hier:</b> Deine <b>Termine</b> kommen live aus deinem <b>Google Kalender</b> – über den Connector von claude.ai, mit deiner Anmeldung und nur lesend (funktioniert nur, wenn du das Cockpit in claude.ai öffnest). Deine <b>E-Mails</b> sind eine <b>Momentaufnahme (Stand ' + SNAPSHOT + ')</b>, die über den mail-mcp abgerufen wurde; eine Aktualisierung muss erneut über Claude erfolgen. Aufgaben sind weiterhin Beispieldaten.';
+    c.appendChild(intro);
+
+    var grid = el("div", "conn"); grid.style.marginTop = "16px";
+    grid.appendChild(connCard("@", "#F5B301", "web.de – mamue_0912@web.de", "on", "Verbunden · Momentaufnahme",
+      "E-Mails über den lokalen mail-mcp (IMAP) abgerufen. Nur Lesezugriff. Diese Momentaufnahme ist im Dashboard eingebettet und aktualisiert sich nicht von selbst.",
+      ["Stand: " + SNAPSHOT,
+        "Nur gelesen – kein Senden, Löschen oder Verändern",
+        "Aktualisieren: neuen Abruf über Claude anstoßen"], false, "Erneut abrufen (über Claude)"));
+    grid.appendChild(connCard("@", "#3B93E8", "iCloud Mail – mmueller_ffm@icloud.com", "on", "Verbunden · Momentaufnahme",
+      "E-Mails über den lokalen mail-mcp (IMAP) abgerufen. Nur Lesezugriff. Automatische Benachrichtigungen (Belege, Codes, Newsletter) sind standardmäßig ausgeblendet.",
+      ["Stand: " + SNAPSHOT,
+        "Nur gelesen – kein Senden, Löschen oder Verändern",
+        "Aktualisieren: neuen Abruf über Claude anstoßen"], false, "Erneut abrufen (über Claude)"));
+    var cs = state.cal.status;
+    var gStateCls = cs === "live" ? "on" : (cs === "error" ? "na" : "off");
+    var gStateTxt = cs === "live" ? ("Verbunden · live · Stand " + calNowLabel() + " Uhr")
+      : cs === "loading" ? "Wird geladen…"
+      : cs === "error" ? ("Fehler – Kalender " + calErrText(state.cal.error))
+      : cs === "unavailable" ? "Nur in claude.ai live"
+      : "…";
+    var gCount = state.events.filter(function (e) { return e.live; }).length;
+    grid.appendChild(connCard("G", "#1a73e8", "Google Kalender" + (cs === "live" ? " – " + userCalName() : ""), gStateCls, gStateTxt,
+      "Deine Termine werden live über den Google-Kalender-Connector von claude.ai geladen – mit deiner Anmeldung, ohne dass Tokens sichtbar werden, nur lesend." +
+      (cs === "live" ? " Aktuell " + gCount + " kommende Termine geladen." : ""),
+      cs === "live"
+        ? ["Aktualisieren: Sync-Knopf oben rechts", "Nur gelesen – nichts wird geändert, verschoben oder gelöscht", "iCloud-Termine erscheinen hier automatisch, sobald du deinen iCloud-Kalender in Google abonnierst (webcal-Link)"]
+        : ["Öffne dieses Cockpit in claude.ai, damit der Connector greift", "Google Kalender muss unter claude.ai → Einstellungen → Connectors verbunden sein", "iCloud-Kalender via webcal-Abo in Google einspeisen – erscheint dann automatisch hier"],
+      false, cs === "live" ? "Live verbunden" : "Nur in claude.ai live"));
+    grid.appendChild(connCard("A", "#E8863C", "Apple Notizen & Erinnerungen", "na", "Nicht verfügbar",
+      "Apple bietet keinerlei offizielle Schnittstelle, über die Notizen oder Erinnerungen ausgelesen werden könnten – nicht für Claude und nicht für andere Apps. Ein direkter Zugriff ist technisch nicht möglich.",
+      ["Kalender-Umweg: iCloud-Kalender per webcal in Google abonnieren – erscheint dann oben als Google Kalender",
+        "Notizen-Umweg: Inhalte in einen Dienst mit Schnittstelle legen (z. B. Google Docs), um sie hier nutzbar zu machen"], true));
+    c.appendChild(grid);
+
+    var safety = el("div", "note"); safety.style.marginTop = "18px";
+    safety.innerHTML = '<b>Sicherheit:</b> Es wird ausschließlich gelesen. Es werden keine E-Mails beantwortet, weitergeleitet, gelöscht oder verändert und keine Aufgaben zurückgeschrieben, ohne dass du das pro Aktion ausdrücklich freigibst.';
+    c.appendChild(safety);
+
+    var actions = el("div"); actions.style.marginTop = "18px"; actions.style.display = "flex"; actions.style.gap = "8px"; actions.style.flexWrap = "wrap";
+    var reset = el("button", "btn", "Beispieldaten zurücksetzen"); reset.onclick = resetDemo;
+    actions.appendChild(reset);
+    c.appendChild(actions);
+  }
+  function connCard(letter, color, name, stateCls, stateTxt, desc, steps, na, btnLabel) {
+    var card = el("div", "conn-card");
+    var stepsHtml = '<ol class="steps">' + steps.map(function (s) { return '<li>' + esc(s) + '</li>'; }).join("") + '</ol>';
+    var label = btnLabel || (na ? "Nicht verfügbar" : "Verbinden (Setup erforderlich)");
+    var title = stateCls === "on" ? "Aktualisierung nur durch erneuten Abruf über Claude" : (na ? "Keine offizielle Verbindung verfügbar" : "In dieser Sitzung nicht verbunden");
+    card.innerHTML =
+      '<div class="ch"><div class="cico" style="background:' + color + '">' + letter + '</div>' +
+      '<div><div class="cname">' + esc(name) + '</div><div class="cstate ' + stateCls + '">' + esc(stateTxt) + '</div></div></div>' +
+      '<p>' + esc(desc) + '</p>' + stepsHtml +
+      '<div class="cbtns"><button class="btn" disabled title="' + esc(title) + '">' + esc(label) + '</button></div>';
+    return card;
+  }
+
+  /* =========================================================
+     DRAWER
+     ========================================================= */
+  function getTask(id) { return state.tasks.filter(function (t) { return t.id === id; })[0]; }
+  function getMail(id) { return state.emails.filter(function (m) { return m.id === id; })[0]; }
+  function getEvent(id) { return state.events.filter(function (e) { return e.id === id; })[0]; }
+
+  function openDrawer(html, footer) {
+    var d = $("#drawer");
+    d.innerHTML = html + (footer ? '<div class="df">' + footer + '</div>' : '');
+    d.classList.add("open"); d.setAttribute("aria-hidden", "false");
+    $("#scrim").classList.add("open");
+    var x = $(".x", d); if (x) x.onclick = closeDrawer;
+    return d;
+  }
+  function closeDrawer() { $("#drawer").classList.remove("open"); $("#drawer").setAttribute("aria-hidden", "true"); $("#scrim").classList.remove("open"); }
+  $("#scrim").onclick = closeDrawer;
+
+  function field(label, val) { return '<div class="field"><div class="fl">' + label + '</div><div class="fv">' + val + '</div></div>'; }
+
+  function openTask(id) {
+    var t = getTask(id); if (!t) return;
+    var mail = t.email ? getMail(t.email) : null;
+    var ev = t.event ? getEvent(t.event) : null;
+    var head = '<div class="dh"><div><div style="margin-bottom:8px;">' + prioBadge(t.prio) + ' ' + srcBadge(t.src) + '</div>' +
+      '<h3>' + esc(t.title) + '</h3></div><button class="x" aria-label="Schließen">✕</button></div>';
+    var body = '<div class="db">';
+    if (t.desc) body += field("Beschreibung", esc(t.desc));
+    body += '<div class="field"><div class="fl">Status</div><div class="seg" id="segStatus">' +
+      COLS.map(function (c) { return '<button data-col="' + c.k + '"' + (c.k === t.status ? ' class="sel"' : '') + '>' + c.t + '</button>'; }).join("") + '</div></div>';
+    body += '<div class="field"><div class="fl">Priorität</div><div class="seg" id="segPrio">' +
+      PRIOS.map(function (p) { return '<button data-p="' + p.k + '"' + (p.k === t.prio ? ' class="sel"' : '') + '>' + p.label + '</button>'; }).join("") + '</div></div>';
+    body += field("Kategorie", CATMAP[t.cat].label);
+    if (t.due != null) body += field("Fällig", '<span class="due ' + dueClass(t.due) + '">' + dueText(t.due) + '</span>' + (t.time ? ' · ' + t.time + ' Uhr' : ''));
+    if (t.est) body += field("Geschätzter Aufwand", t.est + " Minuten");
+    if (t.next) body += field("Nächster sinnvoller Schritt", esc(t.next));
+    if (mail) body += field("Verknüpfte E-Mail", esc(mail.from) + ' – ' + esc(mail.subj) + ' <a href="#" data-open-mail="' + mail.id + '" style="color:var(--accent-ink);text-decoration:none;font-weight:600;">öffnen</a>');
+    if (ev) body += field("Verknüpfter Termin", esc(ev.title) + ' (' + dueText(ev.day) + ', ' + ev.time + ' Uhr)');
+    body += field("Datenquelle", srcBadge(t.src) + (t.src === "manual" ? '' : ' <span style="color:var(--faint);">· nur Beispieldaten</span>'));
+    body += '</div>';
+    var footer = '<button class="btn btn-primary" id="dDone">' + (t.status === "erledigt" ? "Wieder öffnen" : "Als erledigt markieren") + '</button>' +
+      (t.src === "manual" ? '<button class="btn btn-danger" id="dDel">Löschen</button>' : '<button class="btn" disabled title="Nur mit ausdrücklicher Freigabe">In Quelle schreiben</button>');
+    openDrawer(head + body, footer);
+
+    $("#segStatus").querySelectorAll("button").forEach(function (b) { b.onclick = function () { t.status = b.dataset.col; if (t.status === "erledigt") t.done = true; persist(); render(); openTask(id); }; });
+    $("#segPrio").querySelectorAll("button").forEach(function (b) { b.onclick = function () { t.prio = b.dataset.p; persist(); render(); openTask(id); }; });
+    var dd = $("#dDone"); if (dd) dd.onclick = function () { t.status = t.status === "erledigt" ? "eingang" : "erledigt"; persist(); render(); toast(t.status === "erledigt" ? "Erledigt" : "Wieder geöffnet"); openTask(id); };
+    var del = $("#dDel"); if (del) del.onclick = function () { state.tasks = state.tasks.filter(function (x) { return x.id !== id; }); persist(); render(); closeDrawer(); toast("Aufgabe gelöscht"); };
+    var om = $("[data-open-mail]", $("#drawer")); if (om) om.onclick = function (e) { e.preventDefault(); openMail(om.dataset.openMail); };
+  }
+
+  function openMail(id) {
+    var m = getMail(id); if (!m) return;
+    var task = m.task ? getTask(m.task) : null;
+    var head = '<div class="dh"><div><div style="margin-bottom:8px;">' + mailSrc(m) +
+      (m.needsReply && !m.answered ? ' <span class="badge prio-hoch"><span class="d"></span>Antwort nötig</span>' : '') + '</div>' +
+      '<h3>' + esc(m.subj) + '</h3><div style="color:var(--muted);font-size:12.5px;margin-top:5px;">' + esc(m.from) + ' · ' + esc(m.addr) + '</div></div>' +
+      '<button class="x" aria-label="Schließen">✕</button></div>';
+    var body = '<div class="db">';
+    body += field("Eingegangen", esc(m.dateLabel) + ' Uhr');
+    body += field("Zusammenfassung", esc(m.sum));
+    if (m.deadlineLabel) body += field("Erkannte Frist", '<span class="due today">' + esc(m.deadlineLabel) + '</span>');
+    body += field("Antwort erforderlich", m.needsReply ? (m.answered ? "Ja – bereits beantwortet" : "Ja") : "Nein");
+    body += field("Empfohlene nächste Aktion", esc(m.action));
+    body += field("Kategorie", CATMAP[m.cat] ? CATMAP[m.cat].label : m.cat);
+    if (task) body += field("Verknüpfte Aufgabe", esc(task.title) + ' <a href="#" data-open-task="' + task.id + '" style="color:var(--accent-ink);text-decoration:none;font-weight:600;">öffnen</a>');
+    body += '<div class="note" style="margin-top:4px;">Diese Nachricht wurde nur gelesen. Antworten, Weiterleiten, Löschen und Archivieren sind gesperrt und erfordern jeweils eine separate, ausdrückliche Freigabe.</div>';
+    body += '</div>';
+    var canTask = m.needsReply && !task;
+    var footer =
+      '<button class="btn" disabled title="Öffnen in der Mail-App außerhalb des Artefakts">In Mail-App öffnen</button>' +
+      (canTask ? '<button class="btn btn-primary" id="mkTask">Aufgabe erstellen</button>' : '') +
+      '<button class="btn" disabled title="Nur mit ausdrücklicher Freigabe">Antworten</button>';
+    openDrawer(head + body, footer);
+    var mk = $("#mkTask"); if (mk) mk.onclick = function () { createTaskFromMail(m); };
+    var ot = $("[data-open-task]", $("#drawer")); if (ot) ot.onclick = function (e) { e.preventDefault(); openTask(ot.dataset.openTask); };
+  }
+
+  function createTaskFromMail(m) {
+    // avoid duplicates
+    var dup = state.tasks.filter(function (t) { return t.email === m.id; })[0];
+    if (dup) { toast("Aufgabe existiert bereits"); openTask(dup.id); return; }
+    var t = {
+      id: "t" + Date.now(), title: m.action || ("Antworten: " + m.subj), desc: "Aus E-Mail von " + m.from,
+      cat: m.cat || "sonstiges", prio: m.bucket === "sofort" ? "dringend" : (m.bucket === "heute" ? "hoch" : "mittel"),
+      due: (m.bucket === "sofort" || m.bucket === "heute") ? 0 : null, time: null, est: 15, status: "eingang", src: "manual",
+      next: m.action, email: m.id, event: null
+    };
+    state.tasks.push(t); m.task = t.id; persist(); render();
+    toast("Aufgabe im Eingang erstellt"); openTask(t.id);
+  }
+
+  function openEvent(id) {
+    var e = getEvent(id); if (!e) return;
+    var task = e.task ? getTask(e.task) : null;
+    var mail = e.email ? getMail(e.email) : null;
+    var rem = e.day === 0 ? "heute" : (e.day === 1 ? "morgen" : "in " + e.day + " Tagen");
+    var head = '<div class="dh"><div><div style="margin-bottom:8px;">' + srcBadge(e.type === "frist" ? "outlook" : "calendar") +
+      (e.type === "frist" ? ' <span class="deadline-chip">Frist</span>' : '') + '</div><h3>' + esc(e.title) + '</h3></div><button class="x" aria-label="Schließen">✕</button></div>';
+    var whenTxt = e.allDay
+      ? (dueText(e.day) + ' · ganztägig' + (e.endLabel ? ' (' + esc(e.endLabel) + ')' : '') + ' <span style="color:var(--faint);">(' + rem + ')</span>')
+      : (dueText(e.day) + ' · ' + e.time + (e.end ? '–' + e.end : '') + ' Uhr <span style="color:var(--faint);">(' + rem + ')</span>');
+    var body = '<div class="db">';
+    body += field("Wann", whenTxt);
+    if (e.place) body += field(e.place.indexOf("Video") >= 0 || e.place.indexOf("Teams") >= 0 ? "Videolink" : "Ort", esc(e.place));
+    body += field("Kategorie", CATMAP[e.cat].label);
+    if (e.prep) body += field("Notwendige Vorbereitung", esc(e.prep));
+    if (task) body += field("Zugehörige Aufgabe", esc(task.title) + ' <a href="#" data-open-task="' + task.id + '" style="color:var(--accent-ink);text-decoration:none;font-weight:600;">öffnen</a>');
+    if (mail) body += field("Zugehörige E-Mail", esc(mail.from) + ' – ' + esc(mail.subj));
+    if (e.live) body += field("Quelle", '<span class="src src-calendar"><span class="sq"></span>Google Kalender</span> <span style="color:var(--faint);">· live, nur gelesen</span>');
+    body += field("Verbleibende Zeit", rem);
+    body += '</div>';
+    var footer = e.link
+      ? '<a class="btn btn-primary" href="' + esc(e.link) + '" target="_blank" rel="noopener">Im Google Kalender öffnen</a>'
+      : '<button class="btn" disabled title="Verbindung erforderlich">Im Kalender öffnen</button>';
+    openDrawer(head + body, footer);
+    var ot = $("[data-open-task]", $("#drawer")); if (ot) ot.onclick = function (ev) { ev.preventDefault(); openTask(ot.dataset.openTask); };
+  }
+
+  /* =========================================================
+     Add modal
+     ========================================================= */
+  function fillSelect(sel, arr, valKey, labelKey) {
+    sel.innerHTML = arr.map(function (o) { return '<option value="' + o[valKey] + '">' + o[labelKey] + '</option>'; }).join("");
+  }
+  function openModal() {
+    fillSelect($("#m_cat"), CATS, "k", "label");
+    fillSelect($("#m_prio"), PRIOS, "k", "label");
+    fillSelect($("#m_status"), COLS.filter(function (c) { return c.k !== "erledigt"; }), "k", "t");
+    $("#m_prio").value = "mittel"; $("#m_status").value = "eingang";
+    $("#m_title").value = ""; $("#m_desc").value = ""; $("#m_due").value = "";
+    $("#modal").classList.add("open"); setTimeout(function () { $("#m_title").focus(); }, 60);
+  }
+  function closeModal() { $("#modal").classList.remove("open"); }
+  function saveModal() {
+    var title = $("#m_title").value.trim(); if (!title) { $("#m_title").focus(); return; }
+    var dueRaw = $("#m_due").value.trim();
+    var t = {
+      id: "t" + Date.now(), title: title, desc: $("#m_desc").value.trim(),
+      cat: $("#m_cat").value, prio: $("#m_prio").value,
+      due: dueRaw === "" ? null : parseInt(dueRaw, 10), time: null, est: null,
+      status: $("#m_status").value, src: "manual", next: null, email: null, event: null
+    };
+    state.tasks.push(t); persist(); render(); closeModal(); toast("Aufgabe hinzugefügt");
+  }
+
+  /* =========================================================
+     misc
+     ========================================================= */
+  var toastT;
+  function toast(msg) {
+    var t = $("#toast"); t.textContent = msg; t.classList.add("show");
+    clearTimeout(toastT); toastT = setTimeout(function () { t.classList.remove("show"); }, 2200);
+  }
+  function applyTheme() {
+    if (state.theme) document.documentElement.setAttribute("data-theme", state.theme);
+    else document.documentElement.removeAttribute("data-theme");
+  }
+
+  /* ---------- wire up ---------- */
+  $("#addBtn").onclick = openModal;
+  $("#m_cancel").onclick = closeModal; $("#modalBg").onclick = closeModal; $("#m_save").onclick = saveModal;
+  $("#m_title").addEventListener("keydown", function (e) { if (e.key === "Enter") saveModal(); });
+  $("#search").addEventListener("input", function (e) { state.search = e.target.value; render(); });
+  $("#syncBtn").onclick = function () {
+    var b = $("#syncBtn"); b.style.transition = "transform .6s"; b.firstElementChild.style.transform = "rotate(360deg)";
+    setTimeout(function () { b.firstElementChild.style.transform = ""; }, 600);
+    if (mcpAvailable()) { loadCalendar(); toast("Kalender wird aktualisiert · E-Mails: Momentaufnahme vom " + SNAPSHOT); }
+    else { toast("E-Mails: Momentaufnahme vom " + SNAPSHOT + " – Kalender ist nur in claude.ai live"); }
+  };
+  $("#themeBtn").onclick = function () {
+    var dark = state.theme ? state.theme === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches;
+    state.theme = dark ? "light" : "dark"; applyTheme(); persist();
+  };
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") { closeDrawer(); closeModal(); } });
+
+  /* ---------- init ---------- */
+  restore(); applyTheme(); render(); loadCalendar();
+})();
+</script>
