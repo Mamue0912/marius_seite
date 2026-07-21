@@ -1,8 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "crons": [
-    { "path": "/api/cron/renew-subscriptions", "schedule": "*/30 * * * *" },
-    { "path": "/api/cron/delta-fallback", "schedule": "*/3 * * * *" }
+    { "path": "/api/cron/renew-subscriptions", "schedule": "0 4 * * *" },
+    { "path": "/api/cron/delta-fallback", "schedule": "0 5 * * *" }
   ],
   "functions": {
     "app/api/webhooks/microsoft-graph/route.ts": { "maxDuration": 30 },

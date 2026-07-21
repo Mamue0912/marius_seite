@@ -87,7 +87,10 @@ async function renewSubscription(accessToken: string, subscriptionId: string): P
 // Von Cron genutzt: alle bald ablaufenden Abos verlängern, verlorene neu anlegen.
 export async function renewAllExpiring(): Promise<{ renewed: number; recreated: number }> {
   const admin = supabaseAdmin();
-  const soon = new Date(Date.now() + 60 * 60_000).toISOString();
+  // Fenster von 30 Stunden: Auf dem Hobby-Plan läuft der Cron nur EINMAL täglich.
+  // Abos leben ~66 h (EXPIRATION_MINUTES). Mit 30-h-Vorlauf erneuert der tägliche
+  // Lauf jedes Abo rechtzeitig (immer > 1 Tag Puffer bis zum Ablauf).
+  const soon = new Date(Date.now() + 30 * 60 * 60_000).toISOString();
   const { data: subs } = await admin
     .from("graph_subscriptions")
     .select("*")
