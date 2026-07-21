@@ -650,8 +650,9 @@
     tasks: [], emails: [], events: [], demoEvents: [],
     filterCats: {}, filterPrios: {},
     search: "", showHidden: false,
-    theme: null, drawer: null,
-    cal: { status: "idle", error: null, updatedAt: null, calendars: [] }
+    theme: null, drawer: null, showRules: false,
+    cal: { status: "idle", error: null, updatedAt: null, calendars: [] },
+    classStore: { overrides: {}, seriesOverrides: {}, calendarRules: {}, titleRules: {}, signals: {}, actionCompleted: {} }
   };
 
   function persist() {
@@ -667,6 +668,7 @@
     var s = seed();
     state.tasks = s.tasks; state.emails = s.emails; state.events = s.events;
     state.demoEvents = s.events.slice();
+    loadClassStore();
     try {
       var raw = localStorage.getItem("cockpit.v2");
       if (raw) {
@@ -749,7 +751,7 @@
   }
 
   // Google-Event -> Cockpit-Event
-  function mapGEvent(ev, calId) {
+  function mapGEvent(ev, calId, calName) {
     var allDay = isAllDayEv(ev);
     var start, end = null, endLabel = null, time = "00:00";
     if (allDay) {
@@ -769,9 +771,14 @@
     return {
       id: "g_" + (ev.id || Math.random().toString(36).slice(2)),
       title: ev.summary || "(ohne Titel)",
+      desc: ev.description || "",
       day: dayOffset(start), time: time, allDay: allDay, end: end, endLabel: endLabel,
       place: ev.location || null,
       cat: guessCat((ev.summary || "") + " " + (ev.location || "")),
+      // Serie/Wiederholung: expandierte Instanzen tragen recurringEventId.
+      seriesId: ev.recurringEventId || null,
+      recurring: !!ev.recurringEventId,
+      calName: calName || "",
       prep: null, task: null, email: null, type: "termin",
       link: ev.htmlLink || null, live: true, calId: calId
     };
@@ -785,7 +792,10 @@
         .filter(function (c) { return c.id && c.id.indexOf("#holiday") < 0; });
       if (!cals.length) cals = [{ id: "primary", summary: "Kalender" }];
       state.cal.calendars = cals;
-      var start = new Date(); start.setHours(0, 0, 0, 0);
+      seedCalendarRules(cals);
+      // Kleiner Rückblick (3 Tage), damit gerade abgelaufene Fristen als überfällig
+      // sichtbar bleiben – ohne die Zukunftsliste zu verdrängen.
+      var start = new Date(); start.setHours(0, 0, 0, 0); start.setDate(start.getDate() - 3);
       return Promise.all(cals.map(function (c) {
         return window.claude.mcp.callTool(GCAL, "list_events", {
           calendarId: c.id, startTime: start.toISOString(), orderBy: "startTime", pageSize: 50
@@ -796,7 +806,7 @@
         lists.forEach(function (list, i) {
           list.forEach(function (ev) {
             if (ev.status === "cancelled") return;
-            out.push(mapGEvent(ev, cals[i].id));
+            out.push(mapGEvent(ev, cals[i].id, cals[i].summary));
           });
         });
         var seen = {};
@@ -817,6 +827,160 @@
       render();
     });
   }
+
+  /* =========================================================
+     KALENDER-KLASSIFIZIERUNG — Fristen/Termine/Routinen trennen
+     ========================================================= */
+  var CLASSES = {
+    deadline:         { label: "Frist", short: "Frist", color: "var(--urgent)", soft: "var(--urgent-soft)" },
+    action_required:  { label: "Vorbereitung erforderlich", short: "Vorbereitung", color: "var(--high)", soft: "var(--high-soft)" },
+    appointment:      { label: "Normaler Termin", short: "Termin", color: "var(--mid)", soft: "var(--mid-soft)" },
+    routine:          { label: "Routine", short: "Routine", color: "var(--muted)", soft: "var(--surface-2)" },
+    future_highlight: { label: "Wichtiges späteres Ereignis", short: "Highlight", color: "var(--accent)", soft: "var(--accent-soft)" },
+    information:      { label: "Nur Information", short: "Info", color: "var(--faint)", soft: "var(--surface-2)" },
+    hidden:           { label: "Ausgeblendet", short: "Ausgeblendet", color: "var(--faint)", soft: "var(--surface-2)" }
+  };
+  var CLASS_ORDER = ["deadline", "action_required", "appointment", "routine", "future_highlight", "information", "hidden"];
+
+  var RE_DEADLINE = /(frist|deadline|abgabe|abgeben|einreichen|bis spätestens|bewerbungsschluss|anmeldeschluss|rückmeldung bis|bezahlen bis|zahlungsziel|fällig|hochladen|formular|einzahlen)/i;
+  var RE_ROUTINE = /(training|karate|schule|unterricht|fitness|\bkurs\b|wöchentlich|regelmäßig|mannschaftstraining|\bkraft\b|einheit|probe|\bübung\b|schwimmen|laufen|joggen)/i;
+  var RE_HIGHLIGHT = /(wettkampf|turnier|\bopen\b|championship|meisterschaft|\bwm\b|\bem\b|\bdm\b|youth league|\bliga\b|qualifi|prüfung|klausur|\babi\b|examen|reise|\bflug\b|urlaub|hochzeit|konzert|festival|\bcamp\b)/i;
+  var RE_INFO = /(geburtstag|feiertag|ferien|jahrestag|namenstag|gedenktag|brückentag)/i;
+  var RE_ACTION = /(bestätigen|vorbereiten|packen|organisieren|rückmeldung|entscheidung|anmeldung|anmelden|\bbuchen\b|reservieren|einladung|zusage|absage|unterlagen)/i;
+
+  function normTitle(t) {
+    return (t || "").toLowerCase().replace(/\d+/g, "").replace(/[^\wäöüß ]+/g, " ").replace(/\s+/g, " ").trim();
+  }
+  function classifyAuto(e) {
+    var text = ((e.title || "") + " " + (e.desc || "")).toLowerCase();
+    if (RE_DEADLINE.test(text)) return "deadline";
+    if (RE_INFO.test(text)) return "information";
+    if (RE_HIGHLIGHT.test(text) && !e.recurring) return "future_highlight";
+    if (e.recurring) return "routine";              // wiederkehrend → standardmäßig Routine
+    if (RE_ROUTINE.test(text)) return "routine";
+    if (RE_ACTION.test(text)) return "action_required";
+    if (e.allDay) return "information";             // ganztägiger Info-/Zeitraum-Eintrag
+    return "appointment";
+  }
+  function calendarRuleFor(e) {
+    var r = state.classStore.calendarRules[e.calName];
+    return r || null; // "" = automatisch
+  }
+  function classInfo(e) {
+    var st = state.classStore;
+    if (st.overrides[e.id]) return { cls: st.overrides[e.id], src: "user_override" };
+    if (e.seriesId && st.seriesOverrides[e.seriesId]) return { cls: st.seriesOverrides[e.seriesId], src: "series_rule" };
+    var nt = normTitle(e.title);
+    if (st.titleRules[nt]) return { cls: st.titleRules[nt], src: "learned" };
+    var cr = calendarRuleFor(e);
+    if (cr) return { cls: cr, src: "calendar_rule" };
+    return { cls: classifyAuto(e), src: "automatic" };
+  }
+  function classOf(e) { return classInfo(e).cls; }
+  function isDone(e) { return !!state.classStore.actionCompleted[e.id]; }
+
+  // Zählt als OFFEN: unerledigte Fristen (inkl. überfällig) + Termine mit offener Handlung.
+  function isOpenItem(e) {
+    var c = classOf(e);
+    if (c === "hidden" || isDone(e)) return false;
+    if (c === "deadline") return true;
+    if (c === "action_required") return e.day >= 0;
+    return false;
+  }
+  function isOverdueDeadline(e) { return classOf(e) === "deadline" && e.day < 0 && !isDone(e); }
+
+  // Sichtbar im Kalenderbereich: alles ab heute + überfällige Fristen; nichts Ausgeblendetes,
+  // keine vergangenen normalen Termine/Routinen.
+  function activeEvents() {
+    return state.events.filter(function (e) {
+      var c = classOf(e);
+      if (c === "hidden") return false;
+      if (e.day >= 0) return true;
+      return c === "deadline" && !isDone(e);
+    });
+  }
+  function sectionOf(e) {
+    var c = classOf(e), d = e.day, done = isDone(e);
+    if (c === "deadline" && d < 0 && !done) return "jetzt"; // überfällig
+    if (c === "deadline" || c === "action_required") {
+      if (done) return "kalender";
+      if (d <= 1) return "jetzt";
+      if (d <= 7) return "woche";
+      return c === "deadline" ? "spaeter" : "kalender";
+    }
+    if (c === "routine") return d === 0 ? "routinen" : "skip";
+    if (c === "future_highlight") { if (d <= 1) return "jetzt"; if (d <= 7) return "woche"; return "spaeter"; }
+    if (c === "appointment") { if (d <= 1) return "jetzt"; if (d <= 7) return "woche"; return "kalender"; }
+    return "kalender"; // information
+  }
+  function relevanceLabel(d) {
+    if (d > 30) return "Kommende Highlights";
+    if (d >= 15) return "Demnächst";
+    if (d >= 8) return "Vorbereitung prüfen";
+    return "Diese Woche";
+  }
+
+  /* ---- Metriken (getrennte, ehrliche Zahlen) ---- */
+  function openItemsCount() { return state.events.filter(isOpenItem).length; }
+  function metricOpenDeadlines() { return state.events.filter(function (e) { return classOf(e) === "deadline" && !isDone(e); }).length; }
+  function metricOpenActions() { return state.events.filter(function (e) { return classOf(e) === "action_required" && !isDone(e) && e.day >= 0; }).length; }
+  function metricRoutinesToday() { return state.events.filter(function (e) { return classOf(e) === "routine" && e.day === 0; }).length; }
+  function isRelevantType(c) { return c === "deadline" || c === "action_required" || c === "appointment" || c === "future_highlight"; }
+  function metricRelevant(dayFrom, dayTo) {
+    return activeEvents().filter(function (e) { return isRelevantType(classOf(e)) && e.day >= dayFrom && e.day <= dayTo; }).length;
+  }
+  function sortByDay(arr) { return arr.slice().sort(function (a, b) { return a.day !== b.day ? a.day - b.day : (a.time || "").localeCompare(b.time || ""); }); }
+  function nextRelevant() { return sortByDay(activeEvents().filter(function (e) { return isRelevantType(classOf(e)) && e.day >= 0; }))[0] || null; }
+  function nextHighlight() { return sortByDay(activeEvents().filter(function (e) { return classOf(e) === "future_highlight" && e.day >= 0; }))[0] || null; }
+  function classSummary() {
+    var s = { before: state.events.filter(function (e) { return e.day >= 0; }).length, deadline: 0, action_required: 0, appointment: 0, routine: 0, future_highlight: 0, information: 0, hidden: 0, open: openItemsCount() };
+    state.events.forEach(function (e) { var c = classOf(e); if (s[c] != null) s[c]++; });
+    return s;
+  }
+
+  /* ---- Nutzerkorrektur, Serie, Lernen ---- */
+  function setClassification(e, cls, scope) {
+    var st = state.classStore;
+    delete st.overrides[e.id];
+    if (e.seriesId) delete st.seriesOverrides[e.seriesId];
+    if (scope === "series" && e.seriesId) st.seriesOverrides[e.seriesId] = cls;
+    else st.overrides[e.id] = cls;
+    learnSignal(e, cls);
+    saveClassStore(); render();
+    toast("Eingestuft: " + (CLASSES[cls] ? CLASSES[cls].label : cls));
+    openEvent(e.id);
+  }
+  function learnSignal(e, cls) {
+    var st = state.classStore, nt = normTitle(e.title); if (!nt) return;
+    var s = st.signals[nt] || { cls: cls, count: 0 };
+    if (s.cls === cls) s.count++; else { s.cls = cls; s.count = 1; }
+    st.signals[nt] = s;
+    if (s.count >= 2) st.titleRules[nt] = cls; // wiederkehrende Korrektur → gelernte Regel
+  }
+  function setActionDone(e, done) { state.classStore.actionCompleted[e.id] = !!done; saveClassStore(); render(); openEvent(e.id); }
+
+  function seedCalendarRules(cals) {
+    var st = state.classStore; var changed = false;
+    cals.forEach(function (c) {
+      var name = c.summary || c.id;
+      if (st.calendarRules[name] !== undefined) return;
+      var n = name.toLowerCase(); var rule = "";
+      if (/training|fitness|\bsport\b/.test(n)) rule = "routine";
+      else if (/frist|deadline/.test(n)) rule = "deadline";
+      else if (/geburtstag|feiern/.test(n)) rule = "information";
+      else if (/wettkampf|turnier/.test(n)) rule = "future_highlight";
+      else if (/ferien|feiertag|urlaub/.test(n)) rule = "information";
+      st.calendarRules[name] = rule; changed = true;
+    });
+    if (changed) saveClassStore();
+  }
+  function loadClassStore() {
+    try {
+      var raw = localStorage.getItem("cockpit.eventclass.v1");
+      if (raw) { var d = JSON.parse(raw); ["overrides", "seriesOverrides", "calendarRules", "titleRules", "signals", "actionCompleted"].forEach(function (k) { if (d[k]) state.classStore[k] = d[k]; }); }
+    } catch (e) {}
+  }
+  function saveClassStore() { try { localStorage.setItem("cockpit.eventclass.v1", JSON.stringify(state.classStore)); } catch (e) {} }
 
   /* ---------- filters ---------- */
   function activeCatFilters() { return Object.keys(state.filterCats).filter(function (k) { return state.filterCats[k]; }); }
@@ -848,7 +1012,7 @@
     var urgent = open.filter(function (t) { return t.prio === "dringend"; });
     var over = open.filter(function (t) { return t.due != null && t.due < 0; });
     var mails = state.emails.filter(function (m) { return !m.hidden && m.needsReply && !m.answered; });
-    var ev = upcomingEvents()[0];
+    var ev = nextRelevant();
     return { open: open, urgent: urgent, over: over, mails: mails, nextEvent: ev };
   }
   function upcomingEvents() {
@@ -912,7 +1076,7 @@
   function renderNav() {
     var open = state.tasks.filter(function (t) { return t.status !== "erledigt"; }).length;
     var mails = state.emails.filter(function (m) { return !m.hidden && m.needsReply && !m.answered; }).length;
-    var ev = upcomingEvents().length;
+    var ev = openItemsCount(); // NUR offene Fristen + Termine mit offener Handlung
     var counts = { board: open, mails: mails, termine: ev };
     function build(host) {
       host.innerHTML = "";
@@ -1013,6 +1177,24 @@
     row.appendChild(nx); row.appendChild(wt);
     c.appendChild(row);
 
+    // Kalender im Blick – getrennte Zahlen statt einer irreführenden Summe
+    if (state.cal.status === "live") {
+      c.appendChild(sectionTitle("Kalender im Blick", "Nur echte offene Punkte zählen als offen"));
+      var cg = el("div", "tiles"); cg.style.gridTemplateColumns = "repeat(3,1fr)";
+      var od = metricOpenDeadlines(), oa = metricOpenActions(), nh = nextHighlight();
+      cg.appendChild(tile(od ? "alert" : "info", "Offene Fristen", od, "unerledigt"));
+      cg.appendChild(tile(oa ? "warn" : "info", "Vorbereitung erforderlich", oa, "offene Handlung"));
+      cg.appendChild(tile("info", "Termine heute", metricRelevant(0, 0), "relevant"));
+      cg.appendChild(tile("info", "Termine diese Woche", metricRelevant(1, 7), "relevant"));
+      cg.appendChild(tile("info", "Routinen heute", metricRoutinesToday(), "z. B. Training"));
+      var nhTile = el("div", "tile info");
+      nhTile.innerHTML = '<span class="stripe"></span><div class="k">Nächstes Highlight</div>' +
+        (nh ? '<div style="font-size:14px;font-weight:650;margin-top:8px;letter-spacing:-.01em;">' + esc(nh.title) + '</div><div class="cap">' + dueText(nh.day) + '</div>'
+            : '<div class="cap" style="margin-top:8px;">keins geplant</div>');
+      cg.appendChild(nhTile);
+      c.appendChild(cg);
+    }
+
     // Mein Fokus
     c.appendChild(sectionTitle("Mein Fokus", "Die nächsten drei Aufgaben – begründet priorisiert"));
     var fc = el("div", "focus-card");
@@ -1034,14 +1216,14 @@
     var g = el("div", "grid-2"); g.style.marginTop = "22px";
     // events today/next
     var ep = el("div", "panel");
-    ep.appendChild(panelHead("Als Nächstes", "Termine & Fristen"));
-    var evs = upcomingEvents().slice(0, 5);
-    if (!evs.length) ep.appendChild(el("div", "empty", "Nichts geplant"));
+    ep.appendChild(panelHead("Als Nächstes", "Relevante Termine & Fristen"));
+    var evs = sortByDay(activeEvents().filter(function (e) { return isRelevantType(classOf(e)) && e.day >= 0; })).slice(0, 5);
+    if (!evs.length) ep.appendChild(el("div", "empty", "Nichts Relevantes geplant"));
     evs.forEach(function (e) {
       var r = el("div", "mini-row");
       r.innerHTML = '<div class="mini-when">' + evTimeLabel(e) + '<span class="rel">' + dueText(e.day) + '</span></div>' +
         '<div class="mini-main"><div class="t">' + esc(e.title) + '</div><div class="s">' +
-        (e.type === "frist" ? "Frist" : "Termin") + (e.place ? ' · ' + esc(e.place) : '') + '</div></div>';
+        CLASSES[classOf(e)].short + (e.place ? ' · ' + esc(e.place) : '') + '</div></div>';
       r.onclick = function () { openEvent(e.id); };
       ep.appendChild(r);
     });
@@ -1165,38 +1347,99 @@
   }
 
   /* ---------- Termine ---------- */
+  function taskForEvent(e) { return state.tasks.filter(function (t) { return t.event === e.id; })[0]; }
+
   function renderTermine(c) {
-    var groups = [
-      { t: "Heute", f: function (e) { return e.day === 0; } },
-      { t: "Morgen", f: function (e) { return e.day === 1; } },
-      { t: "Diese Woche", f: function (e) { return e.day >= 2 && e.day <= 7; } },
-      { t: "Später", f: function (e) { return e.day > 7; } }
+    if (state.cal.status !== "live") {
+      var evsD = state.events.slice().sort(function (a, b) { return a.day - b.day; }).filter(function (e) { return e.day >= 0; });
+      if (!evsD.length) { c.appendChild(el("div", "empty", "Keine Termine.")); return; }
+      var gd = el("div", "tl-group"); gd.appendChild(el("div", "tl-h", "Beispieltermine"));
+      evsD.forEach(function (e) { gd.appendChild(eventRow(e, false, "kalender")); });
+      c.appendChild(gd); return;
+    }
+
+    // Vorher/Nachher-Zusammenfassung der Neuklassifizierung
+    var s = classSummary();
+    var sum = el("div", "note"); sum.style.marginBottom = "16px";
+    sum.innerHTML = '<b>Neu klassifiziert:</b> ' + s.before + ' Einträge ab heute → <b style="color:' + (s.open ? 'var(--high)' : 'var(--ok)') + ';">' + s.open + ' offen</b>. ' +
+      s.deadline + ' Fristen · ' + s.action_required + ' Vorbereitung · ' + s.appointment + ' normale Termine · ' +
+      s.routine + ' Routinen · ' + s.future_highlight + ' Highlights · ' + s.information + ' Infos. ' +
+      '<span style="color:var(--muted);">Nur unerledigte Fristen und Termine mit offener Handlung zählen als „offen".</span>';
+    c.appendChild(sum);
+
+    var bar = el("div", "section-title"); bar.innerHTML = 'Termine &amp; Fristen <span class="hint">nach Handlungsbedarf gegliedert</span>';
+    var rb = el("button", "chip" + (state.showRules ? " on" : "")); rb.style.marginLeft = "auto";
+    rb.textContent = state.showRules ? "Regeln ausblenden" : "Regeln";
+    rb.onclick = function () { state.showRules = !state.showRules; render(); };
+    bar.appendChild(rb); c.appendChild(bar);
+    if (state.showRules) c.appendChild(rulesPanel());
+
+    var buckets = [
+      { k: "jetzt", t: "Jetzt relevant" },
+      { k: "woche", t: "Diese Woche" },
+      { k: "routinen", t: "Routinen heute" },
+      { k: "spaeter", t: "Später wichtig" },
+      { k: "kalender", t: "Nur Kalender" }
     ];
-    var evs = upcomingEvents();
+    var by = { jetzt: [], woche: [], routinen: [], spaeter: [], kalender: [] };
+    activeEvents().forEach(function (e) { var b = sectionOf(e); if (by[b]) by[b].push(e); });
     var any = false;
-    groups.forEach(function (g) {
-      var list = evs.filter(g.f); if (!list.length) return; any = true;
-      var grp = el("div", "tl-group");
-      grp.appendChild(el("div", "tl-h", g.t));
-      list.forEach(function (e) { grp.appendChild(eventRow(e)); });
+    buckets.forEach(function (bk) {
+      var list = sortByDay(by[bk.k]); if (!list.length) return; any = true;
+      var grp = el("div", "tl-group"); grp.appendChild(el("div", "tl-h", bk.t));
+      var compact = (bk.k === "routinen" || bk.k === "kalender");
+      list.forEach(function (e) { grp.appendChild(eventRow(e, compact, bk.k)); });
       c.appendChild(grp);
     });
     if (!any) c.appendChild(el("div", "empty", "Keine anstehenden Termine oder Fristen."));
   }
-  function eventRow(e) {
-    var row = el("div", "event" + (e.type === "frist" ? " frist" : ""));
-    var rem = e.day === 0 ? "heute" : (e.day === 1 ? "morgen" : "in " + e.day + " Tagen");
-    var task = e.task ? getTask(e.task) : null;
-    var endMeta = e.allDay ? (e.endLabel ? '<span>' + esc(e.endLabel) + '</span>' : '')
-                           : (e.end ? '<span>bis ' + e.end + ' Uhr</span>' : '');
+
+  function rulesPanel() {
+    var wrap = el("div", "panel"); wrap.style.marginBottom = "16px";
+    wrap.appendChild(el("div", "ph", 'Automatische Regeln <span style="color:var(--faint);font-weight:500;">Kalender &amp; gelernt · bearbeitbar</span>'));
+    var body = el("div"); body.style.padding = "10px 15px 14px";
+    var opts = [["", "automatisch"], ["deadline", "Frist"], ["action_required", "Vorbereitung"], ["appointment", "Termin"], ["routine", "Routine"], ["future_highlight", "Highlight"], ["information", "Information"]];
+    var lbl1 = el("div"); lbl1.style.cssText = "font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--faint);font-weight:640;margin:2px 0 6px;"; lbl1.textContent = "Regeln nach Kalender"; body.appendChild(lbl1);
+    Object.keys(state.classStore.calendarRules).forEach(function (name) {
+      var row = el("div"); row.style.cssText = "display:flex;align-items:center;gap:10px;padding:5px 0;font-size:12.5px;";
+      var lab = el("span"); lab.textContent = name; lab.style.cssText = "flex:1;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+      var sel = document.createElement("select"); sel.className = "inp"; sel.style.cssText = "width:auto;padding:6px 9px;font-size:12px;";
+      sel.innerHTML = opts.map(function (o) { return '<option value="' + o[0] + '"' + (state.classStore.calendarRules[name] === o[0] ? " selected" : "") + '>' + o[1] + '</option>'; }).join("");
+      sel.onchange = function () { state.classStore.calendarRules[name] = sel.value; saveClassStore(); render(); };
+      row.appendChild(lab); row.appendChild(sel); body.appendChild(row);
+    });
+    var trs = Object.keys(state.classStore.titleRules);
+    if (trs.length) {
+      var lbl2 = el("div"); lbl2.style.cssText = "font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--faint);font-weight:640;margin:14px 0 6px;"; lbl2.textContent = "Gelernte Regeln (aus deinen Korrekturen)"; body.appendChild(lbl2);
+      trs.forEach(function (nt) {
+        var row = el("div"); row.style.cssText = "display:flex;align-items:center;gap:10px;padding:5px 0;font-size:12.5px;";
+        var lab = el("span"); lab.style.flex = "1"; lab.innerHTML = '„' + esc(nt) + '" → <b>' + (CLASSES[state.classStore.titleRules[nt]] ? CLASSES[state.classStore.titleRules[nt]].label : "") + '</b>';
+        var del = el("button", "chip", "Entfernen"); del.onclick = function () { delete state.classStore.titleRules[nt]; delete state.classStore.signals[nt]; saveClassStore(); render(); };
+        row.appendChild(lab); row.appendChild(del); body.appendChild(row);
+      });
+    }
+    wrap.appendChild(body); return wrap;
+  }
+
+  function eventRow(e, compact, bucket) {
+    var ci = classInfo(e), cls = ci.cls, meta = CLASSES[cls];
+    var overdue = isOverdueDeadline(e), d = e.day, done = isDone(e);
+    var rem = overdue ? (Math.abs(d) === 1 ? "gestern" : Math.abs(d) + " Tage überfällig") : (d === 0 ? "heute" : (d === 1 ? "morgen" : "in " + d + " Tagen"));
+    var task = taskForEvent(e);
+    var endMeta = e.allDay ? (e.endLabel ? '<span>' + esc(e.endLabel) + '</span>' : '') : (e.end ? '<span>bis ' + e.end + ' Uhr</span>' : '');
+    var alarm = cls === "deadline" && (overdue || d <= 0) && !done; // rot nur bei echten fälligen/überfälligen Fristen
+    var manual = (ci.src === "user_override" || ci.src === "series_rule" || ci.src === "learned");
+    var badge = '<span class="badge" style="background:' + meta.soft + ';color:' + meta.color + ';margin-left:6px;">' + meta.short + (done ? " ✓" : "") + '</span>';
+    var relChip = (bucket === "spaeter") ? ' <span class="badge" style="background:var(--accent-soft);color:var(--accent-ink);">' + relevanceLabel(d) + '</span>' : '';
+    var row = el("div", "event" + (alarm ? " frist" : ""));
+    if (compact) row.style.padding = "10px 14px";
     row.innerHTML =
-      '<div class="e-time"><div class="hh">' + evTimeLabel(e) + '</div><div class="rem">' + rem + '</div></div>' +
-      '<div class="e-bar"></div>' +
-      '<div class="e-main"><div class="e-title">' + esc(e.title) + (e.type === "frist" ? ' <span class="deadline-chip">Frist</span>' : '') + '</div>' +
-      '<div class="e-meta"><span>' + CATMAP[e.cat].label + '</span>' + (e.place ? '<span>' + esc(e.place) + '</span>' : '') +
-      endMeta + srcBadge(e.type === "frist" ? "outlook" : "calendar") + '</div>' +
-      (e.prep ? '<div class="e-prep"><b>Vorbereitung:</b> ' + esc(e.prep) + '</div>' : '') +
-      (task ? '<div class="e-prep" style="margin-top:6px;"><b>Aufgabe:</b> ' + esc(task.title) + '</div>' : '') +
+      '<div class="e-time" style="min-width:60px;"><div class="hh"' + (overdue ? ' style="color:var(--urgent);"' : '') + '>' + evTimeLabel(e) + '</div><div class="rem"' + (overdue ? ' style="color:var(--urgent);"' : '') + '>' + rem + '</div></div>' +
+      '<div class="e-bar" style="background:' + meta.color + ';"></div>' +
+      '<div class="e-main"><div class="e-title">' + esc(e.title) + badge + relChip + (manual ? ' <span style="color:var(--faint);font-size:10.5px;">· manuell</span>' : '') + '</div>' +
+      (compact ? '' :
+        '<div class="e-meta"><span>' + CATMAP[e.cat].label + '</span>' + (e.place ? '<span>' + esc(e.place) + '</span>' : '') + endMeta + '</div>' +
+        (task ? '<div class="e-prep"><b>Aufgabe:</b> ' + esc(task.title) + (task.status === "erledigt" ? " (erledigt)" : "") + '</div>' : '')) +
       '</div>';
     row.onclick = function () { openEvent(e.id); };
     return row;
@@ -1356,29 +1599,62 @@
 
   function openEvent(id) {
     var e = getEvent(id); if (!e) return;
-    var task = e.task ? getTask(e.task) : null;
-    var mail = e.email ? getMail(e.email) : null;
-    var rem = e.day === 0 ? "heute" : (e.day === 1 ? "morgen" : "in " + e.day + " Tagen");
-    var head = '<div class="dh"><div><div style="margin-bottom:8px;">' + srcBadge(e.type === "frist" ? "outlook" : "calendar") +
-      (e.type === "frist" ? ' <span class="deadline-chip">Frist</span>' : '') + '</div><h3>' + esc(e.title) + '</h3></div><button class="x" aria-label="Schließen">✕</button></div>';
+    var ci = classInfo(e), cls = ci.cls, meta = CLASSES[cls];
+    var task = taskForEvent(e);
+    var overdue = isOverdueDeadline(e);
+    var rem = overdue ? (Math.abs(e.day) + " Tage überfällig") : (e.day === 0 ? "heute" : (e.day === 1 ? "morgen" : (e.day < 0 ? "vorbei" : "in " + e.day + " Tagen")));
+    var srcTxt = { automatic: "automatisch erkannt", calendar_rule: "Kalender-Regel", series_rule: "Serien-Regel", user_override: "von dir gesetzt", learned: "gelernte Regel" }[ci.src] || ci.src;
+    var head = '<div class="dh"><div><div style="margin-bottom:8px;"><span class="badge" style="background:' + meta.soft + ';color:' + meta.color + ';">' + meta.short + '</span></div><h3>' + esc(e.title) + '</h3></div><button class="x" aria-label="Schließen">✕</button></div>';
     var whenTxt = e.allDay
       ? (dueText(e.day) + ' · ganztägig' + (e.endLabel ? ' (' + esc(e.endLabel) + ')' : '') + ' <span style="color:var(--faint);">(' + rem + ')</span>')
       : (dueText(e.day) + ' · ' + e.time + (e.end ? '–' + e.end : '') + ' Uhr <span style="color:var(--faint);">(' + rem + ')</span>');
     var body = '<div class="db">';
     body += field("Wann", whenTxt);
-    if (e.place) body += field(e.place.indexOf("Video") >= 0 || e.place.indexOf("Teams") >= 0 ? "Videolink" : "Ort", esc(e.place));
-    body += field("Kategorie", CATMAP[e.cat].label);
-    if (e.prep) body += field("Notwendige Vorbereitung", esc(e.prep));
-    if (task) body += field("Zugehörige Aufgabe", esc(task.title) + ' <a href="#" data-open-task="' + task.id + '" style="color:var(--accent-ink);text-decoration:none;font-weight:600;">öffnen</a>');
-    if (mail) body += field("Zugehörige E-Mail", esc(mail.from) + ' – ' + esc(mail.subj));
-    if (e.live) body += field("Quelle", '<span class="src src-calendar"><span class="sq"></span>Google Kalender</span> <span style="color:var(--faint);">· live, nur gelesen</span>');
-    body += field("Verbleibende Zeit", rem);
+    if (e.place) body += field("Ort", esc(e.place));
+    if (e.desc) body += field("Beschreibung", esc(e.desc.slice(0, 280)) + (e.desc.length > 280 ? "…" : ""));
+    body += field("Einstufung", meta.label + ' <span style="color:var(--faint);">· ' + srcTxt + '</span>');
+    if (e.calName) body += field("Kalender", esc(e.calName));
+
+    if (e.seriesId) {
+      body += '<div class="field"><div class="fl">Änderung gilt für</div><div class="seg" id="segScope">' +
+        '<button data-scope="single">Nur dieses</button><button data-scope="series" class="sel">Ganze Serie</button></div></div>';
+    }
+    body += '<div class="field"><div class="fl">Einstufung ändern</div><div class="seg" id="segClass">' +
+      CLASS_ORDER.map(function (k) { return '<button data-cls="' + k + '"' + (k === cls ? ' class="sel"' : '') + '>' + CLASSES[k].label + '</button>'; }).join("") + '</div></div>';
+    if (cls === "deadline" || cls === "action_required") {
+      body += '<div class="field"><div class="fl">Handlung erledigt?</div><div class="seg" id="segDone">' +
+        '<button data-done="0"' + (!isDone(e) ? ' class="sel"' : '') + '>Offen</button>' +
+        '<button data-done="1"' + (isDone(e) ? ' class="sel"' : '') + '>Erledigt</button></div></div>';
+    }
+    if (task) body += field("Verknüpfte Vorbereitungsaufgabe", esc(task.title) + ' <a href="#" data-open-task="' + task.id + '" style="color:var(--accent-ink);text-decoration:none;font-weight:600;">öffnen</a>');
+    body += '<div class="note" style="margin-top:4px;">Ein Kalenderereignis wird nicht selbst zur Aufgabe. Wenn Vorbereitung nötig ist, lege dafür eine getrennte Aufgabe an – nur die zählt dann als offen.</div>';
     body += '</div>';
-    var footer = e.link
-      ? '<a class="btn btn-primary" href="' + esc(e.link) + '" target="_blank" rel="noopener">Im Google Kalender öffnen</a>'
-      : '<button class="btn" disabled title="Verbindung erforderlich">Im Kalender öffnen</button>';
+
+    var footer = "";
+    if (!task) footer += '<button class="btn btn-primary" id="mkPrep">Vorbereitungsaufgabe erstellen</button>';
+    if (e.link) footer += '<a class="btn" href="' + esc(e.link) + '" target="_blank" rel="noopener">Im Google Kalender öffnen</a>';
     openDrawer(head + body, footer);
+
+    var scope = e.seriesId ? "series" : "single";
+    var segScope = $("#segScope");
+    if (segScope) segScope.querySelectorAll("button").forEach(function (b) { b.onclick = function () { segScope.querySelectorAll("button").forEach(function (x) { x.classList.remove("sel"); }); b.classList.add("sel"); scope = b.dataset.scope; }; });
+    $("#segClass").querySelectorAll("button").forEach(function (b) { b.onclick = function () { setClassification(e, b.dataset.cls, scope); }; });
+    var sd = $("#segDone"); if (sd) sd.querySelectorAll("button").forEach(function (b) { b.onclick = function () { setActionDone(e, b.dataset.done === "1"); }; });
+    var mk = $("#mkPrep"); if (mk) mk.onclick = function () { createTaskFromEvent(e); };
     var ot = $("[data-open-task]", $("#drawer")); if (ot) ot.onclick = function (ev) { ev.preventDefault(); openTask(ot.dataset.openTask); };
+  }
+
+  function createTaskFromEvent(e) {
+    var dup = state.tasks.filter(function (t) { return t.event === e.id; })[0];
+    if (dup) { toast("Aufgabe existiert bereits"); openTask(dup.id); return; }
+    var t = {
+      id: "t" + Date.now(), title: "Vorbereiten: " + e.title,
+      desc: "Zur Vorbereitung auf: " + e.title + (e.place ? " (" + e.place + ")" : ""),
+      cat: e.cat, prio: "mittel", due: e.day >= 0 ? e.day : 0, time: null, est: 30,
+      status: "eingang", src: "manual", next: null, email: null, event: e.id
+    };
+    state.tasks.push(t); persist(); render();
+    toast("Vorbereitungsaufgabe erstellt"); openTask(t.id);
   }
 
   /* =========================================================
