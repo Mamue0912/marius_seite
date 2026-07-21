@@ -784,9 +784,9 @@
     };
   }
 
-  function loadCalendar() {
+  function loadCalendar(silent) {
     if (!mcpAvailable()) { state.cal.status = "unavailable"; state.cal.error = null; render(); return; }
-    state.cal.status = "loading"; render();
+    if (!silent) { state.cal.status = "loading"; render(); } // stille Auto-Aktualisierung ohne „lädt…"-Flackern
     window.claude.mcp.callTool(GCAL, "list_calendars", {}).then(function (res) {
       var cals = ((res && res.payload && res.payload.calendars) || [])
         .filter(function (c) { return c.id && c.id.indexOf("#holiday") < 0; });
@@ -825,6 +825,19 @@
       state.cal.error = (err && err.code) || "upstream_error";
       if (!state.events.length || (state.events[0] && state.events[0].live)) state.events = state.demoEvents.slice();
       render();
+    });
+  }
+
+  // Auto-Aktualisierung: solange das Cockpit offen/sichtbar ist, alle 60 s neu
+  // laden – plus sofort beim Zurückwechseln zum Tab. (Kein echtes Push möglich.)
+  var _autoTimer = null;
+  function startAutoRefresh() {
+    if (_autoTimer) clearInterval(_autoTimer);
+    _autoTimer = setInterval(function () {
+      if (!document.hidden && mcpAvailable() && state.cal.status !== "loading") loadCalendar(true);
+    }, 60000);
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden && mcpAvailable() && state.cal.status !== "loading") loadCalendar(true);
     });
   }
 
@@ -1137,7 +1150,7 @@
     } else if (view === "termine") {
       if (calLive) {
         s.className = "demo-strip real";
-        s.innerHTML = '<span class="tag">Live</span><span><b>Termine live aus Google Kalender.</b> Stand ' + calNowLabel() + ' Uhr · nur gelesen. Aktualisieren mit dem Sync-Knopf oben rechts.</span>';
+        s.innerHTML = '<span class="tag">Live</span><span><b>Termine live aus Google Kalender.</b> Stand ' + calNowLabel() + ' Uhr · aktualisiert sich automatisch (~60 s), solange das Cockpit offen ist.</span>';
       } else {
         s.innerHTML = '<span class="tag">Demo</span><span><b>Beispieltermine.</b> Google Kalender ist hier gerade nicht verbunden – die Termine laden live, wenn du das Cockpit in claude.ai öffnest.</span>';
       }
@@ -1715,6 +1728,6 @@
   document.addEventListener("keydown", function (e) { if (e.key === "Escape") { closeDrawer(); closeModal(); } });
 
   /* ---------- init ---------- */
-  restore(); applyTheme(); render(); loadCalendar();
+  restore(); applyTheme(); render(); loadCalendar(); startAutoRefresh();
 })();
 </script>
