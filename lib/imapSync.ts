@@ -2,31 +2,42 @@ import { ImapFlow } from "imapflow";
 import { classify } from "./classify";
 import { supabaseAdmin } from "./supabaseAdmin";
 import { MailAccount, accountPassword } from "./mailAccounts";
+import { folderType, FolderType } from "./folders";
+import { loadRules, applyRules } from "./rules";
+import { classifyEmail } from "./anthropic";
 
-// Wie viele Nachrichten beim ersten Verbinden geladen werden (Seed).
-const SEED_COUNT = 40;
+const SEED_COUNT = 40;       // Erstsync Posteingang
+const SENT_SEED = 25;        // Gesendet je Lauf (idempotent per Message-ID)
+const CLASSIFY_CAP = 12;     // max. KI-Klassifizierungen pro Lauf
 
 function makeClient(acc: MailAccount): ImapFlow {
   return new ImapFlow({
     host: acc.imap_host,
     port: acc.imap_port,
-    secure: true, // 993 = implizites TLS
+    secure: (acc as any).imap_secure !== false,
     auth: { user: acc.username, pass: accountPassword(acc) },
     logger: false,
-    // Nicht ewig hängen bleiben (Serverless-Zeitlimit).
     socketTimeout: 45_000
   });
 }
 
-// Prüft nur, ob Login funktioniert (für den Verbinden-Dialog).
 export async function verifyLogin(acc: MailAccount): Promise<void> {
   const client = makeClient(acc);
   await client.connect();
   await client.logout();
 }
 
-// Holt neue Nachrichten aus dem Posteingang und legt sie in messages ab.
-// Gibt die Anzahl neu verarbeiteter Nachrichten zurück.
+// Findet den echten Ordnernamen für einen kanonischen Typ (z. B. Gesendet).
+async function findMailbox(client: ImapFlow, type: FolderType): Promise<{ path: string } | null> {
+  const list = await client.list();
+  for (const box of list) {
+    const su = Array.isArray((box as any).specialUse) ? (box as any).specialUse.join(" ") : (box as any).specialUse;
+    if (folderType(box.path, su) === type) return { path: box.path };
+  }
+  return null;
+}
+
+// Hauptsync: Posteingang (inkrementell) + Gesendet (Seed), dann KI-Kategorien.
 export async function syncInbox(acc: MailAccount): Promise<number> {
   const admin = supabaseAdmin();
   const client = makeClient(acc);
@@ -34,124 +45,135 @@ export async function syncInbox(acc: MailAccount): Promise<number> {
 
   await client.connect();
   try {
+    // ----- Posteingang (inkrementell via UID-Cursor) -----
     const lock = await client.getMailboxLock("INBOX");
     try {
       const box: any = client.mailbox;
       const uidValidity = Number(box?.uidValidity || 0);
       const exists = Number(box?.exists || 0);
-      if (exists === 0) {
-        await admin
-          .from("mail_accounts")
-          .update({
-            inbox_uidvalidity: uidValidity,
-            last_synced_at: new Date().toISOString(),
-            status: "connected",
-            last_error: null
-          })
-          .eq("id", acc.id);
-        return 0;
-      }
-
-      // UIDVALIDITY-Wechsel → Cursor zurücksetzen (Postfach neu aufgebaut).
       let lastUid = Number(acc.inbox_last_uid || 0);
-      if (acc.inbox_uidvalidity && Number(acc.inbox_uidvalidity) !== uidValidity) {
-        lastUid = 0;
-      }
-
+      if (acc.inbox_uidvalidity && Number(acc.inbox_uidvalidity) !== uidValidity) lastUid = 0;
       let maxUid = lastUid;
 
-      if (lastUid > 0) {
-        // Inkrementell: nur UIDs größer als der zuletzt gesehene.
-        // 3. Argument { uid: true } => Bereich als UID-Bereich interpretieren.
-        for await (const msg of client.fetch(
-          `${lastUid + 1}:*`,
-          { uid: true, envelope: true, flags: true, internalDate: true },
-          { uid: true }
-        )) {
-          if (Number(msg.uid) <= lastUid) continue; // Serverrand kann Grenze mitliefern
-          await upsertMessage(acc, msg);
-          processed++;
-          if (Number(msg.uid) > maxUid) maxUid = Number(msg.uid);
-        }
-      } else {
-        // Erstsync: die letzten SEED_COUNT Nachrichten (nach Sequenznummer).
-        const start = Math.max(1, exists - SEED_COUNT + 1);
-        for await (const msg of client.fetch(
-          `${start}:*`,
-          { uid: true, envelope: true, flags: true, internalDate: true }
-        )) {
-          await upsertMessage(acc, msg);
+      if (exists > 0) {
+        const range = lastUid > 0 ? `${lastUid + 1}:*` : `${Math.max(1, exists - SEED_COUNT + 1)}:*`;
+        const opts = lastUid > 0 ? { uid: true as const } : undefined;
+        for await (const msg of client.fetch(range, { uid: true, envelope: true, flags: true, internalDate: true, bodyStructure: true }, opts)) {
+          if (lastUid > 0 && Number(msg.uid) <= lastUid) continue;
+          await upsertMessage(acc, msg, "inbox", "INBOX");
           processed++;
           if (Number(msg.uid) > maxUid) maxUid = Number(msg.uid);
         }
       }
-
-      await admin
-        .from("mail_accounts")
-        .update({
-          inbox_uidvalidity: uidValidity,
-          inbox_last_uid: maxUid,
-          last_synced_at: new Date().toISOString(),
-          status: "connected",
-          last_error: null
-        })
-        .eq("id", acc.id);
+      await admin.from("mail_accounts").update({
+        inbox_uidvalidity: uidValidity, inbox_last_uid: maxUid,
+        last_synced_at: new Date().toISOString(), status: "connected", last_error: null
+      }).eq("id", acc.id);
     } finally {
       lock.release();
+    }
+
+    // ----- Gesendet (Seed je Lauf; Dedupe über Message-ID) -----
+    try {
+      const sent = await findMailbox(client, "sent");
+      if (sent) {
+        const slock = await client.getMailboxLock(sent.path);
+        try {
+          const sbox: any = client.mailbox;
+          const sexists = Number(sbox?.exists || 0);
+          if (sexists > 0) {
+            const start = Math.max(1, sexists - SENT_SEED + 1);
+            for await (const msg of client.fetch(`${start}:*`, { uid: true, envelope: true, flags: true, internalDate: true, bodyStructure: true })) {
+              await upsertMessage(acc, msg, "sent", sent.path);
+              processed++;
+            }
+          }
+        } finally {
+          slock.release();
+        }
+      }
+    } catch (e) {
+      console.error("Sent-Sync übersprungen:", (e as Error).message);
     }
   } finally {
     await client.logout().catch(() => {});
   }
 
+  // ----- KI-Kategorien + Regeln (getrennt, gedeckelt) -----
+  try {
+    await classifyNew(acc);
+  } catch (e) {
+    console.error("Klassifizierung übersprungen:", (e as Error).message);
+  }
+
   return processed;
 }
 
-async function upsertMessage(acc: MailAccount, msg: any): Promise<void> {
+function hasAttachments(bodyStructure: any): boolean {
+  if (!bodyStructure) return false;
+  const walk = (node: any): boolean => {
+    if (!node) return false;
+    if (node.disposition && String(node.disposition).toLowerCase() === "attachment") return true;
+    if (Array.isArray(node.childNodes)) return node.childNodes.some(walk);
+    return false;
+  };
+  return walk(bodyStructure);
+}
+
+async function upsertMessage(acc: MailAccount, msg: any, ftype: FolderType, mailbox: string): Promise<void> {
   const admin = supabaseAdmin();
   const env = msg.envelope || {};
+  const addrList = (arr: any[]) => (arr || []).map((a: any) => a.address).filter(Boolean).join(", ");
   const fromAddr = env.from?.[0]?.address || null;
   const fromName = env.from?.[0]?.name || null;
-  const to = (env.to || []).map((a: any) => a.address).filter(Boolean).join(", ");
   const received = msg.internalDate ? new Date(msg.internalDate).toISOString() : env.date ? new Date(env.date).toISOString() : null;
   const flags: Set<string> = msg.flags instanceof Set ? msg.flags : new Set(msg.flags || []);
   const isRead = flags.has("\\Seen");
-  const messageId = env.messageId || `imap-${acc.id}-inbox-${msg.uid}`;
+  const isFlagged = flags.has("\\Flagged");
+  const messageId = env.messageId || `imap-${acc.id}-${ftype}-${msg.uid}`;
+  const references = Array.isArray(env.references) ? env.references.join(" ") : env.references || null;
+  // Thread-ID: erster Bezug (Ursprungsnachricht) oder eigene Message-ID.
+  const threadId = env.inReplyTo || (references ? references.split(/\s+/)[0] : null) || messageId;
 
   const base = {
-    folder: "inbox",
-    from_address: fromAddr,
-    from_name: fromName,
-    subject: env.subject ?? null,
-    preview: null as string | null,
-    is_read: isRead,
-    importance: null as string | null,
-    received_at: received
+    folder: ftype, from_address: fromAddr, from_name: fromName,
+    subject: env.subject ?? null, preview: null as string | null,
+    is_read: isRead, importance: null as string | null, received_at: received
   };
-  const c = classify(base);
+  const c = classify(base as any);
 
-  const row = {
+  const row: any = {
     user_id: acc.user_id,
     account_id: null,
     mail_account_id: acc.id,
-    graph_id: messageId, // stabile ID für Dedupe (Message-ID)
-    conversation_id: env.inReplyTo || null,
+    account_display_name: (acc as any).display_name || acc.email,
+    graph_id: messageId,
+    message_id: env.messageId || null,
+    in_reply_to: env.inReplyTo || null,
+    message_refs: references,
+    thread_id: threadId,
+    conversation_id: threadId,
     internet_message_id: env.messageId || null,
-    folder: "inbox",
-    from_name: fromName,
-    from_address: fromAddr,
-    to_recipients: to || null,
-    subject: env.subject ?? null,
-    preview: null,
+    folder: ftype,
+    folder_type: ftype,
+    original_folder_name: mailbox,
+    from_name: fromName, from_address: fromAddr,
+    to_recipients: addrList(env.to) || null,
+    cc_addresses: addrList(env.cc) || null,
+    bcc_addresses: addrList(env.bcc) || null,
+    reply_to_addresses: addrList(env.replyTo) || null,
+    subject: env.subject ?? null, preview: null,
     received_at: received,
-    sent_at: null,
-    is_read: isRead,
+    sent_at: ftype === "sent" ? received : null,
+    is_read: ftype === "sent" ? true : isRead,
+    is_flagged: isFlagged,
+    has_attachments: hasAttachments(msg.bodyStructure),
     importance: null,
-    needs_reply: c.needs_reply,
+    needs_reply: ftype === "sent" ? false : c.needs_reply,
     deadline_at: c.deadline_at,
     detected_task: c.detected_task,
     category: c.category,
     status: c.status,
-    // IMAP-UID hier ablegen, damit wir später den Volltext per IMAP nachladen können.
     web_link: `imap-uid:${msg.uid}`,
     last_modified_at: null,
     last_synced_at: new Date().toISOString(),
@@ -160,4 +182,57 @@ async function upsertMessage(acc: MailAccount, msg: any): Promise<void> {
   };
 
   await admin.from("messages").upsert(row, { onConflict: "user_id,graph_id" });
+}
+
+// KI-Kategorien + Regeln für neue Posteingangs-Nachrichten (gedeckelt).
+async function classifyNew(acc: MailAccount): Promise<void> {
+  const admin = supabaseAdmin();
+  const rules = await loadRules(acc.user_id);
+
+  const { data: pending } = await admin
+    .from("messages")
+    .select("id,from_name,from_address,to_recipients,subject,preview,mail_account_id,has_attachments,user_category_override")
+    .eq("user_id", acc.user_id)
+    .eq("mail_account_id", acc.id)
+    .eq("folder_type", "inbox")
+    .is("semantic_category", null)
+    .order("received_at", { ascending: false })
+    .limit(CLASSIFY_CAP);
+
+  for (const m of pending || []) {
+    // 1) Nutzerregeln zuerst (Vorrang).
+    const r = applyRules(rules, m);
+    if (r.matched) {
+      await admin.from("messages").update({
+        semantic_category: r.category || "Sonstiges",
+        classification_source: "rule",
+        classification_confidence: 1,
+        hidden: r.hidden || undefined
+      }).eq("id", m.id);
+      continue;
+    }
+    // 2) Nutzer hat manuell überschrieben → übernehmen.
+    if (m.user_category_override) {
+      await admin.from("messages").update({
+        semantic_category: m.user_category_override, classification_source: "user", classification_confidence: 1
+      }).eq("id", m.id);
+      continue;
+    }
+    // 3) KI-Klassifizierung.
+    try {
+      const res = await classifyEmail({
+        from_name: m.from_name, from_address: m.from_address, to: m.to_recipients,
+        subject: m.subject, body: m.preview, accountLabel: (acc as any).display_name || acc.email
+      });
+      await admin.from("messages").update({
+        semantic_category: res.category,
+        action_status: res.action_status,
+        priority: res.priority,
+        classification_confidence: res.confidence,
+        classification_source: "ai"
+      }).eq("id", m.id);
+    } catch (e) {
+      console.error("classifyEmail:", (e as Error).message);
+    }
+  }
 }

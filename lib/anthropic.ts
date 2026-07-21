@@ -60,7 +60,8 @@ async function parseJson<T>(system: string, user: string, schema: any): Promise<
 
 // 1) Drei dynamische, kontextabhängige Antwortvorschläge.
 export async function generateSuggestions(
-  thread: ThreadMessage[]
+  thread: ThreadMessage[],
+  accountContext?: string
 ): Promise<{ language: string; suggestions: Suggestion[] }> {
   const schema = {
     type: "object",
@@ -87,7 +88,8 @@ export async function generateSuggestions(
   const system = `${CORE_RULES}
 
 Aufgabe: Analysiere die E-Mail und den Verlauf und schlage GENAU DREI kurze, sinnvolle Reaktionsmöglichkeiten vor, passend zum konkreten Inhalt (z. B. Terminanfrage → "Termin passt / Alternativen vorschlagen / Termin absagen"; Jobangebot → "Angebot annehmen / Bedenkzeit erbitten / Höflich ablehnen"). Jede Beschriftung 3–5 Wörter. Setze binding=true, wenn die Option eine verbindliche/sensible Zusage bedeutet (z. B. Jobzusage/-absage, Vertragsannahme, verbindliche Terminbestätigung). Antworte in der Sprache der E-Mail.`;
-  const user = `E-Mail-Thread:\n\n${renderThread(thread)}`;
+  const ctx = accountContext ? `${accountContext}\n\n` : "";
+  const user = `${ctx}E-Mail-Thread:\n\n${renderThread(thread)}`;
   return parseJson(system, user, schema);
 }
 
@@ -108,6 +110,7 @@ export async function generateDraft(params: {
   intentLabel?: string;
   customInstruction?: string; // "Eigene Antwort"
   tone: string; // Professionell | Freundlich | Kurz und direkt | Förmlich | Locker
+  accountContext?: string; // welches eigene Konto, privat/schulisch/beruflich
 }): Promise<DraftResult> {
   const schema = {
     type: "object",
@@ -134,7 +137,89 @@ Aufgabe: Formuliere eine vollständige, sendefertige Antwort-E-Mail (nur Body al
 - setze binding=true, wenn die Antwort eine verbindliche/sensible Entscheidung enthält (Jobannahme/-absage, finanzielle/vertragliche/rechtliche Zusage, verbindliche Terminbestätigung, Weitergabe sensibler Infos).
 - setze needs_attachment=true, wenn im Thread Unterlagen/Anhänge angefordert werden oder der Entwurf auf Anhänge verweist.
 - missing_info: kurze Beschreibung fehlender wichtiger Angaben, sonst null. Erfinde nichts – bei fehlenden Angaben stattdessen eine Rückfrage in den Text aufnehmen.`;
-  const user = `${intentLine}\n\nE-Mail-Thread:\n\n${renderThread(params.thread)}`;
+  const ctx = params.accountContext ? `\n\nKontext zum eigenen Konto: ${params.accountContext}` : "";
+  const user = `${intentLine}${ctx}\n\nE-Mail-Thread:\n\n${renderThread(params.thread)}`;
+  return parseJson(system, user, schema);
+}
+
+// ---- Semantische Kategorien (getrennt von Ordnern & Priorität) ----
+export const SEMANTIC_CATEGORIES = [
+  "Wichtig", "Antwort erforderlich", "Schule", "Bewerbungen und Karriere",
+  "Sport und Karate", "Reisen", "Termine und Veranstaltungen", "Rechnungen und Finanzen",
+  "Bestellungen und Lieferungen", "Verträge und Versicherungen", "Behörden",
+  "Konten und Sicherheit", "Persönlich", "Newsletter und Werbung",
+  "Automatische Benachrichtigungen", "Sonstiges"
+] as const;
+
+export const ACTION_STATUSES = [
+  "Sofort beantworten", "Heute beantworten", "Diese Woche beantworten",
+  "Später beantworten", "Warten auf Antwort", "Nur zur Information", "Keine Aktion nötig"
+] as const;
+
+export interface ClassifyResult {
+  category: string;
+  action_status: string;
+  priority: string; // normal | hoch | dringend
+  needs_reply: boolean;
+  confidence: number; // 0..1
+}
+
+export async function classifyEmail(input: {
+  from_name?: string | null; from_address?: string | null; to?: string | null;
+  subject?: string | null; body?: string | null; attachments?: string[]; accountLabel?: string | null;
+}): Promise<ClassifyResult> {
+  const schema = {
+    type: "object", additionalProperties: false,
+    required: ["category", "action_status", "priority", "needs_reply", "confidence"],
+    properties: {
+      category: { type: "string", enum: SEMANTIC_CATEGORIES as unknown as string[] },
+      action_status: { type: "string", enum: ACTION_STATUSES as unknown as string[] },
+      priority: { type: "string", enum: ["normal", "hoch", "dringend"] },
+      needs_reply: { type: "boolean" },
+      confidence: { type: "number" }
+    }
+  };
+  const system = `Du kategorisierst eine einzelne E-Mail. Getrennt zu bewerten:
+1) semantische Kategorie (Inhalt/Bedeutung) aus der Liste,
+2) action_status (brauche ich eine Handlung?),
+3) priority (normal/hoch/dringend),
+4) needs_reply (muss ich antworten?),
+5) confidence (0..1 – wie sicher bist du bei der Kategorie).
+Regeln:
+- Analysiere Absendername, Absenderdomain, Empfängeradresse (eigenes Konto), Betreff, Text und Anhang-Dateinamen im Zusammenhang – nicht nur einzelne Wörter.
+- Karateverbände/Trainer/Wettkampfplattformen → "Sport und Karate". Praktika/Bewerbungsrückmeldungen → "Bewerbungen und Karriere". Lehrer/Schule → "Schule". Flug/Hotel/Buchung → "Reisen". Rechnungen/Zahlungen/Kontoauszüge → "Rechnungen und Finanzen". Paketankündigungen → "Bestellungen und Lieferungen". Anmeldecodes/Sicherheitswarnungen → "Konten und Sicherheit". Werbung → "Newsletter und Werbung". Automatische Systemmails → "Automatische Benachrichtigungen".
+- "Sport und Karate" heißt NICHT automatisch wichtig/dringend.
+- Bei Unsicherheit "Sonstiges" und niedrige confidence. Erfinde keine Sicherheit.`;
+  const atts = input.attachments?.length ? `\nAnhänge: ${input.attachments.join(", ")}` : "";
+  const user = `Eigenes Empfänger-Konto: ${input.accountLabel || "unbekannt"}
+Von: ${input.from_name || ""} <${input.from_address || ""}>
+An: ${input.to || ""}
+Betreff: ${input.subject || ""}${atts}
+Text (gekürzt):
+${(input.body || "").slice(0, 2500)}`;
+  return parseJson(system, user, schema);
+}
+
+// ---- Neue E-Mail aus kurzer Anweisung verfassen ----
+export async function composeNew(params: {
+  instruction: string; fromAccountLabel?: string; recipientHint?: string;
+}): Promise<DraftResult> {
+  const schema = {
+    type: "object", additionalProperties: false,
+    required: ["subject", "body", "language", "tone", "binding", "needs_attachment", "missing_info"],
+    properties: {
+      subject: { type: "string" }, body: { type: "string" }, language: { type: "string" },
+      tone: { type: "string" }, binding: { type: "boolean" },
+      needs_attachment: { type: "boolean" }, missing_info: { type: ["string", "null"] }
+    }
+  };
+  const system = `${CORE_RULES}
+
+Aufgabe: Formuliere eine NEUE, sendefertige E-Mail (Betreff + Body als Fließtext) aus meiner kurzen Anweisung.
+- Passe Formalität an Empfänger/Anlass an. Erfinde keine Fakten, Termine oder Namen; fehlt Wichtiges, formuliere eine Rückfrage und melde es in missing_info.
+- binding=true bei verbindlichen/sensiblen Aussagen. needs_attachment=true, wenn Unterlagen erwähnt werden.`;
+  const user = `Absender-Konto: ${params.fromAccountLabel || "eigenes Konto"}
+${params.recipientHint ? `Empfänger-Hinweis: ${params.recipientHint}\n` : ""}Anweisung: ${params.instruction}`;
   return parseJson(system, user, schema);
 }
 

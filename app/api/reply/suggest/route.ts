@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabaseServer";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { getValidAccessToken } from "@/lib/tokens";
-import { fetchThread } from "@/lib/graphMail";
+import { loadMailAccount, MailAccount } from "@/lib/mailAccounts";
+import { buildThreadContext } from "@/lib/imapFetch";
 import { generateSuggestions } from "@/lib/anthropic";
+import { accountContextLine } from "@/lib/accountContext";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
-// Erzeugt (und cacht) drei kontextabhängige Antwortvorschläge für eine Mail.
+// Drei kontextabhängige Antwortvorschläge (mit Konto-Kontext), gecacht.
 export async function POST(req: NextRequest) {
   const user = await requireUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -18,20 +20,17 @@ export async function POST(req: NextRequest) {
   const { data: msg } = await admin.from("messages").select("*").eq("id", messageId).eq("user_id", user.id).maybeSingle();
   if (!msg) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
-  // Cache: wenn vorhanden und < 24h alt, direkt zurück.
   if (msg.suggested_replies && msg.last_generated_at && Date.now() - new Date(msg.last_generated_at).getTime() < 864e5) {
     return NextResponse.json({ suggestions: msg.suggested_replies, language: msg.draft_language || null });
   }
 
-  const { data: account } = await admin.from("ms_accounts").select("*").eq("id", msg.account_id).maybeSingle();
+  const account = msg.mail_account_id ? await loadMailAccount(msg.mail_account_id) : null;
   if (!account) return NextResponse.json({ error: "no_account" }, { status: 400 });
 
   try {
-    const token = await getValidAccessToken(account as any);
-    const thread = await fetchThread(token, msg.graph_id);
-    const { language, suggestions } = await generateSuggestions(thread);
-    await admin
-      .from("messages")
+    const thread = await buildThreadContext(account as MailAccount, msg);
+    const { language, suggestions } = await generateSuggestions(thread, accountContextLine(account as MailAccount));
+    await admin.from("messages")
       .update({ suggested_replies: suggestions, draft_language: language, last_generated_at: new Date().toISOString() })
       .eq("id", msg.id);
     return NextResponse.json({ suggestions, language });

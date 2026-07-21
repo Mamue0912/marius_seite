@@ -14,6 +14,8 @@ const BUCKETS: { k: string; t: string; c: string }[] = [
   { k: "info", t: "Nur zur Information", c: "#30D158" },
   { k: "newsletter", t: "Newsletter & Automatisch", c: "#98989D" }
 ];
+const CATEGORIES = ["Wichtig", "Antwort erforderlich", "Schule", "Bewerbungen und Karriere", "Sport und Karate", "Reisen", "Termine und Veranstaltungen", "Rechnungen und Finanzen", "Bestellungen und Lieferungen", "Verträge und Versicherungen", "Behörden", "Konten und Sicherheit", "Persönlich", "Newsletter und Werbung", "Automatische Benachrichtigungen", "Sonstiges"];
+const FOLDER_LABELS: Record<string, string> = { inbox: "Posteingang", sent: "Gesendet", drafts: "Entwürfe", archive: "Archiv", spam: "Spam", trash: "Papierkorb", other: "Weitere" };
 const TONES = ["Professionell", "Freundlich", "Kurz und direkt", "Förmlich", "Locker"];
 const COMMANDS = ["Kürzer", "Freundlicher", "Förmlicher", "Direkter", "Wärmer", "Weniger begeistert", "Mehr Kontext", "Rechtschreibung prüfen"];
 
@@ -32,7 +34,10 @@ export default function Cockpit({
   const [showHidden, setShowHidden] = useState(false);
   const [status, setStatus] = useState<any>(null);
   const [showConnect, setShowConnect] = useState(false);
+  const [compose, setCompose] = useState<any>(null);
+  const [filter, setFilter] = useState({ account: "all", folder: "all", cat: "all", unread: false, needs: false, q: "" });
   const [suggests, setSuggests] = useState<Record<string, any[]>>({});
+  const accById: Record<string, Account> = Object.fromEntries(accounts.map((a) => [a.id, a]));
   const [drawer, setDrawer] = useState<any>(null); // { msg, mode, loading, draft, body, tone, customInstruction, confirmBinding, sending }
   const uidRef = useRef<string | null>(null);
 
@@ -84,8 +89,20 @@ export default function Cockpit({
   function visible(m: Msg) {
     if (m.is_deleted) return false;
     if (m.hidden && !showHidden) return false;
+    if (filter.account !== "all" && m.mail_account_id !== filter.account) return false;
+    if (filter.folder !== "all" && (m.folder_type || "inbox") !== filter.folder) return false;
+    if (filter.cat !== "all" && (m.semantic_category || "Sonstiges") !== filter.cat) return false;
+    if (filter.unread && m.is_read) return false;
+    if (filter.needs && !m.needs_reply) return false;
+    if (filter.q) {
+      const q = filter.q.toLowerCase();
+      const hay = `${m.from_name || ""} ${m.from_address || ""} ${m.subject || ""} ${m.preview || ""}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
     return true;
   }
+
+  const usedCats = Array.from(new Set(msgs.map((m) => m.semantic_category).filter(Boolean))) as string[];
 
   async function manualSync() {
     setStatus((s: any) => ({ ...s, syncing: true }));
@@ -127,7 +144,8 @@ export default function Cockpit({
       if (!r.ok) throw new Error(j.error || "Fehler");
       setDrawer((d: any) => ({
         ...d, mode: "generated", loading: false, draft: j.draft, body: j.draft.body,
-        tone: j.draft.tone, outlookSynced: j.outlookSynced,
+        tone: j.draft.tone,
+        fromAccountId: d.fromAccountId || m.mail_account_id,
         intent: p.intent, intentLabel: p.intentLabel, customInstruction: p.customInstruction, confirmBinding: false
       }));
     } catch (e: any) {
@@ -162,11 +180,19 @@ export default function Cockpit({
     setDrawer((d: any) => ({ ...d, sending: true }));
     await saveEdited(); // aktuellen (ggf. bearbeiteten) Text sichern
     try {
-      const r = await fetch("/api/reply/send", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messageId: drawer.msg.id, confirm: true }) });
+      const r = await fetch("/api/reply/send", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messageId: drawer.msg.id, confirm: true, fromAccountId: drawer.fromAccountId }) });
       const j = await r.json();
       if (r.ok) setDrawer(null);
       else setDrawer((d: any) => ({ ...d, sending: false, error: j.message || j.error }));
     } catch (e: any) { setDrawer((d: any) => ({ ...d, sending: false, error: e.message })); }
+  }
+
+  async function categorize(m: Msg, opts: { category?: string; hidden?: boolean; ruleScope?: "sender" | "domain" }) {
+    // Optimistisch aktualisieren.
+    setMsgs((prev) => prev.map((x) => x.id === m.id ? { ...x, semantic_category: opts.category ?? x.semantic_category, hidden: opts.hidden ?? x.hidden, classification_source: "user" } : x));
+    try {
+      await fetch("/api/mail/categorize", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messageId: m.id, ...opts }) });
+    } catch {}
   }
 
   const statusView = () => {
@@ -186,6 +212,8 @@ export default function Cockpit({
         <div className="spacer" />
         {statusView()}
         {connected && <button className="btn small ghost" onClick={manualSync} aria-label="Aktualisieren" title="Aktualisieren">↻</button>}
+        <a className="btn small ghost" href="/settings" title="Einstellungen" aria-label="Einstellungen">⚙</a>
+        {connected && <button className="btn small" onClick={() => setCompose({ fromAccountId: accounts[0]?.id, to: "", cc: "", bcc: "", subject: "", body: "", instruction: "" })}>Neue E-Mail</button>}
         <button className="btn btn-primary small" onClick={() => setShowConnect((v) => !v)}>
           {connected ? "+ Postfach" : "Postfach verbinden"}
         </button>
@@ -203,11 +231,27 @@ export default function Cockpit({
           </div>
         )}
 
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          <button className="btn small" onClick={() => setShowHidden((v) => !v)}>
-            {showHidden ? "Newsletter verbergen" : "Newsletter einblenden"}
-          </button>
-        </div>
+        {connected && (
+          <div className="filterbar">
+            <input className="f-search" placeholder="Suche über alle Postfächer…" value={filter.q} onChange={(e) => setFilter((f) => ({ ...f, q: e.target.value }))} />
+            <select value={filter.account} onChange={(e) => setFilter((f) => ({ ...f, account: e.target.value }))}>
+              <option value="all">Alle Postfächer</option>
+              {accounts.map((a) => <option key={a.id} value={a.id}>{PROVIDERS[a.provider]?.label || a.provider} · {a.email}</option>)}
+            </select>
+            <select value={filter.folder} onChange={(e) => setFilter((f) => ({ ...f, folder: e.target.value }))}>
+              <option value="all">Alle Ordner</option>
+              <option value="inbox">Posteingang</option>
+              <option value="sent">Gesendet</option>
+            </select>
+            <select value={filter.cat} onChange={(e) => setFilter((f) => ({ ...f, cat: e.target.value }))}>
+              <option value="all">Alle Kategorien</option>
+              {usedCats.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <button className={"chip" + (filter.unread ? " sel" : "")} onClick={() => setFilter((f) => ({ ...f, unread: !f.unread }))}>Ungelesen</button>
+            <button className={"chip" + (filter.needs ? " sel" : "")} onClick={() => setFilter((f) => ({ ...f, needs: !f.needs }))}>Antwort nötig</button>
+            <button className="chip" onClick={() => setShowHidden((v) => !v)}>{showHidden ? "Newsletter aus" : "Newsletter an"}</button>
+          </div>
+        )}
 
         {BUCKETS.map((bk) => {
           const list = msgs.filter((m) => visible(m) && (m.category || "info") === bk.k);
@@ -216,7 +260,7 @@ export default function Cockpit({
             <div className="bucket" key={bk.k}>
               <div className="bh"><span className="bd" style={{ background: bk.c }} /><span className="bt">{bk.t}</span><span className="bc">{list.length}</span></div>
               {list.map((m) => (
-                <MailCard key={m.id} m={m} suggests={suggests[m.id]} ensure={ensureSuggestions} onReply={openDraft} />
+                <MailCard key={m.id} m={m} account={accById[m.mail_account_id]} suggests={suggests[m.id]} ensure={ensureSuggestions} onReply={openDraft} onCategorize={categorize} />
               ))}
             </div>
           );
@@ -241,20 +285,44 @@ export default function Cockpit({
           onGenerateCustom={() => generate(drawer.msg, { customInstruction: drawer.customInstruction, tone: drawer.tone })}
           onRefine={refine} onChangeTone={changeTone} onSend={send}
           onRegenerate={() => generate(drawer.msg, { intent: drawer.intent, intentLabel: drawer.intentLabel, customInstruction: drawer.customInstruction, tone: drawer.tone })}
+          accounts={accounts}
         />}
       </aside>
+
+      {compose && <ComposeModal compose={compose} setCompose={setCompose} accounts={accounts} sendEnabled={sendEnabled} />}
     </>
   );
 }
 
 function ConnectForm({ accounts, onClose }: { accounts: Account[]; onClose: () => void }) {
   const providerList = Object.values(PROVIDERS);
-  const [provider, setProvider] = useState(providerList[0].id);
+  const [provider, setProvider] = useState("icloud");
+  const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [manual, setManual] = useState({ imapHost: "", imapPort: 993, imapSecure: true, smtpHost: "", smtpPort: 587, smtpSecure: false });
   const [busy, setBusy] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [test, setTest] = useState<any>(null);
   const [err, setErr] = useState<string | null>(null);
   const preset = PROVIDERS[provider];
+  const isCustom = !!preset?.custom;
+
+  function payload() {
+    const base: any = { provider, email, password, displayName };
+    if (isCustom) Object.assign(base, manual);
+    return base;
+  }
+
+  async function testConn() {
+    setTesting(true); setTest(null); setErr(null);
+    try {
+      const r = await fetch("/api/mail/test", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload()) });
+      const j = await r.json();
+      if (!r.ok) setErr(j.error || "Test fehlgeschlagen."); else setTest(j);
+    } catch (e: any) { setErr(e.message || "Netzwerkfehler."); }
+    setTesting(false);
+  }
 
   async function connect(e: React.FormEvent) {
     e.preventDefault();
@@ -262,17 +330,10 @@ function ConnectForm({ accounts, onClose }: { accounts: Account[]; onClose: () =
     setErr(null);
     try {
       const r = await fetch("/api/mail/connect", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ provider, email, password })
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload())
       });
       const j = await r.json();
-      if (!r.ok) {
-        setErr(j.error || "Verbindung fehlgeschlagen.");
-        setBusy(false);
-        return;
-      }
-      // Erfolg → Seite neu laden, damit Postfach + Mails erscheinen.
+      if (!r.ok) { setErr(j.error || "Verbindung fehlgeschlagen."); setBusy(false); return; }
       window.location.reload();
     } catch (e: any) {
       setErr(e.message || "Netzwerkfehler.");
@@ -309,21 +370,50 @@ function ConnectForm({ accounts, onClose }: { accounts: Account[]; onClose: () =
         <form onSubmit={connect} style={{ display: "flex", flexDirection: "column", gap: 10, maxWidth: 460 }}>
           <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <span style={{ opacity: 0.7, fontSize: 13 }}>Anbieter</span>
-            <select value={provider} onChange={(e) => setProvider(e.target.value)}>
+            <select value={provider} onChange={(e) => { setProvider(e.target.value); setTest(null); }}>
               {providerList.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
             </select>
           </label>
           <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span style={{ opacity: 0.7, fontSize: 13 }}>E-Mail-Adresse</span>
-            <input type="email" required placeholder="name@icloud.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <span style={{ opacity: 0.7, fontSize: 13 }}>Anzeigename (optional)</span>
+            <input type="text" placeholder="z. B. Privat, Schule, Bewerbungen" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
           </label>
           <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span style={{ opacity: 0.7, fontSize: 13 }}>Passwort</span>
+            <span style={{ opacity: 0.7, fontSize: 13 }}>E-Mail-Adresse</span>
+            <input type="email" required placeholder="name@anbieter.de" value={email} onChange={(e) => setEmail(e.target.value)} />
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <span style={{ opacity: 0.7, fontSize: 13 }}>Passwort / App-Passwort</span>
             <input type="password" required placeholder="App-Passwort" value={password} onChange={(e) => setPassword(e.target.value)} />
           </label>
+
+          {isCustom && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 8, alignItems: "end" }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}><span style={{ opacity: 0.7, fontSize: 13 }}>IMAP-Server</span>
+                <input placeholder="imap.anbieter.de" value={manual.imapHost} onChange={(e) => setManual((m) => ({ ...m, imapHost: e.target.value }))} /></label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4, width: 80 }}><span style={{ opacity: 0.7, fontSize: 13 }}>Port</span>
+                <input type="number" value={manual.imapPort} onChange={(e) => setManual((m) => ({ ...m, imapPort: +e.target.value }))} /></label>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, paddingBottom: 10, fontSize: 12.5 }}>
+                <input type="checkbox" checked={manual.imapSecure} onChange={(e) => setManual((m) => ({ ...m, imapSecure: e.target.checked }))} style={{ width: "auto" }} /> SSL</label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}><span style={{ opacity: 0.7, fontSize: 13 }}>SMTP-Server</span>
+                <input placeholder="smtp.anbieter.de" value={manual.smtpHost} onChange={(e) => setManual((m) => ({ ...m, smtpHost: e.target.value }))} /></label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4, width: 80 }}><span style={{ opacity: 0.7, fontSize: 13 }}>Port</span>
+                <input type="number" value={manual.smtpPort} onChange={(e) => setManual((m) => ({ ...m, smtpPort: +e.target.value }))} /></label>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, paddingBottom: 10, fontSize: 12.5 }}>
+                <input type="checkbox" checked={manual.smtpSecure} onChange={(e) => setManual((m) => ({ ...m, smtpSecure: e.target.checked }))} style={{ width: "auto" }} /> SSL</label>
+            </div>
+          )}
+
           <div className="note" style={{ fontSize: 13 }}>{preset?.passwordHint}</div>
+          {test && (
+            <div className="note" style={{ borderColor: test.imap?.ok && test.smtp?.ok ? "var(--accent-line)" : undefined }}>
+              <div>{test.imap?.ok ? "✅" : "⚠️"} IMAP (Empfang): {test.imap?.msg}</div>
+              <div style={{ marginTop: 4 }}>{test.smtp?.ok ? "✅" : "⚠️"} SMTP (Versand): {test.smtp?.msg}</div>
+            </div>
+          )}
           {err && <div className="note binding-warn">{err}</div>}
           <div style={{ display: "flex", gap: 8 }}>
+            <button type="button" className="btn" onClick={testConn} disabled={testing || !email || !password}>{testing ? "Teste…" : "Verbindung testen"}</button>
             <button className="btn btn-primary" disabled={busy}>{busy ? "Verbinde…" : "Verbinden"}</button>
             <button type="button" className="btn" onClick={onClose}>Schließen</button>
           </div>
@@ -333,20 +423,47 @@ function ConnectForm({ accounts, onClose }: { accounts: Account[]; onClose: () =
   );
 }
 
-function MailCard({ m, suggests, ensure, onReply }: any) {
-  const canReply = m.needs_reply && m.draft_status !== "gesendet" && !m.hidden && m.category !== "warten";
+function MailCard({ m, account, suggests, ensure, onReply, onCategorize }: any) {
+  const canReply = m.needs_reply && m.draft_status !== "gesendet" && !m.hidden && m.folder_type !== "sent" && m.category !== "warten";
+  const [menu, setMenu] = useState(false);
   useEffect(() => { if (canReply) ensure(m); }, [m.id]); // eslint-disable-line
+  const providerLabel = account ? (PROVIDERS[account.provider]?.label || account.provider) : (m.account_display_name || "");
+  const isSent = m.folder_type === "sent";
   return (
-    <div className="mail">
-      <div className="m-top">
-        <span className="m-from">{m.from_name || m.from_address}</span>
-        {m.draft_status === "gesendet" ? <span className="badge sent">Gesendet</span>
-          : m.status === "analyzing" ? <span className="badge analyzing">Wird analysiert…</span>
-          : m.needs_reply ? <span className="badge reply">Antwort nötig</span> : null}
+    <div className={"mail" + (!m.is_read && !isSent ? " unread" : "")}>
+      <div className="m-acct">
+        <span className="acct-pill" title={account?.email || ""}>
+          {!m.is_read && !isSent && <span className="unread-dot" />}
+          {providerLabel}{account?.email ? ` · ${account.email}` : ""}
+        </span>
+        {m.folder_type && m.folder_type !== "inbox" && <span className="acct-pill soft">{FOLDER_LABELS[m.folder_type] || m.folder_type}</span>}
+        {m.semantic_category && <span className="cat-chip">{m.semantic_category}</span>}
+        {m.has_attachments && <span className="acct-pill soft" title="Anhang">📎</span>}
         <span className="m-time">{m.received_at ? new Date(m.received_at).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : ""}</span>
       </div>
+      <div className="m-top">
+        <span className="m-from">{isSent ? `An: ${m.to_recipients || ""}` : (m.from_name || m.from_address)}</span>
+        {m.draft_status === "gesendet" ? <span className="badge sent">Beantwortet</span>
+          : m.status === "analyzing" ? <span className="badge analyzing">Wird analysiert…</span>
+          : m.needs_reply && !isSent ? <span className="badge reply">Antwort nötig</span> : null}
+        <button className="m-menu" onClick={() => setMenu((v) => !v)} title="Kategorie ändern">⋯</button>
+      </div>
       <div className="m-subj">{m.subject || "(kein Betreff)"}</div>
-      {m.preview && <div className="m-sum">{m.preview}</div>}
+      {isSent && <div className="m-sum">Gesendet über {account?.email || ""}</div>}
+      {menu && (
+        <div className="catmenu">
+          <div className="label" style={{ margin: "0 0 6px" }}>Kategorie zuweisen</div>
+          <select value={m.semantic_category || ""} onChange={(e) => { onCategorize(m, { category: e.target.value }); setMenu(false); }}>
+            <option value="">— wählen —</option>
+            {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <div className="chips" style={{ marginTop: 8 }}>
+            <button className="chip cmd" onClick={() => { onCategorize(m, { category: m.semantic_category, ruleScope: "sender" }); setMenu(false); }}>Absender immer so</button>
+            <button className="chip cmd" onClick={() => { onCategorize(m, { category: m.semantic_category, ruleScope: "domain" }); setMenu(false); }}>Domain immer so</button>
+            <button className="chip cmd" onClick={() => { onCategorize(m, { hidden: true, ruleScope: "sender" }); setMenu(false); }}>Newsletter ausblenden</button>
+          </div>
+        </div>
+      )}
 
       {canReply && (
         <div className="suggests">
@@ -365,7 +482,7 @@ function MailCard({ m, suggests, ensure, onReply }: any) {
   );
 }
 
-function DraftPanel({ drawer, setDrawer, sendEnabled, onGenerateCustom, onRefine, onChangeTone, onSend, onRegenerate }: any) {
+function DraftPanel({ drawer, setDrawer, sendEnabled, onGenerateCustom, onRefine, onChangeTone, onSend, onRegenerate, accounts }: any) {
   const m = drawer.msg;
   const d = drawer.draft;
   return (
@@ -397,11 +514,16 @@ function DraftPanel({ drawer, setDrawer, sendEnabled, onGenerateCustom, onRefine
         ) : (
           <>
             <div className="meta-row">
-              <span className="k">Empfänger</span><span className="v">{m.from_name || ""} &lt;{m.from_address}&gt;</span>
+              <span className="k">Von (Konto)</span>
+              <span className="v">
+                <select value={drawer.fromAccountId || ""} onChange={(e) => setDrawer((x: any) => ({ ...x, fromAccountId: e.target.value }))} style={{ padding: "6px 10px", fontSize: 12.5 }}>
+                  {(accounts || []).map((a: any) => <option key={a.id} value={a.id}>{(PROVIDERS[a.provider]?.label || a.provider)} · {a.email}</option>)}
+                </select>
+              </span>
+              <span className="k">An</span><span className="v">{m.from_name || ""} &lt;{m.from_address}&gt;</span>
               <span className="k">Betreff</span><span className="v">{d.subject}</span>
               <span className="k">Reaktion</span><span className="v">{drawer.customInstruction ? "Eigene Antwort" : drawer.intentLabel}</span>
               <span className="k">Tonalität</span><span className="v">{drawer.tone || d.tone}</span>
-              <span className="k">Sprache</span><span className="v">{d.language}</span>
             </div>
 
             <div className="label">Tonalität ändern</div>
@@ -423,9 +545,7 @@ function DraftPanel({ drawer, setDrawer, sendEnabled, onGenerateCustom, onRefine
             </div>
 
             {d.missing_info && <div className="note warn"><b>Fehlende Information:</b> {d.missing_info} — bitte vor dem Senden prüfen.</div>}
-            {d.needs_attachment && <div className="note warn"><b>Anhang beachten:</b> In dieser Unterhaltung werden Unterlagen angefordert. Prüfe vor dem Senden, ob die benötigten Dateien angehängt sind (Anhänge fügst du direkt in Outlook hinzu).</div>}
-            {drawer.outlookSynced === false && <div className="note">Hinweis: Der Entwurf konnte nicht mit Outlook synchronisiert werden und ist vorerst nur im Cockpit gespeichert.</div>}
-            {drawer.outlookSynced && <div className="note">Als echter Entwurf in deinem Outlook unter „Entwürfe" gespeichert.</div>}
+            {d.needs_attachment && <div className="note warn"><b>Anhang beachten:</b> In dieser Unterhaltung werden Unterlagen angefordert. Anhänge werden aktuell nicht mitgesendet – bei Bedarf separat verschicken.</div>}
             {d.binding && <div className="note binding-warn"><b>Achtung – verbindliche Antwort:</b> Diese Antwort enthält eine verbindliche oder sensible Entscheidung. Bitte prüfe den Text genau vor dem Senden.</div>}
             {drawer.error && <div className="note binding-warn">{drawer.error}</div>}
           </>
@@ -443,12 +563,74 @@ function DraftPanel({ drawer, setDrawer, sendEnabled, onGenerateCustom, onRefine
               </button>
             )
           ) : (
-            <button className="btn" disabled title="Versand ist nicht aktiviert – Entwurf liegt in Outlook">Senden (deaktiviert)</button>
+            <button className="btn" disabled title="Versand ist nicht aktiviert (ENABLE_SEND=false)">Senden (deaktiviert)</button>
           )}
           <button className="btn" onClick={onRegenerate} disabled={drawer.loading}>Neu formulieren</button>
           <button className="btn" onClick={() => setDrawer(null)}>Abbrechen</button>
         </div>
       )}
+    </>
+  );
+}
+
+function ComposeModal({ compose, setCompose, accounts, sendEnabled }: any) {
+  const set = (patch: any) => setCompose((c: any) => ({ ...c, ...patch }));
+  async function aiDraft() {
+    if (!compose.instruction?.trim()) return;
+    set({ loading: true, error: null });
+    try {
+      const r = await fetch("/api/mail/compose", { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "draft", fromAccountId: compose.fromAccountId, instruction: compose.instruction, to: compose.to }) });
+      const j = await r.json();
+      if (r.ok) set({ loading: false, subject: j.draft.subject, body: j.draft.body });
+      else set({ loading: false, error: "KI-Entwurf fehlgeschlagen." });
+    } catch { set({ loading: false, error: "Netzwerkfehler." }); }
+  }
+  async function sendNow() {
+    if (!compose.to?.trim()) { set({ error: "Bitte Empfänger angeben." }); return; }
+    set({ sending: true, error: null });
+    try {
+      const r = await fetch("/api/mail/compose", { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "send", confirm: true, fromAccountId: compose.fromAccountId, to: compose.to, cc: compose.cc, bcc: compose.bcc, subject: compose.subject, body: compose.body }) });
+      const j = await r.json();
+      if (r.ok) setCompose(null);
+      else set({ sending: false, error: j.message || "Versand fehlgeschlagen." });
+    } catch (e: any) { set({ sending: false, error: e.message }); }
+  }
+  return (
+    <>
+      <div className="scrim open" onClick={() => !compose.sending && setCompose(null)} />
+      <div className="modal">
+        <div className="dh"><h3>Neue E-Mail</h3><button className="x" onClick={() => !compose.sending && setCompose(null)}>✕</button></div>
+        <div className="db">
+          <div className="label" style={{ marginTop: 0 }}>Von (Konto)</div>
+          <select value={compose.fromAccountId || ""} onChange={(e) => set({ fromAccountId: e.target.value })}>
+            {accounts.map((a: any) => <option key={a.id} value={a.id}>{(PROVIDERS[a.provider]?.label || a.provider)} · {a.email}</option>)}
+          </select>
+          <div className="label">An</div>
+          <input placeholder="empfaenger@example.com" value={compose.to} onChange={(e) => set({ to: e.target.value })} />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div><div className="label">CC</div><input value={compose.cc} onChange={(e) => set({ cc: e.target.value })} /></div>
+            <div><div className="label">BCC</div><input value={compose.bcc} onChange={(e) => set({ bcc: e.target.value })} /></div>
+          </div>
+          <div className="label">KI-Anweisung (optional)</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input placeholder="z. B. Sage meinem Trainer ab für Freitag" value={compose.instruction} onChange={(e) => set({ instruction: e.target.value })} />
+            <button className="btn" onClick={aiDraft} disabled={compose.loading}>{compose.loading ? <span className="spin" /> : "Formulieren"}</button>
+          </div>
+          <div className="label">Betreff</div>
+          <input value={compose.subject} onChange={(e) => set({ subject: e.target.value })} />
+          <div className="label">Nachricht</div>
+          <textarea className="editor" value={compose.body} onChange={(e) => set({ body: e.target.value })} />
+          {compose.error && <div className="note binding-warn">{compose.error}</div>}
+        </div>
+        <div className="df">
+          {sendEnabled
+            ? <button className="btn btn-primary" onClick={sendNow} disabled={compose.sending}>{compose.sending ? <><span className="spin" /> Sende…</> : "Senden"}</button>
+            : <button className="btn" disabled title="Versand ist nicht aktiviert (ENABLE_SEND=false)">Senden (deaktiviert)</button>}
+          <button className="btn" onClick={() => setCompose(null)}>Abbrechen</button>
+        </div>
+      </div>
     </>
   );
 }
