@@ -1,0 +1,28 @@
+{
+  "name": "cockpit-outlook-live",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cockpit mit Live-Outlook-Synchronisierung (Microsoft Graph + Supabase Realtime)",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.68.0",
+    "@supabase/ssr": "^0.5.2",
+    "@supabase/supabase-js": "^2.45.4",
+    "next": "14.2.15",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "typescript": "^5.5.4"
+  },
+  "engines": { "node": ">=18.18.0" }
+}
