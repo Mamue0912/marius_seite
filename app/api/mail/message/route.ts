@@ -9,25 +9,47 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 45;
 
-// Sicheres HTML: nur lesbare Formatierung, KEINE Skripte, iframes, Event-Handler.
-// Bilder werden entfernt (Tracking-Pixel/Remote-Tracker), ohne den Text zu zerstören.
-function safeHtml(html: string): string {
+// Sicheres HTML für isolierte iframe-Darstellung. Inline-Styles UND
+// Tabellenlayout bleiben erhalten (sonst zerbricht das Original-Layout,
+// z. B. bei PayPal). Skripte/Formulare/Event-Handler werden entfernt.
+// Bilder nur, wenn ausdrücklich gewünscht (Tracking-Pixel sonst geblockt).
+function safeHtml(html: string, withImages: boolean): string {
   return sanitizeHtml(html, {
-    allowedTags: ["p", "br", "b", "strong", "i", "em", "u", "s", "a", "ul", "ol", "li", "blockquote", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "span", "div", "table", "thead", "tbody", "tr", "td", "th", "pre", "code"],
-    allowedAttributes: { a: ["href"] },
+    allowedTags: sanitizeHtml.defaults.allowedTags
+      .concat(["img", "span", "div", "table", "thead", "tbody", "tfoot", "tr", "td", "th", "center", "font", "u", "s", "hr", "h1", "h2"])
+      .filter((t) => !["script", "style", "iframe", "object", "embed", "form", "input", "button", "textarea", "link", "meta"].includes(t)),
+    allowedAttributes: {
+      "*": ["style", "align", "valign", "width", "height", "bgcolor", "color", "colspan", "rowspan", "cellpadding", "cellspacing", "border", "dir"],
+      a: ["href", "style", "target", "align"],
+      img: withImages ? ["src", "alt", "width", "height", "style"] : ["alt", "width", "height", "style"],
+      font: ["face", "size", "color"]
+    },
     allowedSchemes: ["http", "https", "mailto"],
+    allowedSchemesByTag: { img: withImages ? ["http", "https"] : [] },
+    // Gefährliche/positionierende Styles raus, Layout-Styles behalten.
+    allowedStyles: {
+      "*": {
+        "color": [/.*/], "background-color": [/.*/], "background": [/.*/],
+        "text-align": [/.*/], "font-size": [/.*/], "font-weight": [/.*/], "font-family": [/.*/], "font-style": [/.*/],
+        "width": [/.*/], "max-width": [/.*/], "height": [/.*/], "min-width": [/.*/],
+        "padding": [/.*/], "padding-top": [/.*/], "padding-bottom": [/.*/], "padding-left": [/.*/], "padding-right": [/.*/],
+        "margin": [/.*/], "margin-top": [/.*/], "margin-bottom": [/.*/], "margin-left": [/.*/], "margin-right": [/.*/],
+        "border": [/.*/], "border-radius": [/.*/], "border-top": [/.*/], "border-bottom": [/.*/], "border-collapse": [/.*/],
+        "line-height": [/.*/], "letter-spacing": [/.*/], "text-decoration": [/.*/], "vertical-align": [/.*/], "display": [/.*/]
+      }
+    },
     transformTags: {
       a: (tag, attribs) => ({ tagName: "a", attribs: { ...attribs, target: "_blank", rel: "noopener noreferrer nofollow" } })
-    },
-    // Bilder/Style/Script komplett raus.
-    exclusiveFilter: (f) => ["script", "style", "img", "iframe", "object", "embed", "link"].includes(f.tag)
+    }
   });
 }
 
 export async function GET(req: NextRequest) {
   const user = await requireUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const id = new URL(req.url).searchParams.get("id");
+  const url = new URL(req.url);
+  const id = url.searchParams.get("id");
+  const withImages = url.searchParams.get("images") === "1";
   if (!id) return NextResponse.json({ error: "bad_request" }, { status: 400 });
 
   const admin = supabaseAdmin();
@@ -52,18 +74,22 @@ export async function GET(req: NextRequest) {
 
   let text = "";
   let html: string | null = null;
+  let hasImages = false;
   if (account && uid) {
     try {
       const full = await fetchMessageFull(account as MailAccount, uid, msg.original_folder_name || "INBOX");
       text = full.text;
-      html = full.html ? safeHtml(full.html) : null;
+      if (full.html) {
+        hasImages = /<img[\s>]/i.test(full.html);
+        html = safeHtml(full.html, withImages);
+      }
     } catch (e) {
       console.error("fetchMessageFull:", (e as Error).message);
     }
   }
 
   return NextResponse.json({
-    id: msg.id, text, html, thread,
+    id: msg.id, text, html, thread, hasImages, withImages,
     account: account ? { email: (account as any).email, provider: (account as any).provider } : null
   });
 }

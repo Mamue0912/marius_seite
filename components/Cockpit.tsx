@@ -188,17 +188,36 @@ export default function Cockpit({
     } catch (e: any) { setDrawer((d: any) => ({ ...d, sending: false, error: e.message })); }
   }
 
-  async function openReader(m: Msg) {
-    setReading({ msg: m, loading: true });
-    // Optimistisch als gelesen markieren.
+  async function openReader(m: Msg, images = false) {
+    setReading((s: any) => ({ msg: m, loading: true, ...(s && s.msg?.id === m.id ? s : {}), loadingImages: images }));
+    if (!images) setReading({ msg: m, loading: true });
     if (!m.is_read) setMsgs((prev) => prev.map((x) => x.id === m.id ? { ...x, is_read: true } : x));
     try {
-      const r = await fetch(`/api/mail/message?id=${m.id}`);
+      const r = await fetch(`/api/mail/message?id=${m.id}${images ? "&images=1" : ""}`);
       const j = await r.json();
       setReading((s: any) => s && s.msg.id === m.id ? { ...s, loading: false, ...j } : s);
     } catch {
       setReading((s: any) => s ? { ...s, loading: false, error: true } : s);
     }
+  }
+
+  async function mailAction(m: Msg, action: string) {
+    // Optimistisch aus der Liste entfernen (bei move/delete) bzw. Status setzen.
+    const removes = ["delete", "archive", "spam"].includes(action);
+    const before = msgs;
+    if (removes) { setMsgs((prev) => prev.filter((x) => x.id !== m.id)); setReading(null); }
+    try {
+      const r = await fetch("/api/mail/action", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messageId: m.id, action }) });
+      if (!r.ok) throw new Error();
+    } catch {
+      if (removes) setMsgs(before); // Rollback bei IMAP-Fehler
+      alert("Aktion fehlgeschlagen – die Nachricht wurde auf dem Server nicht verschoben.");
+    }
+  }
+
+  async function setReplyFlag(m: Msg, needs: boolean) {
+    setMsgs((prev) => prev.map((x) => x.id === m.id ? { ...x, needs_reply: needs, action_status: needs ? "reply_required" : "no_action" } : x));
+    await fetch("/api/mail/categorize", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messageId: m.id, needs_reply: needs }) });
   }
 
   async function categorize(m: Msg, opts: { category?: string; hidden?: boolean; ruleScope?: "sender" | "domain" }) {
@@ -306,16 +325,32 @@ export default function Cockpit({
 
       <div className={"scrim" + (reading ? " open" : "")} onClick={() => setReading(null)} />
       <aside className={"drawer reader" + (reading ? " open" : "")}>
-        {reading && <Reader reading={reading} account={accById[reading.msg.mail_account_id]} onClose={() => setReading(null)} onReply={(opts: any) => { openDraft(reading.msg, opts); }} suggests={suggests[reading.msg.id]} ensure={ensureSuggestions} onCategorize={categorize} />}
+        {reading && <Reader reading={reading} account={accById[reading.msg.mail_account_id]} onClose={() => setReading(null)} onReply={(opts: any) => { openDraft(reading.msg, opts); }} suggests={suggests[reading.msg.id]} ensure={ensureSuggestions} onCategorize={categorize} onLoadImages={() => openReader(reading.msg, true)} onAction={mailAction} onSetReply={setReplyFlag} />}
       </aside>
     </>
   );
 }
 
-function Reader({ reading, account, onClose, onReply, suggests, ensure, onCategorize }: any) {
+function MailFrame({ html, hasImages, withImages, onLoadImages }: any) {
+  const ref = useRef<HTMLIFrameElement>(null);
+  const doc = `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;padding:0}body{padding:14px;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",Inter,sans-serif;font-size:14px;line-height:1.5;color:#1c1c1e;background:#fff;word-break:break-word;-webkit-text-size-adjust:100%}img{max-width:100%;height:auto}table{max-width:100%}a{color:#0a58ca}</style></head><body>${html}</body></html>`;
+  function onLoad() {
+    try { const d = ref.current?.contentDocument; if (d) ref.current!.style.height = Math.min((d.body?.scrollHeight || 400) + 28, 6000) + "px"; } catch {}
+  }
+  return (
+    <>
+      {hasImages && !withImages && <button className="btn small" style={{ marginBottom: 10 }} onClick={onLoadImages}>Bilder laden</button>}
+      <iframe ref={ref} className="rd-frame" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" srcDoc={doc} onLoad={onLoad} title="E-Mail-Inhalt" />
+    </>
+  );
+}
+
+function Reader({ reading, account, onClose, onReply, suggests, ensure, onCategorize, onLoadImages, onAction, onSetReply }: any) {
   const m = reading.msg;
   const isSent = m.folder_type === "sent";
-  const canReply = m.needs_reply && m.draft_status !== "gesendet" && !isSent;
+  // KI-Antwort nur bei echten persönlichen Antwortfällen – nicht bei Umfrage/Newsletter/Rechnung.
+  const isPersonal = (m.message_type === "personal_direct" || m.user_needs_reply === true);
+  const canReply = isPersonal && m.needs_reply && m.draft_status !== "gesendet" && !isSent;
   useEffect(() => { if (canReply) ensure(m); }, [m.id]); // eslint-disable-line
   return (
     <>
@@ -352,14 +387,14 @@ function Reader({ reading, account, onClose, onReply, suggests, ensure, onCatego
 
         <div className="rd-body">
           {reading.loading ? <div className="empty"><span className="spin" /><div style={{ marginTop: 12 }}>Nachricht wird geladen…</div></div>
-            : reading.html ? <div className="rd-html" dangerouslySetInnerHTML={{ __html: reading.html }} />
+            : reading.html ? <MailFrame html={reading.html} hasImages={reading.hasImages} withImages={reading.withImages} onLoadImages={reading.onLoadImages} />
             : reading.text ? <pre className="rd-text">{reading.text}</pre>
             : <div className="empty">Kein Inhalt geladen. {reading.error ? "(Fehler beim Abruf)" : ""}</div>}
         </div>
 
-        {canReply && (
+        {canReply ? (
           <div className="rd-actions">
-            <div className="label">Antworten</div>
+            <div className="label">KI-Antwortvorschläge</div>
             <div className="suggests">
               {(suggests && suggests.length ? suggests : []).map((s: any, i: number) => (
                 <button key={i} className={"sug" + (s.binding ? " binding" : "")} title={s.explanation} onClick={() => onReply({ intent: s.intent, intentLabel: s.label })}>{s.label}</button>
@@ -368,11 +403,27 @@ function Reader({ reading, account, onClose, onReply, suggests, ensure, onCatego
               <button className="sug custom" onClick={() => onReply({ custom: true })}>Eigene Antwort</button>
             </div>
           </div>
+        ) : !isSent && (
+          <div className="rd-actions">
+            <div className="note" style={{ marginTop: 0 }}>
+              {m.message_type === "survey_feedback" ? "Automatisierte Feedback-/Umfragemail – keine persönliche Antwort nötig."
+                : m.message_type === "newsletter_marketing" || m.is_bulk ? "Massen-/Newslettermail – keine persönliche Antwort nötig."
+                : m.message_type === "transactional" ? "Transaktions-/Belegmail – nur zur Information."
+                : "Keine persönliche Antwort erwartet."}
+            </div>
+            <div className="chips" style={{ marginTop: 10 }}>
+              <button className="chip" onClick={() => onSetReply(m, true)}>Doch Antwort nötig</button>
+              <button className="chip" onClick={() => onCategorize(m, { hidden: true, ruleScope: "sender" })}>Newsletter ausblenden</button>
+            </div>
+          </div>
         )}
       </div>
       <div className="df">
         {canReply && <button className="btn btn-primary" onClick={() => onReply({ custom: true })}>Antworten</button>}
-        <button className="btn" onClick={() => onCategorize(m, { hidden: true, ruleScope: "sender" })} title="Diesen Absender künftig ausblenden">Newsletter ausblenden</button>
+        {!isSent && m.needs_reply && <button className="btn" onClick={() => onSetReply(m, false)} title="Als erledigt/keine Antwort">Keine Antwort nötig</button>}
+        <button className="btn" onClick={() => onAction(m, "archive")}>Archivieren</button>
+        <button className="btn" onClick={() => onAction(m, "spam")}>Spam</button>
+        <button className="btn btn-danger" onClick={() => onAction(m, "delete")}>Löschen</button>
         <button className="btn" onClick={onClose}>Schließen</button>
       </div>
     </>
@@ -508,10 +559,8 @@ function ConnectForm({ accounts, onClose }: { accounts: Account[]; onClose: () =
   );
 }
 
-function MailCard({ m, account, suggests, ensure, onReply, onCategorize, onOpen, selected }: any) {
-  const canReply = m.needs_reply && m.draft_status !== "gesendet" && !m.hidden && m.folder_type !== "sent" && m.category !== "warten";
+function MailCard({ m, account, onCategorize, onOpen, selected }: any) {
   const [menu, setMenu] = useState(false);
-  useEffect(() => { if (canReply) ensure(m); }, [m.id]); // eslint-disable-line
   const providerLabel = account ? (PROVIDERS[account.provider]?.label || account.provider) : (m.account_display_name || "");
   const isSent = m.folder_type === "sent";
   return (
@@ -552,16 +601,6 @@ function MailCard({ m, account, suggests, ensure, onReply, onCategorize, onOpen,
         </div>
       )}
 
-      {canReply && (
-        <div className="suggests">
-          {(suggests && suggests.length ? suggests : []).map((s: any, i: number) => (
-            <button key={i} className={"sug" + (s.binding ? " binding" : "")} title={s.explanation}
-              onClick={() => onReply(m, { intent: s.intent, intentLabel: s.label })}>{s.label}</button>
-          ))}
-          {(!suggests || !suggests.length) && <span className="sug" style={{ pointerEvents: "none" }}><span className="spin" /></span>}
-          <button className="sug custom" onClick={() => onReply(m, { custom: true })}>Eigene Antwort</button>
-        </div>
-      )}
       {m.draft_status === "gesendet" && m.reply_sent_at && (
         <div className="note" style={{ marginTop: 10 }}>Antwort gesendet am {new Date(m.reply_sent_at).toLocaleString("de-DE")}.</div>
       )}

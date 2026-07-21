@@ -10,15 +10,22 @@ export const dynamic = "force-dynamic";
 export async function POST(req: NextRequest) {
   const user = await requireUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const { messageId, category, hidden, ruleScope } = await req.json();
+  const { messageId, category, hidden, ruleScope, needs_reply } = await req.json();
   const admin = supabaseAdmin();
 
   const { data: msg } = await admin.from("messages").select("*").eq("id", messageId).eq("user_id", user.id).maybeSingle();
   if (!msg) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
-  const update: any = { classification_source: "user", classification_confidence: 1 };
+  // Nutzer-Override hat höchste Priorität und bleibt bei Re-Sync erhalten.
+  const update: any = { classification_source: "user_override", classification_confidence: 1, override_updated_at: new Date().toISOString() };
   if (category != null) { update.semantic_category = category; update.user_category_override = category; }
   if (hidden != null) update.hidden = !!hidden;
+  if (needs_reply != null) {
+    update.needs_reply = !!needs_reply;
+    update.user_needs_reply = !!needs_reply;
+    update.action_status = needs_reply ? "reply_required" : "no_action";
+    update.user_action_status = needs_reply ? "reply_required" : "no_action";
+  }
   await admin.from("messages").update(update).eq("id", msg.id);
 
   // Optionale Dauerregel (Absender/Domain immer diese Kategorie / ausblenden).

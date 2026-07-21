@@ -5,6 +5,20 @@ import { MailAccount, accountPassword } from "./mailAccounts";
 import { folderType, FolderType } from "./folders";
 import { loadRules, applyRules } from "./rules";
 import { classifyEmail } from "./anthropic";
+import { detectType } from "./messageType";
+
+const HEADER_FIELDS = ["list-unsubscribe", "list-id", "precedence", "auto-submitted", "feedback-id", "x-feedback-id", "reply-to", "return-path"];
+
+function parseHeaders(raw: any): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!raw) return out;
+  const text = Buffer.isBuffer(raw) ? raw.toString("utf8") : String(raw);
+  for (const line of text.split(/\r?\n/)) {
+    const i = line.indexOf(":");
+    if (i > 0) out[line.slice(0, i).trim().toLowerCase()] = line.slice(i + 1).trim();
+  }
+  return out;
+}
 
 const SEED_COUNT = 40;       // Erstsync Posteingang
 const SENT_SEED = 25;        // Gesendet je Lauf (idempotent per Message-ID)
@@ -58,7 +72,7 @@ export async function syncInbox(acc: MailAccount): Promise<number> {
       if (exists > 0) {
         const range = lastUid > 0 ? `${lastUid + 1}:*` : `${Math.max(1, exists - SEED_COUNT + 1)}:*`;
         const opts = lastUid > 0 ? { uid: true as const } : undefined;
-        for await (const msg of client.fetch(range, { uid: true, envelope: true, flags: true, internalDate: true, bodyStructure: true }, opts)) {
+        for await (const msg of client.fetch(range, { uid: true, envelope: true, flags: true, internalDate: true, bodyStructure: true, headers: HEADER_FIELDS }, opts)) {
           if (lastUid > 0 && Number(msg.uid) <= lastUid) continue;
           await upsertMessage(acc, msg, "inbox", "INBOX");
           processed++;
@@ -83,7 +97,7 @@ export async function syncInbox(acc: MailAccount): Promise<number> {
           const sexists = Number(sbox?.exists || 0);
           if (sexists > 0) {
             const start = Math.max(1, sexists - SENT_SEED + 1);
-            for await (const msg of client.fetch(`${start}:*`, { uid: true, envelope: true, flags: true, internalDate: true, bodyStructure: true })) {
+            for await (const msg of client.fetch(`${start}:*`, { uid: true, envelope: true, flags: true, internalDate: true, bodyStructure: true, headers: HEADER_FIELDS })) {
               await upsertMessage(acc, msg, "sent", sent.path);
               processed++;
             }
@@ -142,6 +156,16 @@ async function upsertMessage(acc: MailAccount, msg: any, ftype: FolderType, mail
   };
   const c = classify(base as any);
 
+  // Header-basierte Typ-/Antwortbewertung (Massenmail/Umfrage erkennen).
+  const headers = parseHeaders(msg.headers);
+  const t = detectType({ headers, from_address: fromAddr, subject: env.subject, folder: ftype });
+  // Bucket-Kategorie aus dem Typ ableiten.
+  let bucket = "info";
+  if (ftype === "sent") bucket = "warten";
+  else if (t.message_type === "newsletter_marketing" || t.message_type === "survey_feedback" || t.message_type === "automated_bulk") bucket = "newsletter";
+  else if (t.needs_reply) bucket = t.priority === "hoch" || t.priority === "dringend" ? "sofort" : "heute";
+  else bucket = "info";
+
   const row: any = {
     user_id: acc.user_id,
     account_id: null,
@@ -169,10 +193,15 @@ async function upsertMessage(acc: MailAccount, msg: any, ftype: FolderType, mail
     is_flagged: isFlagged,
     has_attachments: hasAttachments(msg.bodyStructure),
     importance: null,
-    needs_reply: ftype === "sent" ? false : c.needs_reply,
+    needs_reply: t.needs_reply,
+    message_type: t.message_type,
+    is_bulk: t.is_bulk,
+    has_list_unsub: t.has_list_unsub,
+    action_status: t.action_status,
+    priority: t.priority,
     deadline_at: c.deadline_at,
     detected_task: c.detected_task,
-    category: c.category,
+    category: bucket,
     status: c.status,
     web_link: `imap-uid:${msg.uid}`,
     last_modified_at: null,
@@ -224,10 +253,10 @@ async function classifyNew(acc: MailAccount): Promise<void> {
         from_name: m.from_name, from_address: m.from_address, to: m.to_recipients,
         subject: m.subject, body: m.preview, accountLabel: (acc as any).display_name || acc.email
       });
+      // Nur die INHALTS-Kategorie von der KI; Antwortbedarf/Priorität bleiben
+      // header-basiert (verhindert, dass Umfragen als antwortpflichtig gelten).
       await admin.from("messages").update({
         semantic_category: res.category,
-        action_status: res.action_status,
-        priority: res.priority,
         classification_confidence: res.confidence,
         classification_source: "ai"
       }).eq("id", m.id);
