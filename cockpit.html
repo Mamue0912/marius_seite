@@ -726,6 +726,11 @@
             out.push(mapGEvent(ev, cals[i].id));
           });
         });
+        var seen = {};
+        out = out.filter(function (e) {
+          var k = e.title.toLowerCase() + "|" + e.day + "|" + e.time + "|" + e.allDay;
+          if (seen[k]) return false; seen[k] = true; return true;
+        });
         state.events = out;
         state.cal.status = "live";
         state.cal.error = null;
