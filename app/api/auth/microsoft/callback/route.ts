@@ -12,9 +12,11 @@ import { FOLDERS } from "@/lib/env";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function home(err?: string): URL {
+function home(err?: string, reason?: string): URL {
   const u = new URL("/", process.env.APP_BASE_URL);
   if (err) u.searchParams.set("outlook", err);
+  // Zum Debuggen: den echten Grund in die URL schreiben (keine Secrets).
+  if (reason) u.searchParams.set("reason", reason.slice(0, 300));
   return u;
 }
 
@@ -23,7 +25,7 @@ export async function GET(req: NextRequest) {
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
   const oauthErr = url.searchParams.get("error");
-  if (oauthErr) return NextResponse.redirect(home("error"));
+  if (oauthErr) return NextResponse.redirect(home("error", url.searchParams.get("error_description") || oauthErr));
   if (!code || !state) return NextResponse.redirect(home("error"));
 
   const raw = cookies().get("ms_oauth")?.value;
@@ -79,7 +81,8 @@ export async function GET(req: NextRequest) {
     }
     return NextResponse.redirect(home("connected"));
   } catch (e) {
-    console.error("OAuth callback failed:", (e as Error).message);
-    return NextResponse.redirect(home("error"));
+    const msg = (e as Error).message || "unknown";
+    console.error("OAuth callback failed:", msg);
+    return NextResponse.redirect(home("error", msg));
   }
 }
