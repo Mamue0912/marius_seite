@@ -34,6 +34,25 @@ export async function fetchMessageText(acc: MailAccount, uid: number, mailbox = 
   }
 }
 
+// Lädt Text UND HTML einer Nachricht (für die Leseansicht).
+export async function fetchMessageFull(acc: MailAccount, uid: number, mailbox = "INBOX"): Promise<{ text: string; html: string | null }> {
+  const c = client(acc);
+  await c.connect();
+  try {
+    const lock = await c.getMailboxLock(mailbox);
+    try {
+      const msg: any = await c.fetchOne(String(uid), { source: true }, { uid: true });
+      if (!msg?.source) return { text: "", html: null };
+      const parsed = await simpleParser(msg.source);
+      return { text: (parsed.text || "").toString(), html: parsed.html ? String(parsed.html) : null };
+    } finally {
+      lock.release();
+    }
+  } finally {
+    await c.logout().catch(() => {});
+  }
+}
+
 // Baut den Thread-Kontext für die KI: aktuelle Nachricht (Volltext per IMAP) +
 // vorherige Nachrichten derselben Unterhaltung aus der Datenbank (Kurzform).
 export async function buildThreadContext(acc: MailAccount, msgRow: any): Promise<ThreadMessage[]> {

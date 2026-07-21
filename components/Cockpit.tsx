@@ -35,6 +35,7 @@ export default function Cockpit({
   const [status, setStatus] = useState<any>(null);
   const [showConnect, setShowConnect] = useState(false);
   const [compose, setCompose] = useState<any>(null);
+  const [reading, setReading] = useState<any>(null);
   const [filter, setFilter] = useState({ account: "all", folder: "all", cat: "all", unread: false, needs: false, q: "" });
   const [suggests, setSuggests] = useState<Record<string, any[]>>({});
   const accById: Record<string, Account> = Object.fromEntries(accounts.map((a) => [a.id, a]));
@@ -187,6 +188,19 @@ export default function Cockpit({
     } catch (e: any) { setDrawer((d: any) => ({ ...d, sending: false, error: e.message })); }
   }
 
+  async function openReader(m: Msg) {
+    setReading({ msg: m, loading: true });
+    // Optimistisch als gelesen markieren.
+    if (!m.is_read) setMsgs((prev) => prev.map((x) => x.id === m.id ? { ...x, is_read: true } : x));
+    try {
+      const r = await fetch(`/api/mail/message?id=${m.id}`);
+      const j = await r.json();
+      setReading((s: any) => s && s.msg.id === m.id ? { ...s, loading: false, ...j } : s);
+    } catch {
+      setReading((s: any) => s ? { ...s, loading: false, error: true } : s);
+    }
+  }
+
   async function categorize(m: Msg, opts: { category?: string; hidden?: boolean; ruleScope?: "sender" | "domain" }) {
     // Optimistisch aktualisieren.
     setMsgs((prev) => prev.map((x) => x.id === m.id ? { ...x, semantic_category: opts.category ?? x.semantic_category, hidden: opts.hidden ?? x.hidden, classification_source: "user" } : x));
@@ -206,8 +220,7 @@ export default function Cockpit({
     <>
       <div className="topbar">
         <div className="brand">
-          <span className="mark" />
-          <h1>Cockpit</h1>
+          <h1>E-Mails</h1>
         </div>
         <div className="spacer" />
         {statusView()}
@@ -260,7 +273,7 @@ export default function Cockpit({
             <div className="bucket" key={bk.k}>
               <div className="bh"><span className="bd" style={{ background: bk.c }} /><span className="bt">{bk.t}</span><span className="bc">{list.length}</span></div>
               {list.map((m) => (
-                <MailCard key={m.id} m={m} account={accById[m.mail_account_id]} suggests={suggests[m.id]} ensure={ensureSuggestions} onReply={openDraft} onCategorize={categorize} />
+                <MailCard key={m.id} m={m} account={accById[m.mail_account_id]} suggests={suggests[m.id]} ensure={ensureSuggestions} onReply={openDraft} onCategorize={categorize} onOpen={openReader} selected={reading?.msg?.id === m.id} />
               ))}
             </div>
           );
@@ -290,6 +303,78 @@ export default function Cockpit({
       </aside>
 
       {compose && <ComposeModal compose={compose} setCompose={setCompose} accounts={accounts} sendEnabled={sendEnabled} />}
+
+      <div className={"scrim" + (reading ? " open" : "")} onClick={() => setReading(null)} />
+      <aside className={"drawer reader" + (reading ? " open" : "")}>
+        {reading && <Reader reading={reading} account={accById[reading.msg.mail_account_id]} onClose={() => setReading(null)} onReply={(opts: any) => { openDraft(reading.msg, opts); }} suggests={suggests[reading.msg.id]} ensure={ensureSuggestions} onCategorize={categorize} />}
+      </aside>
+    </>
+  );
+}
+
+function Reader({ reading, account, onClose, onReply, suggests, ensure, onCategorize }: any) {
+  const m = reading.msg;
+  const isSent = m.folder_type === "sent";
+  const canReply = m.needs_reply && m.draft_status !== "gesendet" && !isSent;
+  useEffect(() => { if (canReply) ensure(m); }, [m.id]); // eslint-disable-line
+  return (
+    <>
+      <div className="dh">
+        <div style={{ minWidth: 0 }}>
+          <h3 style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{m.subject || "(kein Betreff)"}</h3>
+          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>
+            {account ? `${PROVIDERS[account.provider]?.label || account.provider} · ${account.email}` : m.account_display_name}
+          </div>
+        </div>
+        <button className="x" onClick={onClose}>✕</button>
+      </div>
+      <div className="db">
+        <div className="rd-head">
+          <div className="rd-from">{isSent ? "Ich" : (m.from_name || m.from_address)}</div>
+          <div className="rd-addr">{isSent ? `An: ${m.to_recipients || ""}` : m.from_address}</div>
+          <div className="meta-row" style={{ marginTop: 10 }}>
+            {!isSent && <><span className="k">An</span><span className="v">{m.to_recipients || ""}</span></>}
+            {m.cc_addresses && <><span className="k">CC</span><span className="v">{m.cc_addresses}</span></>}
+            <span className="k">Datum</span><span className="v">{m.received_at ? new Date(m.received_at).toLocaleString("de-DE") : ""}</span>
+            {m.semantic_category && <><span className="k">Kategorie</span><span className="v">{m.semantic_category}</span></>}
+            {m.action_status && <><span className="k">Status</span><span className="v">{m.action_status}</span></>}
+          </div>
+        </div>
+
+        {reading.thread && reading.thread.length > 0 && (
+          <div className="rd-thread">
+            <div className="label" style={{ marginTop: 0 }}>Früher im Thread ({reading.thread.length})</div>
+            {reading.thread.map((t: any) => (
+              <div className="rd-tmsg" key={t.id}><b>{t.from_name || t.from_address}</b> · {t.received_at ? new Date(t.received_at).toLocaleDateString("de-DE") : ""}<div className="rd-tprev">{t.preview || ""}</div></div>
+            ))}
+          </div>
+        )}
+
+        <div className="rd-body">
+          {reading.loading ? <div className="empty"><span className="spin" /><div style={{ marginTop: 12 }}>Nachricht wird geladen…</div></div>
+            : reading.html ? <div className="rd-html" dangerouslySetInnerHTML={{ __html: reading.html }} />
+            : reading.text ? <pre className="rd-text">{reading.text}</pre>
+            : <div className="empty">Kein Inhalt geladen. {reading.error ? "(Fehler beim Abruf)" : ""}</div>}
+        </div>
+
+        {canReply && (
+          <div className="rd-actions">
+            <div className="label">Antworten</div>
+            <div className="suggests">
+              {(suggests && suggests.length ? suggests : []).map((s: any, i: number) => (
+                <button key={i} className={"sug" + (s.binding ? " binding" : "")} title={s.explanation} onClick={() => onReply({ intent: s.intent, intentLabel: s.label })}>{s.label}</button>
+              ))}
+              {(!suggests || !suggests.length) && <span className="sug" style={{ pointerEvents: "none" }}><span className="spin" /></span>}
+              <button className="sug custom" onClick={() => onReply({ custom: true })}>Eigene Antwort</button>
+            </div>
+          </div>
+        )}
+      </div>
+      <div className="df">
+        {canReply && <button className="btn btn-primary" onClick={() => onReply({ custom: true })}>Antworten</button>}
+        <button className="btn" onClick={() => onCategorize(m, { hidden: true, ruleScope: "sender" })} title="Diesen Absender künftig ausblenden">Newsletter ausblenden</button>
+        <button className="btn" onClick={onClose}>Schließen</button>
+      </div>
     </>
   );
 }
@@ -423,14 +508,14 @@ function ConnectForm({ accounts, onClose }: { accounts: Account[]; onClose: () =
   );
 }
 
-function MailCard({ m, account, suggests, ensure, onReply, onCategorize }: any) {
+function MailCard({ m, account, suggests, ensure, onReply, onCategorize, onOpen, selected }: any) {
   const canReply = m.needs_reply && m.draft_status !== "gesendet" && !m.hidden && m.folder_type !== "sent" && m.category !== "warten";
   const [menu, setMenu] = useState(false);
   useEffect(() => { if (canReply) ensure(m); }, [m.id]); // eslint-disable-line
   const providerLabel = account ? (PROVIDERS[account.provider]?.label || account.provider) : (m.account_display_name || "");
   const isSent = m.folder_type === "sent";
   return (
-    <div className={"mail" + (!m.is_read && !isSent ? " unread" : "")}>
+    <div className={"mail" + (!m.is_read && !isSent ? " unread" : "") + (selected ? " selected" : "")}>
       <div className="m-acct">
         <span className="acct-pill" title={account?.email || ""}>
           {!m.is_read && !isSent && <span className="unread-dot" />}
@@ -448,8 +533,10 @@ function MailCard({ m, account, suggests, ensure, onReply, onCategorize }: any) 
           : m.needs_reply && !isSent ? <span className="badge reply">Antwort nötig</span> : null}
         <button className="m-menu" onClick={() => setMenu((v) => !v)} title="Kategorie ändern">⋯</button>
       </div>
-      <div className="m-subj">{m.subject || "(kein Betreff)"}</div>
+      <div className="m-subj" style={{ cursor: "pointer" }} onClick={() => onOpen && onOpen(m)}>{m.subject || "(kein Betreff)"}</div>
       {isSent && <div className="m-sum">Gesendet über {account?.email || ""}</div>}
+      {!isSent && m.preview && <div className="m-sum">{m.preview}</div>}
+      {onOpen && <button className="m-open" onClick={() => onOpen(m)}>Öffnen &amp; lesen →</button>}
       {menu && (
         <div className="catmenu">
           <div className="label" style={{ margin: "0 0 6px" }}>Kategorie zuweisen</div>
