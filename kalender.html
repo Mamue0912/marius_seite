@@ -1,0 +1,660 @@
+<title>Kalender</title>
+<style>
+  :root {
+    --bg: #f3f6f3;
+    --surface: #ffffff;
+    --surface-2: #f7faf8;
+    --ink: #16211c;
+    --muted: #5c6b63;
+    --faint: #84968c;
+    --line: #dde4de;
+    --accent: #157a58;
+    --accent-ink: #0d5a40;
+    --accent-soft: #e4f0ea;
+    --today: #b8860011;
+    --danger: #b3452f;
+    --danger-soft: #f6e6e2;
+    --warn: #8a6d1f;
+    --warn-soft: #f5eed6;
+    --shadow: 0 1px 2px rgba(20,40,30,.06), 0 8px 24px rgba(20,40,30,.05);
+    --radius: 14px;
+    --maxw: 780px;
+  }
+  :root { color-scheme: light; }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1512;
+      --surface: #151d19;
+      --surface-2: #10171400;
+      --surface-2: #121a16;
+      --ink: #e9f1ec;
+      --muted: #93a49b;
+      --faint: #6d7d74;
+      --line: #26312b;
+      --accent: #4fbc8f;
+      --accent-ink: #6fd0a6;
+      --accent-soft: #17332766;
+      --today: #d9a94411;
+      --danger: #e88a72;
+      --danger-soft: #33201b;
+      --warn: #d8bb6a;
+      --warn-soft: #2c2717;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.35);
+    }
+    :root { color-scheme: dark; }
+  }
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --bg: #f3f6f3; --surface: #ffffff; --surface-2: #f7faf8; --ink: #16211c;
+    --muted: #5c6b63; --faint: #84968c; --line: #dde4de; --accent: #157a58;
+    --accent-ink: #0d5a40; --accent-soft: #e4f0ea; --today: #b8860011;
+    --danger: #b3452f; --danger-soft: #f6e6e2; --warn: #8a6d1f; --warn-soft: #f5eed6;
+    --shadow: 0 1px 2px rgba(20,40,30,.06), 0 8px 24px rgba(20,40,30,.05);
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0e1512; --surface: #151d19; --surface-2: #121a16; --ink: #e9f1ec;
+    --muted: #93a49b; --faint: #6d7d74; --line: #26312b; --accent: #4fbc8f;
+    --accent-ink: #6fd0a6; --accent-soft: #17332766; --today: #d9a94411;
+    --danger: #e88a72; --danger-soft: #33201b; --warn: #d8bb6a; --warn-soft: #2c2717;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.35);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 28px 20px 80px; }
+
+  header.top { display: flex; flex-direction: column; gap: 18px; margin-bottom: 22px; }
+  .titlerow { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  h1 {
+    font-size: clamp(1.6rem, 4vw, 2.15rem);
+    font-weight: 680;
+    letter-spacing: -0.02em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .subtitle { color: var(--muted); font-size: .92rem; margin-top: 4px; }
+
+  .status {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: .78rem; font-weight: 600; letter-spacing: .01em;
+    padding: 6px 11px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--surface);
+    white-space: nowrap;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
+  .status.ok .dot { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .status.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); background: var(--warn-soft); }
+  .status.warn .dot { background: var(--warn); }
+  .status.err { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--line)); background: var(--danger-soft); }
+  .status.err .dot { background: var(--danger); }
+
+  .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .search {
+    flex: 1 1 220px; display: flex; align-items: center; gap: 8px;
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 10px; padding: 8px 12px; min-width: 0;
+    box-shadow: var(--shadow);
+  }
+  .search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .search svg { flex: none; color: var(--muted); }
+  .search input {
+    border: 0; outline: 0; background: transparent; color: var(--ink);
+    font: inherit; width: 100%; min-width: 0;
+  }
+  .search input::placeholder { color: var(--faint); }
+
+  .cals { display: flex; gap: 8px; flex-wrap: wrap; }
+  .cal-chip {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: .82rem; font-weight: 550;
+    padding: 6px 12px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--surface); color: var(--muted);
+    user-select: none; transition: background .12s, color .12s, border-color .12s;
+  }
+  .cal-chip .cdot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  .cal-chip[aria-pressed="true"] { color: var(--ink); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); background: var(--surface-2); }
+  .cal-chip[aria-pressed="false"] { opacity: .55; }
+  .cal-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* Agenda */
+  .agenda { display: flex; flex-direction: column; gap: 2px; }
+  .daygroup { display: grid; grid-template-columns: 68px 1fr; gap: 16px; padding: 16px 0; border-top: 1px solid var(--line); }
+  .daygroup:first-child { border-top: 0; }
+  .daycol { position: sticky; top: 8px; align-self: start; text-align: center; }
+  .dow { font-size: .72rem; font-weight: 650; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+  .dnum { font-size: 1.7rem; font-weight: 680; line-height: 1.05; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+  .dmon { font-size: .72rem; color: var(--faint); font-weight: 550; }
+  .daygroup.is-today .dnum { color: var(--accent); }
+  .daygroup.is-today .daycol::after {
+    content: "heute"; display: block; margin-top: 3px;
+    font-size: .62rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  .events { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .event {
+    display: flex; gap: 12px; align-items: flex-start;
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 12px 14px;
+    box-shadow: var(--shadow); min-width: 0;
+  }
+  .event .rail { width: 4px; border-radius: 4px; align-self: stretch; flex: none; background: var(--accent); }
+  .event .body { min-width: 0; flex: 1; }
+  .event .etitle { font-weight: 600; font-size: .98rem; letter-spacing: -.01em; overflow-wrap: anywhere; }
+  .event .meta { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 3px; color: var(--muted); font-size: .84rem; }
+  .event .meta .mi { display: inline-flex; align-items: center; gap: 5px; }
+  .event .meta svg { color: var(--faint); flex: none; }
+  .etime { font-variant-numeric: tabular-nums; }
+  .allday-badge {
+    font-size: .68rem; font-weight: 650; text-transform: uppercase; letter-spacing: .05em;
+    color: var(--accent-ink); background: var(--accent-soft);
+    padding: 2px 7px; border-radius: 6px; align-self: center; flex: none;
+  }
+
+  /* States */
+  .panel {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--radius); box-shadow: var(--shadow);
+    padding: 26px 22px; text-align: center;
+  }
+  .panel.err { border-color: color-mix(in srgb, var(--danger) 35%, var(--line)); }
+  .panel h2 { margin: 0 0 6px; font-size: 1.05rem; font-weight: 640; }
+  .panel p { margin: 0 auto; max-width: 46ch; color: var(--muted); font-size: .92rem; }
+  .panel .icon { font-size: 1.7rem; margin-bottom: 8px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 7px; margin-top: 16px;
+    font: inherit; font-weight: 600; font-size: .9rem; cursor: pointer;
+    padding: 9px 16px; border-radius: 10px;
+    border: 1px solid var(--accent); background: var(--accent); color: #fff;
+  }
+  .btn:hover { filter: brightness(1.05); }
+  .btn.ghost { background: transparent; color: var(--accent); }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .skeleton { display: flex; flex-direction: column; gap: 12px; }
+  .sk { height: 62px; border-radius: var(--radius); background:
+    linear-gradient(90deg, var(--surface) 0%, var(--surface-2) 50%, var(--surface) 100%);
+    background-size: 200% 100%; border: 1px solid var(--line); animation: sh 1.4s ease-in-out infinite; }
+  @keyframes sh { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+  @media (prefers-reduced-motion: reduce) { .sk { animation: none; } }
+
+  .footnote { margin-top: 26px; color: var(--faint); font-size: .78rem; text-align: center; }
+  a { color: var(--accent-ink); }
+  .hidden { display: none !important; }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="titlerow">
+      <div>
+        <h1>Kalender</h1>
+        <div class="subtitle" id="subtitle">Deine kommenden Termine</div>
+      </div>
+      <span class="status" id="status"><span class="dot"></span><span id="statusText">Verbinde…</span></span>
+    </div>
+    <div class="controls" id="controls">
+      <label class="search">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+        <input id="searchInput" type="search" placeholder="Termine durchsuchen…" autocomplete="off" aria-label="Termine durchsuchen">
+      </label>
+      <div class="cals" id="cals"></div>
+    </div>
+  </header>
+
+  <main id="main">
+    <div class="skeleton" id="skeleton">
+      <div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div>
+    </div>
+  </main>
+
+  <div class="footnote" id="footnote"></div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var main = document.getElementById("main");
+  var statusEl = document.getElementById("status");
+  var statusText = document.getElementById("statusText");
+  var calsEl = document.getElementById("cals");
+  var controls = document.getElementById("controls");
+  var searchInput = document.getElementById("searchInput");
+  var subtitle = document.getElementById("subtitle");
+  var footnote = document.getElementById("footnote");
+
+  var SERVER = "Google Calendar";
+  var PALETTE = ["#157a58", "#3b6ea5", "#b5711f", "#8a4fb0", "#b3452f", "#0f8a8a", "#7a7d1f"];
+
+  var state = {
+    calendars: [],        // {id, summary, color, enabled}
+    eventsByCal: {},      // calId -> [events]
+    unsubs: {},           // calId -> unsubscribe fn
+    errorsByCal: {},      // calId -> McpError
+    filter: "",
+    loadedOnce: {}        // calId -> bool
+  };
+
+  // ---------- helpers ----------
+  function setStatus(kind, text) {
+    statusEl.className = "status " + kind;
+    statusText.textContent = text;
+  }
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  var DOW = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
+  var MON = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
+
+  function isAllDay(ev) { return !!(ev.start && ev.start.date && !ev.start.dateTime); }
+
+  // returns Date for the start (local); for all-day, a local-midnight Date on that day
+  function startDate(ev) {
+    if (isAllDay(ev)) {
+      var d = String(ev.start.date).slice(0, 10).split("-");
+      return new Date(Number(d[0]), Number(d[1]) - 1, Number(d[2]));
+    }
+    return new Date(ev.start.dateTime);
+  }
+  function endDate(ev) {
+    if (!ev.end) return null;
+    if (isAllDay(ev)) {
+      var d = String(ev.end.date).slice(0, 10).split("-");
+      return new Date(Number(d[0]), Number(d[1]) - 1, Number(d[2]));
+    }
+    return new Date(ev.end.dateTime);
+  }
+  function dayKey(dt) {
+    return dt.getFullYear() + "-" + String(dt.getMonth() + 1).padStart(2, "0") + "-" + String(dt.getDate()).padStart(2, "0");
+  }
+  function fmtTime(dt) {
+    return dt.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+  }
+
+  function calColor(id) {
+    var c = state.calendars.filter(function (x) { return x.id === id; })[0];
+    return c ? c.color : "var(--accent)";
+  }
+
+  // ---------- MCP error mapping ----------
+  function describeError(code) {
+    switch (code) {
+      case "needs_reauth":
+        return { title: "Google Kalender neu verbinden", body: "Die Anmeldung ist abgelaufen. Verbinde Google Kalender erneut unter claude.ai → Einstellungen → Connectors.", retry: false };
+      case "server_not_connected":
+        return { title: "Google Kalender nicht verbunden", body: "Füge Google Kalender unter claude.ai → Einstellungen → Connectors hinzu, damit deine Termine hier erscheinen.", retry: false };
+      case "selection_required":
+        return { title: "Kalender auswählen", body: "Du hast mehrere Google-Kalender-Verbindungen. Wähle im Hinweis von claude.ai eine aus und lade neu.", retry: true };
+      case "blocked_by_policy":
+        return { title: "Durch Richtlinie blockiert", body: "Deine Organisation erlaubt den Zugriff auf diesen Kalender hier nicht.", retry: false };
+      case "approval_required":
+        return { title: "Freigabe nötig", body: "Für diesen Zugriff ist eine Einzelfreigabe erforderlich, die in Artefakten noch nicht unterstützt wird.", retry: false };
+      case "server_unavailable":
+        return { title: "Kalender vorübergehend nicht erreichbar", body: "Der Dienst antwortet gerade nicht. Versuch es gleich noch einmal.", retry: true };
+      case "not_granted":
+      case "capability_disabled":
+      case "capability_removed":
+        return { title: "Kein Kalender-Zugriff in dieser Ansicht", body: "Diese Ansicht wurde ohne Connector-Zugriff geladen. Öffne das Artefakt erneut in claude.ai.", retry: false };
+      default:
+        return { title: "Kalender konnte nicht geladen werden", body: "Beim Abruf ist ein Fehler aufgetreten. Versuch es später erneut.", retry: true };
+    }
+  }
+
+  function panel(kind, title, body, buttonLabel, onClick) {
+    var d = document.createElement("div");
+    d.className = "panel " + (kind || "");
+    var icon = kind === "err" ? "⚠️" : "📅";
+    d.innerHTML = '<div class="icon">' + icon + '</div><h2>' + esc(title) + '</h2><p>' + esc(body) + '</p>';
+    if (buttonLabel) {
+      var b = document.createElement("button");
+      b.className = "btn";
+      b.textContent = buttonLabel;
+      b.addEventListener("click", onClick);
+      d.appendChild(b);
+    }
+    return d;
+  }
+
+  // ---------- rendering ----------
+  function allEvents() {
+    var out = [];
+    state.calendars.forEach(function (c) {
+      if (!c.enabled) return;
+      (state.eventsByCal[c.id] || []).forEach(function (ev) {
+        out.push({ ev: ev, calId: c.id });
+      });
+    });
+    return out;
+  }
+
+  function matchesFilter(ev) {
+    if (!state.filter) return true;
+    var q = state.filter.toLowerCase();
+    var hay = [ev.summary, ev.location, ev.description].filter(Boolean).join(" ").toLowerCase();
+    return hay.indexOf(q) !== -1;
+  }
+
+  function render() {
+    // aggregate error state: only show a blocking panel if every enabled calendar failed and none has data
+    var enabled = state.calendars.filter(function (c) { return c.enabled; });
+    var haveAnyData = enabled.some(function (c) { return (state.eventsByCal[c.id] || []).length > 0; });
+    var allDone = enabled.every(function (c) { return state.loadedOnce[c.id] || state.errorsByCal[c.id]; });
+
+    if (!allDone && !haveAnyData) return; // keep skeleton
+
+    var errs = enabled.map(function (c) { return state.errorsByCal[c.id]; }).filter(Boolean);
+    if (!haveAnyData && errs.length && errs.length === enabled.length) {
+      // page-level error (all failed the same or not)
+      var code = errs[0].code;
+      var d = describeError(code);
+      var isReauth = (code === "needs_reauth" || code === "server_not_connected");
+      setStatus("err", isReauth ? "Verbindung nötig" : "Fehler");
+      main.innerHTML = "";
+      main.appendChild(panel("err", d.title, d.body, d.retry ? "Erneut versuchen" : null, function () { reloadAll(); }));
+      return;
+    }
+
+    var items = allEvents()
+      .filter(function (x) { return matchesFilter(x.ev); })
+      .sort(function (a, b) { return startDate(a.ev) - startDate(b.ev); });
+
+    main.innerHTML = "";
+
+    if (!items.length) {
+      var msg = state.filter
+        ? { t: "Keine Treffer", b: 'Für „' + state.filter + '" gibt es keine passenden Termine.' }
+        : { t: "Keine anstehenden Termine", b: "In den ausgewählten Kalendern steht gerade nichts an." };
+      main.appendChild(panel("", msg.t, msg.b, null, null));
+      renderFootnote(errs);
+      return;
+    }
+
+    var todayKey = dayKey(new Date());
+    var agenda = document.createElement("div");
+    agenda.className = "agenda";
+
+    var groups = {};
+    var order = [];
+    items.forEach(function (x) {
+      var k = dayKey(startDate(x.ev));
+      if (!groups[k]) { groups[k] = []; order.push(k); }
+      groups[k].push(x);
+    });
+
+    order.forEach(function (k) {
+      var first = startDate(groups[k][0].ev);
+      var g = document.createElement("div");
+      g.className = "daygroup" + (k === todayKey ? " is-today" : "");
+      var col = document.createElement("div");
+      col.className = "daycol";
+      col.innerHTML =
+        '<div class="dow">' + DOW[first.getDay()] + '</div>' +
+        '<div class="dnum">' + first.getDate() + '</div>' +
+        '<div class="dmon">' + MON[first.getMonth()] + '</div>';
+      var evWrap = document.createElement("div");
+      evWrap.className = "events";
+      groups[k].forEach(function (x) { evWrap.appendChild(eventCard(x.ev, x.calId)); });
+      g.appendChild(col);
+      g.appendChild(evWrap);
+      agenda.appendChild(g);
+    });
+
+    main.appendChild(agenda);
+    renderFootnote(errs);
+  }
+
+  function eventCard(ev, calId) {
+    var el = document.createElement("div");
+    el.className = "event";
+    var color = calColor(calId);
+
+    var rail = document.createElement("div");
+    rail.className = "rail";
+    rail.style.background = color;
+    el.appendChild(rail);
+
+    var body = document.createElement("div");
+    body.className = "body";
+
+    var title = document.createElement("div");
+    title.className = "etitle";
+    title.textContent = ev.summary || "(ohne Titel)";
+    body.appendChild(title);
+
+    var meta = document.createElement("div");
+    meta.className = "meta";
+
+    if (isAllDay(ev)) {
+      var b = document.createElement("span");
+      b.className = "mi etime";
+      b.textContent = "ganztägig";
+      meta.appendChild(b);
+    } else {
+      var t = document.createElement("span");
+      t.className = "mi etime";
+      var s = startDate(ev), e = endDate(ev);
+      t.innerHTML = clockSvg() + esc(fmtTime(s) + (e ? " – " + fmtTime(e) : ""));
+      meta.appendChild(t);
+    }
+
+    if (ev.location) {
+      var loc = document.createElement("span");
+      loc.className = "mi";
+      loc.innerHTML = pinSvg() + esc(ev.location);
+      meta.appendChild(loc);
+    }
+
+    body.appendChild(meta);
+    el.appendChild(body);
+
+    if (isAllDay(ev)) {
+      var badge = document.createElement("span");
+      badge.className = "allday-badge";
+      badge.textContent = "Tag";
+      el.appendChild(badge);
+    }
+    return el;
+  }
+
+  function clockSvg() {
+    return '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
+  }
+  function pinSvg() {
+    return '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>';
+  }
+
+  function renderFootnote(errs) {
+    if (errs && errs.length) {
+      var d = describeError(errs[0].code);
+      footnote.textContent = "Hinweis: Ein Kalender konnte nicht geladen werden – " + d.title.toLowerCase() + ".";
+    } else {
+      footnote.textContent = "Live aus Google Kalender · Termine ab heute";
+    }
+  }
+
+  function renderCalChips() {
+    calsEl.innerHTML = "";
+    state.calendars.forEach(function (c) {
+      var chip = document.createElement("button");
+      chip.className = "cal-chip";
+      chip.type = "button";
+      chip.setAttribute("aria-pressed", c.enabled ? "true" : "false");
+      chip.innerHTML = '<span class="cdot" style="background:' + c.color + '"></span>' + esc(c.summary);
+      chip.addEventListener("click", function () {
+        c.enabled = !c.enabled;
+        chip.setAttribute("aria-pressed", c.enabled ? "true" : "false");
+        if (c.enabled && !state.unsubs[c.id]) watchCalendar(c);
+        render();
+      });
+      calsEl.appendChild(chip);
+    });
+  }
+
+  // ---------- data loading ----------
+  function startOfTodayISO() {
+    var d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d.toISOString();
+  }
+
+  function watchCalendar(cal) {
+    var input = {
+      calendarId: cal.id,
+      startTime: startOfTodayISO(),
+      orderBy: "startTime",
+      pageSize: 50
+    };
+    try {
+      state.unsubs[cal.id] = window.claude.mcp.watchTool(
+        SERVER, "list_events", input,
+        function (ev) {
+          if (ev.type === "data") {
+            var payload = ev.result && ev.result.payload;
+            var list = (payload && payload.events) || [];
+            state.eventsByCal[cal.id] = list;
+            state.errorsByCal[cal.id] = null;
+            state.loadedOnce[cal.id] = true;
+            render();
+          } else if (ev.type === "error") {
+            var code = ev.error && ev.error.code;
+            // transient: keep last-good data; authz denials: retract
+            var retract = (code === "needs_reauth" || code === "server_not_connected" ||
+                           code === "blocked_by_policy" || code === "approval_required" ||
+                           code === "not_granted" || code === "capability_disabled" ||
+                           code === "capability_removed" || code === "selection_required");
+            if (retract) state.eventsByCal[cal.id] = [];
+            state.errorsByCal[cal.id] = ev.error;
+            state.loadedOnce[cal.id] = true;
+            render();
+          }
+        },
+        { refetchInterval: 300000 }
+      );
+    } catch (e) {
+      state.errorsByCal[cal.id] = { code: "bad_request", message: String(e) };
+      state.loadedOnce[cal.id] = true;
+      render();
+    }
+  }
+
+  function reloadAll() {
+    Object.keys(state.unsubs).forEach(function (id) {
+      try { state.unsubs[id] && state.unsubs[id](); } catch (e) {}
+    });
+    state.unsubs = {};
+    state.errorsByCal = {};
+    state.loadedOnce = {};
+    main.innerHTML = '<div class="skeleton"><div class="sk"></div><div class="sk"></div><div class="sk"></div></div>';
+    boot();
+  }
+
+  function noMcp() {
+    setStatus("err", "Nicht verfügbar");
+    controls.classList.add("hidden");
+    main.innerHTML = "";
+    main.appendChild(panel("err",
+      "Kalender-Zugriff nicht verfügbar",
+      "Diese Seite braucht den Google-Kalender-Connector von claude.ai. Öffne das Artefakt in claude.ai und stelle sicher, dass Google Kalender verbunden ist.",
+      null, null));
+    footnote.textContent = "";
+  }
+
+  function boot() {
+    if (!window.claude || typeof window.claude !== "object" || window.claude.mcp === undefined) {
+      noMcp();
+      return;
+    }
+    var mcp = window.claude.mcp;
+    setStatus("", "Verbinde…");
+
+    mcp.listTools().then(function (res) {
+      var srv = (res.servers || []).filter(function (s) { return s.server === SERVER; })[0];
+      if (!srv) {
+        setStatus("err", "Nicht verbunden");
+        main.innerHTML = "";
+        main.appendChild(panel("err",
+          "Google Kalender nicht verbunden",
+          "Füge Google Kalender unter claude.ai → Einstellungen → Connectors hinzu, um deine Termine hier zu sehen.",
+          null, null));
+        return;
+      }
+      if (srv.authStatus === "needs_reauth") {
+        setStatus("err", "Verbindung nötig");
+        main.innerHTML = "";
+        main.appendChild(panel("err",
+          "Google Kalender neu verbinden",
+          "Die Anmeldung ist abgelaufen. Verbinde Google Kalender erneut unter claude.ai → Einstellungen → Connectors.",
+          "Erneut versuchen", function () { reloadAll(); }));
+        return;
+      }
+      loadCalendars();
+    }, function (err) {
+      handleTopError(err);
+    });
+  }
+
+  function handleTopError(err) {
+    var d = describeError(err && err.code);
+    setStatus("err", "Fehler");
+    main.innerHTML = "";
+    main.appendChild(panel("err", d.title, d.body, d.retry ? "Erneut versuchen" : null, function () { reloadAll(); }));
+  }
+
+  function loadCalendars() {
+    window.claude.mcp.callTool(SERVER, "list_calendars", {}, { cache: { staleTime: 60000 } })
+      .then(function (res) {
+        var payload = res && res.payload;
+        var cals = (payload && payload.calendars) || [];
+        if (!cals.length) {
+          setStatus("warn", "Keine Kalender");
+          main.innerHTML = "";
+          main.appendChild(panel("", "Keine Kalender gefunden", "In deinem Google-Konto sind keine Kalender sichtbar.", null, null));
+          return;
+        }
+        // primary first (id equals an email that matches summary), then others
+        state.calendars = cals.map(function (c, i) {
+          var isPrimary = c.id && c.id.indexOf("@group.") === -1;
+          return {
+            id: c.id,
+            summary: c.summary || c.id,
+            color: PALETTE[i % PALETTE.length],
+            enabled: isPrimary || cals.length <= 2
+          };
+        });
+        // ensure at least one enabled
+        if (!state.calendars.some(function (c) { return c.enabled; })) state.calendars[0].enabled = true;
+
+        setStatus("ok", "Verbunden");
+        subtitle.textContent = "Deine kommenden Termine · live aus Google Kalender";
+        renderCalChips();
+        state.calendars.forEach(function (c) { if (c.enabled) watchCalendar(c); });
+      }, function (err) {
+        handleTopError(err);
+      });
+  }
+
+  // ---------- search ----------
+  var searchTimer = null;
+  searchInput.addEventListener("input", function () {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(function () {
+      state.filter = searchInput.value.trim();
+      render();
+    }, 140);
+  });
+
+  boot();
+})();
+</script>
