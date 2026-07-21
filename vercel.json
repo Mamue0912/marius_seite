@@ -1,13 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "crons": [
-    { "path": "/api/cron/renew-subscriptions", "schedule": "0 4 * * *" },
-    { "path": "/api/cron/delta-fallback", "schedule": "0 5 * * *" }
+    { "path": "/api/cron/mail-sync", "schedule": "0 5 * * *" }
   ],
   "functions": {
-    "app/api/webhooks/microsoft-graph/route.ts": { "maxDuration": 30 },
-    "app/api/sync/route.ts": { "maxDuration": 60 },
-    "app/api/cron/renew-subscriptions/route.ts": { "maxDuration": 60 },
-    "app/api/cron/delta-fallback/route.ts": { "maxDuration": 60 }
+    "app/api/mail/connect/route.ts": { "maxDuration": 60 },
+    "app/api/mail/sync/route.ts": { "maxDuration": 60 },
+    "app/api/cron/mail-sync/route.ts": { "maxDuration": 60 }
   }
 }

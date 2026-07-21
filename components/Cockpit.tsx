@@ -1,6 +1,7 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabaseBrowser";
+import { PROVIDERS } from "@/lib/mailProviders";
 
 type Msg = any;
 
@@ -16,10 +17,21 @@ const BUCKETS: { k: string; t: string; c: string }[] = [
 const TONES = ["Professionell", "Freundlich", "Kurz und direkt", "Förmlich", "Locker"];
 const COMMANDS = ["Kürzer", "Freundlicher", "Förmlicher", "Direkter", "Wärmer", "Weniger begeistert", "Mehr Kontext", "Rechtschreibung prüfen"];
 
-export default function Cockpit({ connected, email, sendEnabled }: { connected: boolean; email: string | null; sendEnabled: boolean }) {
+type Account = { id: string; email: string; provider: string };
+
+export default function Cockpit({
+  connected,
+  accounts,
+  sendEnabled
+}: {
+  connected: boolean;
+  accounts: Account[];
+  sendEnabled: boolean;
+}) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [showHidden, setShowHidden] = useState(false);
   const [status, setStatus] = useState<any>(null);
+  const [showConnect, setShowConnect] = useState(false);
   const [suggests, setSuggests] = useState<Record<string, any[]>>({});
   const [drawer, setDrawer] = useState<any>(null); // { msg, mode, loading, draft, body, tone, customInstruction, confirmBinding, sending }
   const uidRef = useRef<string | null>(null);
@@ -51,16 +63,12 @@ export default function Cockpit({ connected, email, sendEnabled }: { connected: 
     return () => { if (channel) channel.unsubscribe(); };
   }, []);
 
-  // ---- Status (Live-Verbindung, letzte Aktualisierung) ----
-  const loadStatus = useCallback(async () => {
-    try { const r = await fetch("/api/status"); if (r.ok) setStatus(await r.json()); } catch {}
-  }, []);
+  // ---- Beim Öffnen einmal synchronisieren (holt neue Mails) ----
   useEffect(() => {
     if (!connected) return;
-    loadStatus();
-    const id = setInterval(loadStatus, 30000);
-    return () => clearInterval(id);
-  }, [connected, loadStatus]);
+    manualSync();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected]);
 
   // ---- Vorschläge lazy laden (nur für zu beantwortende, noch nicht gesendete Mails) ----
   async function ensureSuggestions(m: Msg) {
@@ -81,8 +89,21 @@ export default function Cockpit({ connected, email, sendEnabled }: { connected: 
 
   async function manualSync() {
     setStatus((s: any) => ({ ...s, syncing: true }));
-    try { await fetch("/api/sync", { method: "POST" }); } catch {}
-    await loadStatus();
+    let errors: string[] = [];
+    try {
+      const r = await fetch("/api/mail/sync", { method: "POST" });
+      if (r.ok) {
+        const j = await r.json();
+        errors = j.errors || [];
+      }
+    } catch {}
+    // Nachrichten frisch laden (Realtime pusht sonst nur neue Inserts).
+    try {
+      const supabase = supabaseBrowser();
+      const { data } = await supabase.from("messages").select("*").eq("is_deleted", false).order("received_at", { ascending: false });
+      setMsgs(data || []);
+    } catch {}
+    setStatus({ syncing: false, errors });
   }
 
   // ---- Entwurf erzeugen (aus Vorschlag oder Freitext) ----
@@ -149,33 +170,33 @@ export default function Cockpit({ connected, email, sendEnabled }: { connected: 
   }
 
   const statusView = () => {
-    if (!connected) return <span className="status"><span className="sdot" />Outlook nicht verbunden</span>;
+    if (!connected) return <span className="status"><span className="sdot" />Kein Postfach verbunden</span>;
     if (status?.syncing) return <span className="status sync"><span className="sdot" />Synchronisierung läuft…</span>;
-    if (!status) return <span className="status"><span className="sdot" />…</span>;
-    if (status.status === "needs_reauth") return <span className="status err"><span className="sdot" />Outlook neu verbinden</span>;
-    if (!status.live) return <span className="status err"><span className="sdot" />Verbindung unterbrochen</span>;
-    const upd = status.lastWebhookAt || status.lastDeltaAt;
-    return <span className="status live"><span className="sdot" />Live verbunden{upd ? " · " + new Date(upd).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) : ""}</span>;
+    if (status?.errors && status.errors.length) return <span className="status err"><span className="sdot" />Sync-Fehler</span>;
+    return <span className="status live"><span className="sdot" />Verbunden · {accounts.length} Postfach{accounts.length === 1 ? "" : "er"}</span>;
   };
 
   return (
     <>
       <div className="topbar">
-        <h1>Cockpit — Outlook Live</h1>
+        <h1>Cockpit — Live Mail</h1>
         <div className="spacer" />
         {statusView()}
-        {connected ? (
-          <button className="btn small" onClick={manualSync}>Aktualisieren</button>
-        ) : (
-          <a className="btn btn-primary small" href="/api/auth/microsoft">Outlook verbinden</a>
-        )}
+        {connected && <button className="btn small" onClick={manualSync}>Aktualisieren</button>}
+        <button className="btn btn-primary small" onClick={() => setShowConnect((v) => !v)}>
+          {connected ? "+ Postfach" : "Postfach verbinden"}
+        </button>
       </div>
 
       <div className="wrap">
-        {!connected && (
-          <div className="note" style={{ marginBottom: 18 }}>
-            Verbinde dein Microsoft-Konto, um E-Mails live zu synchronisieren. Es werden nur die Berechtigungen
-            <b> Mail lesen</b> und <b>Entwürfe erstellen</b> angefragt{sendEnabled ? " sowie Senden (aktiviert)" : " – Senden bleibt deaktiviert, bis du es freischaltest"}.
+        {(showConnect || !connected) && <ConnectForm accounts={accounts} onClose={() => setShowConnect(false)} />}
+
+        {status?.errors && status.errors.length > 0 && (
+          <div className="note binding-warn" style={{ marginBottom: 18 }}>
+            <b>Synchronisierung fehlgeschlagen:</b>
+            <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+              {status.errors.map((e: string, i: number) => <li key={i}>{e}</li>)}
+            </ul>
           </div>
         )}
 
@@ -211,6 +232,92 @@ export default function Cockpit({ connected, email, sendEnabled }: { connected: 
         />}
       </aside>
     </>
+  );
+}
+
+function ConnectForm({ accounts, onClose }: { accounts: Account[]; onClose: () => void }) {
+  const providerList = Object.values(PROVIDERS);
+  const [provider, setProvider] = useState(providerList[0].id);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const preset = PROVIDERS[provider];
+
+  async function connect(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await fetch("/api/mail/connect", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ provider, email, password })
+      });
+      const j = await r.json();
+      if (!r.ok) {
+        setErr(j.error || "Verbindung fehlgeschlagen.");
+        setBusy(false);
+        return;
+      }
+      // Erfolg → Seite neu laden, damit Postfach + Mails erscheinen.
+      window.location.reload();
+    } catch (e: any) {
+      setErr(e.message || "Netzwerkfehler.");
+      setBusy(false);
+    }
+  }
+
+  async function disconnect(id: string) {
+    if (!confirm("Dieses Postfach trennen? Die geladenen Mails werden entfernt.")) return;
+    await fetch("/api/mail/disconnect", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id })
+    });
+    window.location.reload();
+  }
+
+  return (
+    <div className="bucket" style={{ marginBottom: 18 }}>
+      <div className="bh"><span className="bt">Postfach verbinden</span></div>
+      <div style={{ padding: "4px 2px" }}>
+        {accounts.length > 0 && (
+          <div style={{ marginBottom: 14 }}>
+            {accounts.map((a) => (
+              <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0" }}>
+                <span className="sdot" style={{ background: "#30D158" }} />
+                <span style={{ flex: 1 }}>{a.email} <span style={{ opacity: 0.6 }}>({PROVIDERS[a.provider]?.label || a.provider})</span></span>
+                <button className="btn small" onClick={() => disconnect(a.id)}>Trennen</button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <form onSubmit={connect} style={{ display: "flex", flexDirection: "column", gap: 10, maxWidth: 460 }}>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <span style={{ opacity: 0.7, fontSize: 13 }}>Anbieter</span>
+            <select value={provider} onChange={(e) => setProvider(e.target.value)}>
+              {providerList.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+            </select>
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <span style={{ opacity: 0.7, fontSize: 13 }}>E-Mail-Adresse</span>
+            <input type="email" required placeholder="name@icloud.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <span style={{ opacity: 0.7, fontSize: 13 }}>Passwort</span>
+            <input type="password" required placeholder="App-Passwort" value={password} onChange={(e) => setPassword(e.target.value)} />
+          </label>
+          <div className="note" style={{ fontSize: 13 }}>{preset?.passwordHint}</div>
+          {err && <div className="note binding-warn">{err}</div>}
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn btn-primary" disabled={busy}>{busy ? "Verbinde…" : "Verbinden"}</button>
+            <button type="button" className="btn" onClick={onClose}>Schließen</button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
 
