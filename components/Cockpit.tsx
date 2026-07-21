@@ -15,30 +15,60 @@ const BUCKETS: { k: string; t: string; c: string }[] = [
   { k: "newsletter", t: "Newsletter & Automatisch", c: "#98989D" }
 ];
 const CATEGORIES = ["Wichtig", "Antwort erforderlich", "Schule", "Bewerbungen und Karriere", "Sport und Karate", "Reisen", "Termine und Veranstaltungen", "Rechnungen und Finanzen", "Bestellungen und Lieferungen", "Verträge und Versicherungen", "Behörden", "Konten und Sicherheit", "Persönlich", "Newsletter und Werbung", "Automatische Benachrichtigungen", "Sonstiges"];
-const FOLDER_LABELS: Record<string, string> = { inbox: "Posteingang", sent: "Gesendet", drafts: "Entwürfe", archive: "Archiv", spam: "Spam", trash: "Papierkorb", other: "Weitere" };
+const FOLDER_LABELS: Record<string, string> = { inbox: "Posteingang", sent: "Gesendet", drafts: "Entwürfe", archive: "Archiv", spam: "Junk", trash: "Papierkorb", other: "Weitere" };
+const FOLDER_ICONS: Record<string, string> = { inbox: "📥", sent: "➤", drafts: "✎", archive: "🗄", spam: "⚠", trash: "🗑", other: "📁" };
+const DEFAULT_FOLDERS = ["inbox", "sent", "drafts", "archive", "spam", "trash"];
+const LABEL_COLORS: Record<string, string> = {
+  Karate: "#4AA3FF", Bewerbungen: "#B4B2FF", Zahlungen: "#4ADE80", Abonnements: "#FFB340",
+  Bestellungen: "#FF9F6B", Reisen: "#5AC8FA", Schule: "#C77DFF", Sicherheit: "#FF6961",
+  Termine: "#7C7AF2", "Antwort nötig": "#FFB340", Persönlich: "#4ADE80", Newsletter: "#98989D", Automatisch: "#98989D", Wichtig: "#FF6961"
+};
 const TONES = ["Professionell", "Freundlich", "Kurz und direkt", "Förmlich", "Locker"];
 const COMMANDS = ["Kürzer", "Freundlicher", "Förmlicher", "Direkter", "Wärmer", "Weniger begeistert", "Mehr Kontext", "Rechtschreibung prüfen"];
 
 type Account = { id: string; email: string; provider: string };
 
+type Folder = { account_id: string; path: string; folder_type: string; unread: number; total: number };
+
+const SMART_VIEWS = [
+  { key: "wichtig", label: "Wichtig", ic: "★" },
+  { key: "reply", label: "Antwort nötig", ic: "↩" },
+  { key: "Persönlich", label: "Persönlich", ic: "👤" },
+  { key: "Karate", label: "Karate", ic: "🥋" },
+  { key: "Bewerbungen", label: "Bewerbungen", ic: "💼" },
+  { key: "Zahlungen", label: "Zahlungen", ic: "€" },
+  { key: "Abonnements", label: "Abos", ic: "↻" },
+  { key: "Reisen", label: "Reisen", ic: "✈" },
+  { key: "Newsletter", label: "Newsletter", ic: "✉" }
+];
+
 export default function Cockpit({
   connected,
   accounts,
+  folders = [],
   sendEnabled
 }: {
   connected: boolean;
   accounts: Account[];
+  folders?: Folder[];
   sendEnabled: boolean;
 }) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
-  const [showHidden, setShowHidden] = useState(false);
+  const [showHidden, setShowHidden] = useState(true);
   const [status, setStatus] = useState<any>(null);
   const [showConnect, setShowConnect] = useState(false);
   const [compose, setCompose] = useState<any>(null);
   const [reading, setReading] = useState<any>(null);
-  const [filter, setFilter] = useState({ account: "all", folder: "all", cat: "all", unread: false, needs: false, q: "" });
+  const [q, setQ] = useState("");
+  // Auswahl: Konto (all|id) + Ordner-Typ + optional Smart-View.
+  const [sel, setSel] = useState<{ account: string; ftype: string; path?: string; view?: string }>({ account: "all", ftype: "inbox" });
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [folderItems, setFolderItems] = useState<any[] | null>(null);
+  const [folderLoading, setFolderLoading] = useState(false);
+  const [mobilePane, setMobilePane] = useState<"nav" | "list" | "read">("list");
   const [suggests, setSuggests] = useState<Record<string, any[]>>({});
   const accById: Record<string, Account> = Object.fromEntries(accounts.map((a) => [a.id, a]));
+  const filter = { account: sel.account, folder: sel.ftype, cat: "all", unread: false, needs: false, q };
   const [drawer, setDrawer] = useState<any>(null); // { msg, mode, loading, draft, body, tone, customInstruction, confirmBinding, sending }
   const uidRef = useRef<string | null>(null);
 
@@ -87,23 +117,55 @@ export default function Cockpit({
     } catch {}
   }
 
+  const labelsOf = (m: Msg): string[] => (m.user_labels && m.user_labels.length ? m.user_labels : (m.labels || []));
+
   function visible(m: Msg) {
     if (m.is_deleted) return false;
-    if (m.hidden && !showHidden) return false;
-    if (filter.account !== "all" && m.mail_account_id !== filter.account) return false;
-    if (filter.folder !== "all" && (m.folder_type || "inbox") !== filter.folder) return false;
-    if (filter.cat !== "all" && (m.semantic_category || "Sonstiges") !== filter.cat) return false;
-    if (filter.unread && m.is_read) return false;
-    if (filter.needs && !m.needs_reply) return false;
-    if (filter.q) {
-      const q = filter.q.toLowerCase();
+    if (q) {
       const hay = `${m.from_name || ""} ${m.from_address || ""} ${m.subject || ""} ${m.preview || ""}`.toLowerCase();
-      if (!hay.includes(q)) return false;
+      if (!hay.includes(q.toLowerCase())) return false;
     }
+    if (sel.view) {
+      // Intelligente Ansicht: kontenübergreifend, ordnerunabhängig.
+      if (sel.view === "wichtig") return m.semantic_category === "Wichtig" || m.priority === "hoch" || m.priority === "dringend";
+      if (sel.view === "reply") return !!m.needs_reply && m.folder_type !== "sent";
+      return labelsOf(m).includes(sel.view);
+    }
+    // Konto + Ordner.
+    if (sel.account !== "all" && m.mail_account_id !== sel.account) return false;
+    if ((m.folder_type || "inbox") !== sel.ftype) return false;
     return true;
   }
 
-  const usedCats = Array.from(new Set(msgs.map((m) => m.semantic_category).filter(Boolean))) as string[];
+  function foldersFor(accId: string): Folder[] {
+    const order = ["inbox", "sent", "drafts", "archive", "spam", "trash", "other"];
+    return folders.filter((f) => f.account_id === accId).sort((a, b) => order.indexOf(a.folder_type) - order.indexOf(b.folder_type));
+  }
+  async function selectFolder(account: string, ftype: string, path?: string) {
+    setSel({ account, ftype, path, view: undefined });
+    setReading(null); setMobilePane("list");
+    if (ftype === "inbox" || ftype === "sent" || !path) { setFolderItems(null); return; }
+    setFolderLoading(true); setFolderItems([]);
+    try {
+      const r = await fetch(`/api/mail/folder?account=${account}&path=${encodeURIComponent(path)}`);
+      const j = await r.json();
+      setFolderItems(r.ok ? (j.items || []) : []);
+    } catch { setFolderItems([]); }
+    setFolderLoading(false);
+  }
+  function selectView(view: string) {
+    setSel({ account: "all", ftype: "inbox", view }); setFolderItems(null); setReading(null); setMobilePane("list");
+  }
+  async function openFolderItem(it: any) {
+    const synthetic = { id: `imap:${it.account_id}:${it.uid}`, ...it, folder_type: sel.ftype, mail_account_id: it.account_id, readonly: true };
+    setReading({ msg: synthetic, loading: true });
+    setMobilePane("read");
+    try {
+      const r = await fetch(`/api/mail/message?uid=${it.uid}&account=${it.account_id}&path=${encodeURIComponent(it.path)}`);
+      const j = await r.json();
+      setReading((s: any) => s && s.msg.id === synthetic.id ? { ...s, loading: false, ...j } : s);
+    } catch { setReading((s: any) => s ? { ...s, loading: false, error: true } : s); }
+  }
 
   async function manualSync() {
     setStatus((s: any) => ({ ...s, syncing: true }));
@@ -189,6 +251,7 @@ export default function Cockpit({
   }
 
   async function openReader(m: Msg, images = false) {
+    setMobilePane("read");
     setReading((s: any) => ({ msg: m, loading: true, ...(s && s.msg?.id === m.id ? s : {}), loadingImages: images }));
     if (!images) setReading({ msg: m, loading: true });
     if (!m.is_read) setMsgs((prev) => prev.map((x) => x.id === m.id ? { ...x, is_read: true } : x));
@@ -217,7 +280,16 @@ export default function Cockpit({
 
   async function setReplyFlag(m: Msg, needs: boolean) {
     setMsgs((prev) => prev.map((x) => x.id === m.id ? { ...x, needs_reply: needs, action_status: needs ? "reply_required" : "no_action" } : x));
+    setReading((s: any) => s && s.msg.id === m.id ? { ...s, msg: { ...s.msg, needs_reply: needs, user_needs_reply: needs } } : s);
     await fetch("/api/mail/categorize", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messageId: m.id, needs_reply: needs }) });
+  }
+
+  async function addLabel(m: Msg, label: string, remove = false) {
+    const cur = (m.user_labels && m.user_labels.length ? m.user_labels : (m.labels || [])) as string[];
+    const next = remove ? cur.filter((l) => l !== label) : Array.from(new Set([...cur, label]));
+    setMsgs((prev) => prev.map((x) => x.id === m.id ? { ...x, user_labels: next } : x));
+    setReading((s: any) => s && s.msg.id === m.id ? { ...s, msg: { ...s.msg, user_labels: next } } : s);
+    await fetch("/api/mail/categorize", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messageId: m.id, user_labels: next }) });
   }
 
   async function categorize(m: Msg, opts: { category?: string; hidden?: boolean; ruleScope?: "sender" | "domain" }) {
@@ -251,64 +323,88 @@ export default function Cockpit({
         </button>
       </div>
 
-      <div className="wrap">
-        {(showConnect || !connected) && <ConnectForm accounts={accounts} onClose={() => setShowConnect(false)} />}
+      {(showConnect || !connected) && (
+        <div className="wrap"><ConnectForm accounts={accounts} onClose={() => setShowConnect(false)} /></div>
+      )}
 
-        {status?.errors && status.errors.length > 0 && (
-          <div className="note binding-warn" style={{ marginBottom: 18 }}>
-            <b>Synchronisierung fehlgeschlagen:</b>
-            <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
-              {status.errors.map((e: string, i: number) => <li key={i}>{e}</li>)}
-            </ul>
+      {connected && (
+        <div className={"mail3 pane-" + mobilePane}>
+          {/* Spalte 1: Konten, echte Ordner, intelligente Ansichten */}
+          <div className="msidebar">
+            <button className={"mfolder top" + (sel.account === "all" && !sel.view && sel.ftype === "inbox" ? " active" : "")} onClick={() => selectFolder("all", "inbox")}>
+              <span className="mf-ic">📥</span><span className="mf-lbl">Alle Postfächer</span>
+            </button>
+            {accounts.map((a) => {
+              const fl = foldersFor(a.id);
+              const inbox = fl.find((f) => f.folder_type === "inbox");
+              const open = expanded[a.id] !== false;
+              return (
+                <div className="macct" key={a.id}>
+                  <button className="macct-h" onClick={() => setExpanded((e) => ({ ...e, [a.id]: !open }))}>
+                    <span className={"chev" + (open ? " open" : "")}>›</span>
+                    <span className="macct-name">{PROVIDERS[a.provider]?.label || a.provider}</span>
+                    {inbox && inbox.unread > 0 && <span className="mf-count">{inbox.unread}</span>}
+                  </button>
+                  {open && (
+                    <div className="macct-folders">
+                      {(fl.length ? fl : DEFAULT_FOLDERS.map((t) => ({ account_id: a.id, path: "", folder_type: t, unread: 0, total: 0 }))).map((f) => (
+                        <button key={f.folder_type + f.path} className={"mfolder" + (sel.account === a.id && sel.ftype === f.folder_type && !sel.view ? " active" : "")} onClick={() => selectFolder(a.id, f.folder_type, f.path)}>
+                          <span className="mf-ic">{FOLDER_ICONS[f.folder_type] || "📁"}</span>
+                          <span className="mf-lbl">{FOLDER_LABELS[f.folder_type] || f.folder_type}</span>
+                          {f.unread > 0 && <span className="mf-count">{f.unread}</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            <div className="msmart-h">Intelligente Ansichten</div>
+            {SMART_VIEWS.map((v) => (
+              <button key={v.key} className={"mfolder" + (sel.view === v.key ? " active" : "")} onClick={() => selectView(v.key)}>
+                <span className="mf-ic">{v.ic}</span><span className="mf-lbl">{v.label}</span>
+              </button>
+            ))}
+            <button className="btn small" style={{ margin: "12px 8px" }} onClick={() => setShowConnect(true)}>+ Postfach</button>
           </div>
-        )}
 
-        {connected && (
-          <div className="filterbar">
-            <input className="f-search" placeholder="Suche über alle Postfächer…" value={filter.q} onChange={(e) => setFilter((f) => ({ ...f, q: e.target.value }))} />
-            <select value={filter.account} onChange={(e) => setFilter((f) => ({ ...f, account: e.target.value }))}>
-              <option value="all">Alle Postfächer</option>
-              {accounts.map((a) => <option key={a.id} value={a.id}>{PROVIDERS[a.provider]?.label || a.provider} · {a.email}</option>)}
-            </select>
-            <select value={filter.folder} onChange={(e) => setFilter((f) => ({ ...f, folder: e.target.value }))}>
-              <option value="all">Alle Ordner</option>
-              <option value="inbox">Posteingang</option>
-              <option value="sent">Gesendet</option>
-            </select>
-            <select value={filter.cat} onChange={(e) => setFilter((f) => ({ ...f, cat: e.target.value }))}>
-              <option value="all">Alle Kategorien</option>
-              {usedCats.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
-            <button className={"chip" + (filter.unread ? " sel" : "")} onClick={() => setFilter((f) => ({ ...f, unread: !f.unread }))}>Ungelesen</button>
-            <button className={"chip" + (filter.needs ? " sel" : "")} onClick={() => setFilter((f) => ({ ...f, needs: !f.needs }))}>Antwort nötig</button>
-            <button className="chip" onClick={() => setShowHidden((v) => !v)}>{showHidden ? "Newsletter aus" : "Newsletter an"}</button>
-          </div>
-        )}
-
-        {BUCKETS.map((bk) => {
-          const list = msgs.filter((m) => visible(m) && (m.category || "info") === bk.k);
-          if (!list.length) return null;
-          return (
-            <div className="bucket" key={bk.k}>
-              <div className="bh"><span className="bd" style={{ background: bk.c }} /><span className="bt">{bk.t}</span><span className="bc">{list.length}</span></div>
-              {list.map((m) => (
-                <MailCard key={m.id} m={m} account={accById[m.mail_account_id]} suggests={suggests[m.id]} ensure={ensureSuggestions} onReply={openDraft} onCategorize={categorize} onOpen={openReader} selected={reading?.msg?.id === m.id} />
-              ))}
+          {/* Spalte 2: kompakte Nachrichtenliste */}
+          <div className="mlist">
+            <div className="mlist-top">
+              <button className="mback" onClick={() => setMobilePane("nav")} aria-label="Ordner">☰</button>
+              <input className="f-search" placeholder="Suchen…" value={q} onChange={(e) => setQ(e.target.value)} />
+              <button className="btn small ghost" onClick={manualSync} title="Aktualisieren">↻</button>
             </div>
-          );
-        })}
-
-        {connected && msgs.length === 0 && status?.syncing && (
-          <div className="bucket">{[0, 1, 2, 3].map((i) => <div className="sk-card" key={i} />)}</div>
-        )}
-        {connected && msgs.length === 0 && !status?.syncing && (
-          <div className="empty">
-            <div className="ic">✦</div>
-            Für heute ist alles ruhig.
-            <div className="sub">Keine neuen E-Mails im Posteingang.</div>
+            <div className="mlist-scroll">
+              {folderItems !== null ? (
+                folderLoading ? [0, 1, 2, 3].map((i) => <div className="sk-card" key={i} />)
+                  : folderItems.length ? folderItems.map((it) => (
+                    <MailRow key={it.uid} m={it} account={accById[it.account_id]} onOpen={() => openFolderItem(it)} selected={reading?.msg?.uid === it.uid} labelsOf={labelsOf} />
+                  )) : <div className="empty" style={{ padding: 40 }}>Keine Nachrichten in diesem Ordner.</div>
+              ) : (() => {
+                const list = msgs.filter(visible).sort((a, b) => new Date(b.received_at || 0).getTime() - new Date(a.received_at || 0).getTime());
+                if (msgs.length === 0 && status?.syncing) return [0, 1, 2, 3].map((i) => <div className="sk-card" key={i} />);
+                if (!list.length) return <div className="empty" style={{ padding: 40 }}><div className="ic">✦</div>Keine Nachrichten.</div>;
+                return list.map((m) => (
+                  <MailRow key={m.id} m={m} account={accById[m.mail_account_id]} onOpen={() => openReader(m)} selected={reading?.msg?.id === m.id} labelsOf={labelsOf} />
+                ));
+              })()}
+            </div>
           </div>
-        )}
-      </div>
+
+          {/* Spalte 3: dauerhafte Leseansicht */}
+          <div className="mread">
+            <button className="mback mread-back" onClick={() => setMobilePane("list")} aria-label="Zurück">‹ Liste</button>
+            {reading ? (
+              <Reader reading={reading} account={accById[reading.msg.mail_account_id]} onClose={() => { setReading(null); setMobilePane("list"); }}
+                onReply={(opts: any) => { openDraft(reading.msg, opts); }} suggests={suggests[reading.msg.id]} ensure={ensureSuggestions}
+                onCategorize={categorize} onLoadImages={() => openReader(reading.msg, true)} onAction={mailAction} onSetReply={setReplyFlag} onAddLabel={addLabel} />
+            ) : (
+              <div className="mread-empty"><div className="ic">✉</div><div>Wähle eine Nachricht zum Lesen.</div></div>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className={"scrim" + (drawer ? " open" : "")} onClick={() => !drawer?.sending && setDrawer(null)} />
       <aside className={"drawer" + (drawer ? " open" : "")}>
@@ -322,13 +418,44 @@ export default function Cockpit({
       </aside>
 
       {compose && <ComposeModal compose={compose} setCompose={setCompose} accounts={accounts} sendEnabled={sendEnabled} />}
-
-      <div className={"scrim" + (reading ? " open" : "")} onClick={() => setReading(null)} />
-      <aside className={"drawer reader" + (reading ? " open" : "")}>
-        {reading && <Reader reading={reading} account={accById[reading.msg.mail_account_id]} onClose={() => setReading(null)} onReply={(opts: any) => { openDraft(reading.msg, opts); }} suggests={suggests[reading.msg.id]} ensure={ensureSuggestions} onCategorize={categorize} onLoadImages={() => openReader(reading.msg, true)} onAction={mailAction} onSetReply={setReplyFlag} />}
-      </aside>
     </>
   );
+}
+
+function MailRow({ m, account, onOpen, selected, labelsOf }: any) {
+  const isSent = m.folder_type === "sent";
+  const provider = account ? (PROVIDERS[account.provider]?.label || account.provider) : (m.account_display_name || "");
+  const labels: string[] = (labelsOf ? labelsOf(m) : (m.labels || [])).filter((l: string) => l !== "Automatisch" && l !== "Persönlich").slice(0, 3);
+  return (
+    <div className={"mrow" + (selected ? " sel" : "") + (!m.is_read && !isSent ? " unread" : "")} onClick={onOpen}>
+      <span className="mrow-dot" style={{ opacity: !m.is_read && !isSent ? 1 : 0 }} />
+      <div className="mrow-main">
+        <div className="mrow-top">
+          <span className="mrow-from">{isSent ? "An: " + (m.to_recipients || "") : (m.from_name || m.from_address || "")}</span>
+          <span className="mrow-time">{m.received_at ? new Date(m.received_at).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" }) : ""}</span>
+        </div>
+        <div className="mrow-subj">{m.subject || "(kein Betreff)"} {m.has_attachments && <span className="mrow-att">📎</span>}</div>
+        {m.preview && <div className="mrow-prev">{m.preview}</div>}
+        <div className="mrow-tags">
+          <span className="mrow-acct">{provider}</span>
+          {m.needs_reply && !isSent && <span className="mrow-badge">Antwort</span>}
+          {labels.map((l) => <span key={l} className="mrow-label" style={{ ["--lc" as any]: LABEL_COLORS[l] || "#8a8a8f" }}>{l}</span>)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function wantSummary(m: any): string {
+  switch (m.message_type) {
+    case "survey_feedback": return "Automatisierte Feedback-/Umfragemail. Teilnahme optional – keine Antwort nötig.";
+    case "newsletter_marketing": return "Newsletter/Werbung. Keine Antwort nötig.";
+    case "transactional": return "Transaktions-/Beleg-Mail. Nur zur Information.";
+    case "security_notification": return "Sicherheitsnachricht – kurz prüfen, ob die Aktivität von dir war.";
+    case "system_notification": return "Automatische Systembenachrichtigung. Meist keine Aktion nötig.";
+    case "personal_direct": return m.needs_reply ? "Persönliche Nachricht – eine Antwort ist sinnvoll." : "Persönliche Nachricht – zur Kenntnis.";
+    default: return m.needs_reply ? "Vermutlich wird eine Antwort erwartet." : "Nur zur Information.";
+  }
 }
 
 function MailFrame({ html, hasImages, withImages, onLoadImages }: any) {
@@ -345,7 +472,7 @@ function MailFrame({ html, hasImages, withImages, onLoadImages }: any) {
   );
 }
 
-function Reader({ reading, account, onClose, onReply, suggests, ensure, onCategorize, onLoadImages, onAction, onSetReply }: any) {
+function Reader({ reading, account, onClose, onReply, suggests, ensure, onCategorize, onLoadImages, onAction, onSetReply, onAddLabel }: any) {
   const m = reading.msg;
   const isSent = m.folder_type === "sent";
   // KI-Antwort nur bei echten persönlichen Antwortfällen – nicht bei Umfrage/Newsletter/Rechnung.
@@ -374,6 +501,27 @@ function Reader({ reading, account, onClose, onReply, suggests, ensure, onCatego
             {m.semantic_category && <><span className="k">Kategorie</span><span className="v">{m.semantic_category}</span></>}
             {m.action_status && <><span className="k">Status</span><span className="v">{m.action_status}</span></>}
           </div>
+        </div>
+
+        {!isSent && (
+          <div className="rd-want">
+            <span className="rd-want-ic">🤖</span>
+            <div><b>Diese E-Mail möchte von dir:</b> {wantSummary(m)}</div>
+          </div>
+        )}
+
+        <div className="rd-labels">
+          {((m.user_labels && m.user_labels.length ? m.user_labels : (m.labels || [])) as string[]).map((l) => (
+            <span key={l} className="mrow-label" style={{ ["--lc" as any]: LABEL_COLORS[l] || "#8a8a8f" }}>
+              {l}{onAddLabel && <button className="lbl-x" onClick={() => onAddLabel(m, l, true)} title="Entfernen">×</button>}
+            </span>
+          ))}
+          {onAddLabel && (
+            <select className="lbl-add" value="" onChange={(e) => { if (e.target.value) onAddLabel(m, e.target.value); }} title="Label hinzufügen">
+              <option value="">+ Label</option>
+              {["Karate", "Bewerbungen", "Zahlungen", "Abonnements", "Reisen", "Schule", "Sicherheit", "Termine", "Persönlich", "Wichtig", "Newsletter"].map((l) => <option key={l} value={l}>{l}</option>)}
+            </select>
+          )}
         </div>
 
         {reading.thread && reading.thread.length > 0 && (

@@ -6,6 +6,7 @@ import { folderType, FolderType } from "./folders";
 import { loadRules, applyRules } from "./rules";
 import { classifyEmail } from "./anthropic";
 import { detectType } from "./messageType";
+import { autoLabels } from "./labels";
 
 const HEADER_FIELDS = ["list-unsubscribe", "list-id", "precedence", "auto-submitted", "feedback-id", "x-feedback-id", "reply-to", "return-path"];
 
@@ -109,6 +110,13 @@ export async function syncInbox(acc: MailAccount): Promise<number> {
     } catch (e) {
       console.error("Sent-Sync übersprungen:", (e as Error).message);
     }
+
+    // ----- Ordnerliste je Konto (echte IMAP-Ordner + Zähler) -----
+    try {
+      await syncFolders(acc, client);
+    } catch (e) {
+      console.error("Ordnerliste übersprungen:", (e as Error).message);
+    }
   } finally {
     await client.logout().catch(() => {});
   }
@@ -121,6 +129,25 @@ export async function syncInbox(acc: MailAccount): Promise<number> {
   }
 
   return processed;
+}
+
+// Liest die echten Ordner des Kontos aus und speichert Typ + Zähler.
+async function syncFolders(acc: MailAccount, client: ImapFlow): Promise<void> {
+  const admin = supabaseAdmin();
+  const list = await client.list();
+  const rows: any[] = [];
+  for (const box of list) {
+    if ((box as any).flags && Array.from((box as any).flags).includes("\\Noselect")) continue;
+    const su = Array.isArray((box as any).specialUse) ? (box as any).specialUse.join(" ") : (box as any).specialUse;
+    const ftype = folderType(box.path, su);
+    let unread = 0, total = 0;
+    try {
+      const st: any = await client.status(box.path, { unseen: true, messages: true });
+      unread = Number(st?.unseen || 0); total = Number(st?.messages || 0);
+    } catch { /* Zähler optional */ }
+    rows.push({ user_id: acc.user_id, account_id: acc.id, path: box.path, folder_type: ftype, unread, total, updated_at: new Date().toISOString() });
+  }
+  if (rows.length) await admin.from("mail_folders").upsert(rows, { onConflict: "account_id,path" });
 }
 
 function hasAttachments(bodyStructure: any): boolean {
@@ -202,6 +229,7 @@ async function upsertMessage(acc: MailAccount, msg: any, ftype: FolderType, mail
     deadline_at: c.deadline_at,
     detected_task: c.detected_task,
     category: bucket,
+    labels: autoLabels({ from_address: fromAddr, from_name: fromName, subject: env.subject, message_type: t.message_type, needs_reply: t.needs_reply }),
     status: c.status,
     web_link: `imap-uid:${msg.uid}`,
     last_modified_at: null,

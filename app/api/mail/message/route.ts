@@ -50,6 +50,22 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const id = url.searchParams.get("id");
   const withImages = url.searchParams.get("images") === "1";
+
+  // Direktabruf aus einem beliebigen IMAP-Ordner (nicht in der DB gespeichert).
+  const directUid = url.searchParams.get("uid");
+  const directAccount = url.searchParams.get("account");
+  const directPath = url.searchParams.get("path");
+  if (directUid && directAccount && directPath) {
+    const acc = await loadMailAccount(directAccount);
+    if (!acc || (acc as any).user_id !== user.id) return NextResponse.json({ error: "no_account" }, { status: 403 });
+    try {
+      const full = await fetchMessageFull(acc as MailAccount, parseInt(directUid, 10), directPath);
+      return NextResponse.json({ text: full.text, html: full.html ? safeHtml(full.html, withImages) : null, hasImages: full.html ? /<img[\s>]/i.test(full.html) : false, withImages, thread: [] });
+    } catch (e) {
+      return NextResponse.json({ error: (e as Error).message }, { status: 502 });
+    }
+  }
+
   if (!id) return NextResponse.json({ error: "bad_request" }, { status: 400 });
 
   const admin = supabaseAdmin();
