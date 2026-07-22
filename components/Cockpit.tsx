@@ -98,16 +98,19 @@ export default function Cockpit({
   connected,
   accounts,
   folders = [],
-  sendEnabled
+  sendEnabled,
+  initialOpenId
 }: {
   connected: boolean;
   accounts: Account[];
   folders?: Folder[];
   sendEnabled: boolean;
+  initialOpenId?: string | null;
 }) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [showHidden, setShowHidden] = useState(true);
   const [status, setStatus] = useState<any>(null);
+  const [mailDiag, setMailDiag] = useState<boolean>(false);
   const [showConnect, setShowConnect] = useState(false);
   const [compose, setCompose] = useState<any>(null);
   const [reading, setReading] = useState<any>(null);
@@ -161,6 +164,26 @@ export default function Cockpit({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connected]);
 
+  // ---- Automatische Aktualisierung: Fenster-Fokus + regelmäßig ----
+  useEffect(() => {
+    if (!connected) return;
+    const onFocus = () => { if (document.visibilityState === "visible") manualSync(); };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    const iv = setInterval(() => { if (document.visibilityState === "visible") manualSync(); }, 120000);
+    return () => { window.removeEventListener("focus", onFocus); document.removeEventListener("visibilitychange", onFocus); clearInterval(iv); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected]);
+
+  // ---- Deep-Link: bestimmte Nachricht direkt öffnen (aus der Übersicht) ----
+  const openedDeepLink = useRef(false);
+  useEffect(() => {
+    if (openedDeepLink.current || !initialOpenId || !msgs.length) return;
+    const m = msgs.find((x: any) => x.id === initialOpenId);
+    if (m) { openedDeepLink.current = true; openReader(m); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [msgs, initialOpenId]);
+
   // ---- Einmalige Nachklassifizierung bereits gespeicherter Mails ----
   // Läuft nur, wenn es noch nicht eingeordnete Nachrichten gibt; verarbeitet
   // in Stapeln mit sichtbarem Fortschritt und lädt danach die Liste neu.
@@ -207,6 +230,12 @@ export default function Cockpit({
     setSuggests((s) => ({ ...s, [m.id]: ok ? (data.suggestions || []) : [] }));
     setSuggestLoading((s) => ({ ...s, [m.id]: false }));
   }
+
+  // Zähler IMMER aus derselben Quelle wie die Liste (messages), nie aus IMAP-STATUS.
+  const unreadInbox = (accId?: string) => msgs.filter((m: any) => !m.is_deleted && (m.folder_type || "inbox") === "inbox" && !m.is_read && (!accId || m.mail_account_id === accId)).length;
+  // Vom Server (IMAP-STATUS) gemeldete, aber noch NICHT gespeicherte Nachrichten.
+  const imapUnread = (accId?: string) => folders.filter((f) => f.folder_type === "inbox" && (!accId || f.account_id === accId)).reduce((s, f) => s + (f.unread || 0), 0);
+  const pendingInbox = (accId?: string) => Math.max(0, imapUnread(accId) - unreadInbox(accId));
 
   // Gespeicherte Klassifizierung – Nutzer-Overrides haben immer Vorrang.
   const labelsOf = (m: Msg): string[] => (m.user_labels && m.user_labels.length ? m.user_labels : (m.labels || []));
@@ -270,23 +299,29 @@ export default function Cockpit({
     } catch { setReading((s: any) => s ? { ...s, loading: false, error: true } : s); }
   }
 
-  async function manualSync() {
-    setStatus((s: any) => ({ ...s, syncing: true }));
-    let errors: string[] = [];
-    try {
-      const r = await fetch("/api/mail/sync", { method: "POST" });
-      if (r.ok) {
-        const j = await r.json();
-        errors = j.errors || [];
-      }
-    } catch {}
-    // Nachrichten frisch laden (Realtime pusht sonst nur neue Inserts).
+  async function reloadMessages() {
     try {
       const supabase = supabaseBrowser();
       const { data } = await supabase.from("messages").select("*").eq("is_deleted", false).order("received_at", { ascending: false });
-      setMsgs(data || []);
+      if (data) setMsgs(data);
     } catch {}
-    setStatus({ syncing: false, errors });
+  }
+
+  const syncingRef = useRef(false);
+  async function manualSync() {
+    if (syncingRef.current) return; // kein paralleler Sync
+    syncingRef.current = true;
+    setStatus((s: any) => ({ ...s, syncing: true }));
+    let errors: string[] = [];
+    let report: any = null;
+    try {
+      const r = await fetch("/api/mail/sync", { method: "POST" });
+      if (r.ok) { const j = await r.json(); errors = j.errors || []; report = j.report || null; }
+    } catch { errors = ["Netzwerkfehler beim Synchronisieren"]; }
+    // Nach dem Sync alle Queries neu laden (Badge + Liste + Übersicht aus einer Quelle).
+    await reloadMessages();
+    setStatus({ syncing: false, errors, report, syncedAt: new Date().toISOString() });
+    syncingRef.current = false;
   }
 
   // ---- Entwurf erzeugen (aus Vorschlag oder Freitext) ----
@@ -448,17 +483,21 @@ export default function Cockpit({
           <div className="msidebar">
             <button className={"mfolder top" + (sel.account === "all" && !sel.view && sel.ftype === "inbox" ? " active" : "")} onClick={() => selectFolder("all", "inbox")}>
               <span className="mf-ic">📥</span><span className="mf-lbl">Alle Postfächer</span>
+              {unreadInbox() > 0 && <span className="mf-count">{unreadInbox()}</span>}
+              {pendingInbox() > 0 && <span className="mf-pending" title={`${pendingInbox()} werden synchronisiert`}>⟳{pendingInbox()}</span>}
             </button>
             {accounts.map((a) => {
               const fl = foldersFor(a.id);
-              const inbox = fl.find((f) => f.folder_type === "inbox");
               const open = expanded[a.id] !== false;
+              const accUnread = unreadInbox(a.id);
+              const accPending = pendingInbox(a.id);
               return (
                 <div className="macct" key={a.id}>
                   <button className="macct-h" onClick={() => setExpanded((e) => ({ ...e, [a.id]: !open }))}>
                     <span className={"chev" + (open ? " open" : "")}>›</span>
                     <span className="macct-name">{PROVIDERS[a.provider]?.label || a.provider}</span>
-                    {inbox && inbox.unread > 0 && <span className="mf-count">{inbox.unread}</span>}
+                    {accUnread > 0 && <span className="mf-count">{accUnread}</span>}
+                    {accPending > 0 && <span className="mf-pending" title={`${accPending} werden synchronisiert`}>⟳{accPending}</span>}
                   </button>
                   {open && (
                     <div className="macct-folders">
@@ -466,7 +505,7 @@ export default function Cockpit({
                         <button key={f.folder_type + f.path} className={"mfolder" + (sel.account === a.id && sel.ftype === f.folder_type && !sel.view ? " active" : "")} onClick={() => selectFolder(a.id, f.folder_type, f.path)}>
                           <span className="mf-ic">{FOLDER_ICONS[f.folder_type] || "📁"}</span>
                           <span className="mf-lbl">{FOLDER_LABELS[f.folder_type] || f.folder_type}</span>
-                          {f.unread > 0 && <span className="mf-count">{f.unread}</span>}
+                          {(f.folder_type === "inbox" ? accUnread : f.unread) > 0 && <span className="mf-count">{f.folder_type === "inbox" ? accUnread : f.unread}</span>}
                         </button>
                       ))}
                     </div>
@@ -480,7 +519,8 @@ export default function Cockpit({
                 <span className="mf-ic">{v.ic}</span><span className="mf-lbl">{v.label}</span>
               </button>
             ))}
-            <button className="btn small" style={{ margin: "12px 8px" }} onClick={() => setShowConnect(true)}>+ Postfach</button>
+            <button className="btn small" style={{ margin: "12px 8px 4px" }} onClick={() => setShowConnect(true)}>+ Postfach</button>
+            <button className="ac-diaglink" style={{ margin: "0 8px 12px", display: "block" }} onClick={() => setMailDiag(true)}>Sync-Diagnose</button>
           </div>
 
           {/* Spalte 2: kompakte Nachrichtenliste */}
@@ -494,6 +534,19 @@ export default function Cockpit({
               <div className="classify-banner">
                 <span className="spin" />
                 <span>Nachrichten werden eingeordnet: {classify.done} von {classify.total}</span>
+              </div>
+            )}
+            {pendingInbox() > 0 && (
+              <div className="sync-banner">
+                <span className="spin" />
+                <span>{pendingInbox()} {pendingInbox() === 1 ? "Nachricht wird" : "Nachrichten werden"} synchronisiert…</span>
+                <button className="mini-link" onClick={manualSync}>Jetzt laden</button>
+              </div>
+            )}
+            {(sel.view || sel.ftype !== "inbox" || sel.account !== "all") && unreadInbox() > 0 && (
+              <div className="filter-banner">
+                <span>Neue Mails im Posteingang ({unreadInbox()}) sind hier ausgeblendet.</span>
+                <button className="mini-link" onClick={() => { setSel({ account: "all", ftype: "inbox" }); setFolderItems(null); }}>Filter zurücksetzen</button>
               </div>
             )}
             <div className="mlist-scroll">
@@ -539,7 +592,68 @@ export default function Cockpit({
       </aside>
 
       {diag && <DiagModal onClose={() => setDiag(false)} />}
+      {mailDiag && <MailDiagModal onClose={() => setMailDiag(false)} client={{
+        loadedTotal: msgs.length,
+        visibleCount: msgs.filter(visible).length,
+        unreadInboxDb: unreadInbox(),
+        sel, report: status?.report, syncedAt: status?.syncedAt, syncing: !!status?.syncing
+      }} />}
       {compose && <ComposeModal compose={compose} setCompose={setCompose} accounts={accounts} sendEnabled={sendEnabled} />}
+    </>
+  );
+}
+
+// Owner-Diagnose der Mail-Synchronisierung (keine Passwörter/Tokens/Inhalte).
+function MailDiagModal({ onClose, client }: any) {
+  const [s, setS] = useState<any>({ loading: true });
+  useEffect(() => { fetch("/api/mail/diag").then((r) => r.json()).then((d) => setS({ loading: false, ...d })).catch(() => setS({ loading: false, error: true })); }, []);
+  return (
+    <>
+      <div className="scrim open" onClick={onClose} />
+      <div className="modal">
+        <div className="dh"><h3>Sync-Diagnose</h3><button className="x" onClick={onClose}>✕</button></div>
+        <div className="db">
+          <div className="label" style={{ marginTop: 0 }}>Diese Ansicht (Client)</div>
+          <div className="meta-row">
+            <span className="k">Geladene Datensätze</span><span className="v">{client.loadedTotal}</span>
+            <span className="k">Sichtbar mit Filter</span><span className="v">{client.visibleCount}</span>
+            <span className="k">Ungelesen Posteingang (DB)</span><span className="v">{client.unreadInboxDb}</span>
+            <span className="k">Aktiver Filter</span><span className="v">{client.sel.view ? "Ansicht: " + client.sel.view : `Konto: ${client.sel.account} · Ordner: ${client.sel.ftype}`}</span>
+            <span className="k">Letzter Sync</span><span className="v">{client.syncing ? "läuft…" : client.syncedAt ? new Date(client.syncedAt).toLocaleTimeString("de-DE") : "—"}</span>
+          </div>
+          {client.report && client.report.length > 0 && (
+            <>
+              <div className="label">Letzter Sync-Lauf</div>
+              <div className="diag-list">
+                {client.report.map((r: any, i: number) => (
+                  <div key={i} className={"diag-row" + (r.error || r.skipped ? " bad" : "")}>
+                    <span className="diag-kind">{r.email}</span>
+                    <span className="diag-meta">{r.error ? "Fehler: " + r.error : `neu ${r.newUids} · gespeichert ${r.saved} · übersprungen ${r.skipped}`}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+          <div className="label">Server (Datenbank & IMAP)</div>
+          {s.loading ? <div className="empty"><span className="spin" /></div> : s.error ? <div className="note binding-warn">Diagnose nicht verfügbar.</div> : (
+            <>
+              <div className="meta-row">
+                <span className="k">Posteingang gespeichert</span><span className="v">{s.db?.inboxTotal}</span>
+                <span className="k">davon ungelesen</span><span className="v">{s.db?.inboxUnread}</span>
+                <span className="k">noch nicht eingeordnet</span><span className="v">{s.db?.unclassified}</span>
+              </div>
+              {(s.accounts || []).map((a: any, i: number) => (
+                <div className="diag-row" key={i} style={{ marginTop: 6 }}>
+                  <span className="diag-kind">{a.email}</span>
+                  <span className="diag-meta">UID {a.inbox_last_uid} · IMAP ungelesen {a.imapInboxUnread} · {a.last_synced_at ? new Date(a.last_synced_at).toLocaleTimeString("de-DE") : "nie"}{a.last_error ? " · " + a.last_error : ""}</span>
+                </div>
+              ))}
+            </>
+          )}
+          <div className="note" style={{ fontSize: 12, marginTop: 12 }}>Keine Passwörter, Tokens oder Mailinhalte werden angezeigt.</div>
+        </div>
+        <div className="df"><button className="btn" onClick={onClose}>Schließen</button></div>
+      </div>
     </>
   );
 }
@@ -561,7 +675,9 @@ function MailRow({ m, account, onOpen, selected, labelsOf }: any) {
         {m.preview && <div className="mrow-prev">{m.preview}</div>}
         <div className="mrow-tags">
           <span className="mrow-acct">{provider}</span>
-          {chip && <span className={"mrow-status " + chip.tone}>{chip.text}</span>}
+          {!m.classified_at && !isSent
+            ? <span className="mrow-status pending">Wird eingeordnet…</span>
+            : chip && <span className={"mrow-status " + chip.tone}>{chip.text}</span>}
           {labels.map((l) => <span key={l} className="mrow-label" style={{ ["--lc" as any]: LABEL_COLORS[l] || "#8a8a8f" }}>{l}</span>)}
         </div>
       </div>

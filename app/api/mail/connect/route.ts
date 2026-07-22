@@ -92,7 +92,7 @@ export async function POST(req: NextRequest) {
 
   let synced = 0;
   try {
-    synced = await syncInbox(account as MailAccount);
+    synced = (await syncInbox(account as MailAccount)).processed;
   } catch (e) {
     await admin.from("mail_accounts").update({ last_error: (e as Error).message }).eq("id", (account as any).id);
   }

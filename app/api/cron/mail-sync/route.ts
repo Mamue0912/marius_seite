@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
   let processed = 0;
   for (const acc of accounts) {
     try {
-      processed += await syncInbox(acc);
+      processed += (await syncInbox(acc)).processed;
     } catch (e) {
       await admin
         .from("mail_accounts")

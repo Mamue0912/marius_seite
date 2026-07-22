@@ -10,7 +10,7 @@ function greeting() {
   return "Gute Nacht";
 }
 
-export default function Overview({ accounts, summary, newest, needsReplyList, deadlineList, appStats }: any) {
+export default function Overview({ accounts, summary, newest, newestUnread = [], needsReplyList, deadlineList, appStats }: any) {
   const dateStr = new Date().toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" });
   const parts: string[] = [];
   if (summary.needsReply) parts.push(`${summary.needsReply} E-Mail${summary.needsReply === 1 ? "" : "s"} mit Antwortbedarf`);
@@ -30,11 +30,16 @@ export default function Overview({ accounts, summary, newest, needsReplyList, de
         <a className="tile" href="/mail">
           <div className="tile-h"><span className="tile-ic">✉</span><span className="tile-t">E-Mails</span><span className="tile-go">→</span></div>
           <div className="tile-stats">
+            <div className="stat"><span className="stat-n">{summary.totalUnread}</span><span className="stat-l">neu / ungelesen</span></div>
+            <div className="stat"><span className="stat-n">{summary.unreadImportant}</span><span className="stat-l">wichtig / persönlich</span></div>
             <div className="stat"><span className="stat-n">{summary.needsReply}</span><span className="stat-l">Antwort nötig</span></div>
-            <div className="stat"><span className="stat-n">{summary.unreadImportant}</span><span className="stat-l">wichtig ungelesen</span></div>
-            <div className="stat"><span className="stat-n">{summary.totalUnread}</span><span className="stat-l">ungelesen gesamt</span></div>
           </div>
-          {newest && <div className="tile-newest"><b>Neueste:</b> {newest.from_name || newest.from_address} — {newest.subject || "(kein Betreff)"}</div>}
+          {newestUnread.length > 0 ? newestUnread.map((m: any) => (
+            <div className="tile-inrow" key={m.id} onClick={(e) => { e.preventDefault(); window.location.href = `/mail?open=${m.id}`; }}>
+              <span className="il"><b>{m.from}</b> · {PROVIDERS[m.provider]?.label || m.provider}<br /><span style={{ color: "var(--muted)" }}>{m.subject}</span></span>
+              <span className="iv">{m.at ? new Date(m.at).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" }) : ""}</span>
+            </div>
+          )) : <div className="tile-empty">Keine ungelesenen Mails.</div>}
           <div className="tile-accts">
             {accounts.map((a: any) => (
               <span className="acct-pill" key={a.id}>{PROVIDERS[a.provider]?.label || a.provider} · {a.unread}</span>

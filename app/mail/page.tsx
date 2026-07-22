@@ -7,7 +7,7 @@ import Cockpit from "@/components/Cockpit";
 
 export const dynamic = "force-dynamic";
 
-export default async function MailPage() {
+export default async function MailPage({ searchParams }: { searchParams?: { open?: string } }) {
   const user = await requireUser();
   if (!user) return <LoginForm />;
   const accounts = await loadMailAccounts(user.id);
@@ -21,6 +21,7 @@ export default async function MailPage() {
         accounts={accounts.map((a) => ({ id: a.id, email: a.email, provider: a.provider }))}
         folders={folders || []}
         sendEnabled={process.env.ENABLE_SEND === "true"}
+        initialOpenId={searchParams?.open || null}
       />
     </AppShell>
   );

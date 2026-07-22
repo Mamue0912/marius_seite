@@ -32,6 +32,12 @@ export default async function Home() {
   const needsReply = rows.filter((m) => m.needs_reply && !m.hidden);
   const unreadImportant = rows.filter((m) => !m.is_read && !m.hidden && (m.semantic_category === "Wichtig" || m.needs_reply));
   const newest = rows.find((m) => !m.hidden) || null;
+  // Zwei bis drei neueste ungelesene für die Übersicht (klickbar → direkt öffnen).
+  const acctById = Object.fromEntries(accounts.map((a) => [a.id, a]));
+  const newestUnread = rows.filter((m) => !m.is_read && !m.hidden).slice(0, 3).map((m) => ({
+    id: m.id, from: m.from_name || m.from_address || "", subject: m.subject || "(kein Betreff)",
+    at: m.received_at, provider: acctById[m.mail_account_id]?.provider || "", email: acctById[m.mail_account_id]?.email || ""
+  }));
   const now = Date.now();
   const deadlines = rows.filter((m) => m.deadline_at && new Date(m.deadline_at).getTime() >= now - 864e5);
 
@@ -74,6 +80,7 @@ export default async function Home() {
           deadlines: deadlines.length
         }}
         newest={newest}
+        newestUnread={newestUnread}
         needsReplyList={needsReply.slice(0, 5)}
         deadlineList={deadlines.slice(0, 5)}
         appStats={appStats}

@@ -52,11 +52,16 @@ async function findMailbox(client: ImapFlow, type: FolderType): Promise<{ path: 
   return null;
 }
 
+export interface SyncResult {
+  processed: number; saved: number; skipped: number;
+  newUids: number[]; skippedUids: number[];
+}
+
 // Hauptsync: Posteingang (inkrementell) + Gesendet (Seed), dann KI-Kategorien.
-export async function syncInbox(acc: MailAccount): Promise<number> {
+export async function syncInbox(acc: MailAccount): Promise<SyncResult> {
   const admin = supabaseAdmin();
   const client = makeClient(acc);
-  let processed = 0;
+  const result: SyncResult = { processed: 0, saved: 0, skipped: 0, newUids: [], skippedUids: [] };
 
   await client.connect();
   try {
@@ -68,21 +73,36 @@ export async function syncInbox(acc: MailAccount): Promise<number> {
       const exists = Number(box?.exists || 0);
       let lastUid = Number(acc.inbox_last_uid || 0);
       if (acc.inbox_uidvalidity && Number(acc.inbox_uidvalidity) !== uidValidity) lastUid = 0;
-      let maxUid = lastUid;
+      // Cursor nur über den lückenlos erfolgreich gespeicherten Anfang vorrücken,
+      // damit eine einzelne fehlgeschlagene Nachricht NIE übersprungen wird.
+      let advanceUid = lastUid;
+      let blocked = false;
 
       if (exists > 0) {
         const range = lastUid > 0 ? `${lastUid + 1}:*` : `${Math.max(1, exists - SEED_COUNT + 1)}:*`;
         const opts = lastUid > 0 ? { uid: true as const } : undefined;
         for await (const msg of client.fetch(range, { uid: true, envelope: true, flags: true, internalDate: true, bodyStructure: true, headers: HEADER_FIELDS }, opts)) {
-          if (lastUid > 0 && Number(msg.uid) <= lastUid) continue;
-          await upsertMessage(acc, msg, "inbox", "INBOX");
-          processed++;
-          if (Number(msg.uid) > maxUid) maxUid = Number(msg.uid);
+          const uid = Number(msg.uid);
+          if (lastUid > 0 && uid <= lastUid) continue;
+          result.newUids.push(uid);
+          result.processed++;
+          try {
+            await upsertMessage(acc, msg, "inbox", "INBOX");
+            result.saved++;
+            if (!blocked && uid > advanceUid) advanceUid = uid;
+          } catch (e) {
+            result.skipped++;
+            result.skippedUids.push(uid);
+            blocked = true; // ab hier Cursor nicht weiter vorrücken → Retry nächster Lauf
+            console.error(`upsertMessage uid=${uid} (${acc.email}):`, (e as Error).message);
+          }
         }
       }
       await admin.from("mail_accounts").update({
-        inbox_uidvalidity: uidValidity, inbox_last_uid: maxUid,
-        last_synced_at: new Date().toISOString(), status: "connected", last_error: null
+        inbox_uidvalidity: uidValidity, inbox_last_uid: advanceUid,
+        last_synced_at: new Date().toISOString(),
+        status: result.skipped > 0 ? "connected" : "connected",
+        last_error: result.skipped > 0 ? `${result.skipped} Nachricht(en) konnten nicht gespeichert werden` : null
       }).eq("id", acc.id);
     } finally {
       lock.release();
@@ -99,8 +119,9 @@ export async function syncInbox(acc: MailAccount): Promise<number> {
           if (sexists > 0) {
             const start = Math.max(1, sexists - SENT_SEED + 1);
             for await (const msg of client.fetch(`${start}:*`, { uid: true, envelope: true, flags: true, internalDate: true, bodyStructure: true, headers: HEADER_FIELDS })) {
-              await upsertMessage(acc, msg, "sent", sent.path);
-              processed++;
+              try { await upsertMessage(acc, msg, "sent", sent.path); result.saved++; }
+              catch (e) { result.skipped++; console.error("upsertMessage (sent):", (e as Error).message); }
+              result.processed++;
             }
           }
         } finally {
@@ -128,7 +149,7 @@ export async function syncInbox(acc: MailAccount): Promise<number> {
     console.error("Klassifizierung übersprungen:", (e as Error).message);
   }
 
-  return processed;
+  return result;
 }
 
 // Liest die echten Ordner des Kontos aus und speichert Typ + Zähler.

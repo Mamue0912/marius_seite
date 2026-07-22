@@ -998,3 +998,11 @@ textarea { resize: vertical; line-height: 1.55; }
 .rc-body { padding: 12px 13px; display: flex; flex-direction: column; gap: 12px; }
 .rc-row { display: flex; flex-direction: column; gap: 6px; }
 .rc-k { font-size: 11px; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); font-weight: 620; word-break: break-all; }
+
+/* Sync-Zustände: ausstehend, Banner, Filter-Hinweis, Einordnung */
+.mf-pending { margin-left: 4px; font-size: 10.5px; font-weight: 640; padding: 1px 6px; border-radius: var(--r-pill); color: var(--high); background: var(--high-soft); }
+.sync-banner, .filter-banner { display: flex; align-items: center; gap: 9px; margin: 8px 10px 0; padding: 8px 12px; border-radius: var(--r-sm); font-size: 12.5px; font-weight: 540; }
+.sync-banner { background: var(--high-soft); border: 1px solid rgba(255,179,64,.3); color: var(--high); }
+.filter-banner { background: var(--mid-soft); border: 1px solid rgba(74,163,255,.3); color: var(--mid); }
+.mini-link { margin-left: auto; border: 0; background: transparent; color: inherit; font-weight: 640; font-size: 12px; cursor: pointer; text-decoration: underline; padding: 2px 4px; white-space: nowrap; }
+.mrow-status.pending { color: var(--accent-ink); background: var(--accent-soft); }

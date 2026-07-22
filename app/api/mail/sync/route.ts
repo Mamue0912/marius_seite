@@ -19,15 +19,19 @@ export async function POST() {
   const admin = supabaseAdmin();
   let processed = 0;
   const errors: string[] = [];
+  const report: any[] = [];
   for (const acc of accounts) {
     try {
-      processed += await syncInbox(acc);
+      const r = await syncInbox(acc);
+      processed += r.processed;
+      report.push({ email: acc.email, newUids: r.newUids.length, saved: r.saved, skipped: r.skipped, skippedUids: r.skippedUids.slice(0, 10) });
     } catch (e) {
       const msg = (e as Error).message;
       errors.push(`${acc.email}: ${msg}`);
+      report.push({ email: acc.email, error: msg });
       await admin.from("mail_accounts").update({ status: "error", last_error: msg }).eq("id", acc.id);
     }
   }
 
-  return NextResponse.json({ connected: true, processed, errors });
+  return NextResponse.json({ connected: true, processed, errors, report, at: new Date().toISOString() });
 }
