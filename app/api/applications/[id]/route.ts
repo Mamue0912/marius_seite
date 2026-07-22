@@ -38,6 +38,12 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   for (const k of ["company", "position", "job_type", "deadline", "contact", "status"]) {
     if (body[k] !== undefined) update[k] = body[k] === "" ? null : body[k];
   }
+  // Eingefügtes Stellenangebot / gespeicherten Link + Analyse entfernen,
+  // ohne das ganze Projekt zu löschen.
+  if (body.clearJob === true) {
+    update.job_url = null; update.job_text = null; update.analysis = null; update.job_source = null;
+    update.status = "interessant";
+  }
   await admin.from("applications").update(update).eq("id", app.id);
   return NextResponse.json({ ok: true });
 }

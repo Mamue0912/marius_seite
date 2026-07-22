@@ -61,6 +61,7 @@ export default function ApplicationCenter({ accounts, sendEnabled }: { accounts:
   const [apps, setApps] = useState<any[]>([]);
   const [docs, setDocs] = useState<any[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [listFilter, setListFilter] = useState<string>("all");
   const [loading, setLoading] = useState(true);
   const [diag, setDiag] = useState(false);
 
@@ -90,8 +91,10 @@ export default function ApplicationCenter({ accounts, sendEnabled }: { accounts:
       else { setSection("neu"); }
       return;
     }
-    setSection(key); setOpenId(null);
+    setSection(key); setListFilter("all"); setOpenId(null);
   }
+  // Direkte Navigation aus der Mitte (Kachel-Klick).
+  function nav(sec: any, filter = "all") { setSection(sec); setListFilter(filter); setOpenId(null); }
   function openApp(id: string) { setOpenId(id); }
 
   return (
@@ -112,12 +115,12 @@ export default function ApplicationCenter({ accounts, sendEnabled }: { accounts:
 
       <main className="ac-main">
         {loading ? <div className="ac-empty"><span className="spin" /></div>
-          : openId ? <Workspace id={openId} accounts={accounts} sendEnabled={sendEnabled} docs={docs} onBack={() => setOpenId(null)} onChanged={loadApps} onDiag={() => setDiag(true)} />
-          : section === "uebersicht" ? <Overview apps={apps} onOpen={openApp} onNew={() => setSection("neu")} />
+          : openId ? <Workspace id={openId} accounts={accounts} sendEnabled={sendEnabled} docs={docs} onBack={() => setOpenId(null)} onChanged={loadApps} onDeleted={async () => { setOpenId(null); await loadApps(); }} onDiag={() => setDiag(true)} />
+          : section === "uebersicht" ? <Overview apps={apps} onOpen={openApp} onNav={nav} onNew={() => nav("neu")} />
           : section === "neu" ? <NewJob onCreated={async (id: string) => { await loadApps(); setOpenId(id); }} accounts={accounts} />
-          : section === "aktiv" ? <AppList apps={apps} onOpen={openApp} onNew={() => setSection("neu")} />
+          : section === "aktiv" ? <AppList apps={apps} filter={listFilter} onFilter={setListFilter} onOpen={openApp} onNew={() => setSection("neu")} onReload={loadApps} />
           : section === "unterlagen" ? <Documents docs={docs} reload={loadDocs} onDiag={() => setDiag(true)} />
-          : <GeneratedDocsAll apps={apps} onOpen={openApp} />}
+          : <GeneratedDocsAll apps={apps} onOpen={openApp} onReloadApps={loadApps} />}
       </main>
 
       {diag && <DiagModal onClose={() => setDiag(false)} />}
@@ -126,7 +129,7 @@ export default function ApplicationCenter({ accounts, sendEnabled }: { accounts:
 }
 
 // ============================ Übersicht ============================
-function Overview({ apps, onOpen, onNew }: any) {
+function Overview({ apps, onOpen, onNav, onNew }: any) {
   const now = Date.now();
   const active = apps.filter((a: any) => !["absage", "zusage"].includes(a.status));
   const prep = apps.filter((a: any) => ["analyse_offen", "unterlagen", "bereit"].includes(a.status));
@@ -158,40 +161,46 @@ function Overview({ apps, onOpen, onNew }: any) {
   return (
     <div className="ac-view">
       <div className="ac-view-head"><h1>Übersicht</h1><button className="ac-btn primary" onClick={onNew}>＋ Neue Stelle</button></div>
-      <div className="ac-grid">
-        {nextAction && (
-          <div className="ac-mod ac-mod-wide ac-mod-primary" onClick={() => onOpen(nextAction.a.id)}>
-            <div className="ac-mod-k">Nächste sinnvolle Handlung</div>
-            <div className="ac-mod-big">{nextAction.t}</div>
-            <div className="ac-mod-cta">Bewerbung öffnen →</div>
-          </div>
-        )}
-        <div className="ac-mod"><div className="ac-mod-k">Aktive Bewerbungen</div><div className="ac-mod-num">{active.length}</div></div>
-        <div className="ac-mod"><div className="ac-mod-k">In Vorbereitung</div><div className="ac-mod-num">{prep.length}</div></div>
-        <div className="ac-mod"><div className="ac-mod-k">Warte auf Antwort</div><div className="ac-mod-num">{waiting.length}</div></div>
 
-        <div className="ac-mod ac-mod-tall">
-          <div className="ac-mod-k">Offene Fristen</div>
+      {/* Fokus: primäre Handlung + Fristen */}
+      <div className="ac-focus">
+        <button className={"ac-primcard" + (nextAction ? "" : " muted")} onClick={() => (nextAction ? onOpen(nextAction.a.id) : onNew())}>
+          <div className="ac-primglow" />
+          <div className="ac-mod-k light">Nächste sinnvolle Handlung</div>
+          <div className="ac-prim-big">{nextAction ? nextAction.t : "Füge eine Stellenanzeige ein – die KI analysiert sie und legt ein Projekt an."}</div>
+          <div className="ac-prim-cta">{nextAction ? "Bewerbung öffnen" : "Neue Stelle einfügen"} →</div>
+        </button>
+
+        <div className="ac-card ac-deadcard">
+          <div className="ac-card-head"><span className="ac-mod-k">Offene Fristen</span>{deadlines.length ? <button className="ac-morelink" onClick={() => onNav("aktiv", "fristen")}>alle →</button> : null}</div>
           {deadlines.length ? (
             <div className="ac-mini-list">
               {deadlines.slice(0, 5).map(({ a, d }: any) => {
                 const days = Math.ceil((d - now) / 864e5);
-                return <div key={a.id} className="ac-mini" onClick={() => onOpen(a.id)}>
+                return <button key={a.id} className="ac-mini" onClick={() => onOpen(a.id)}>
                   <span className="ac-mini-t">{a.position || a.company || "Bewerbung"}</span>
-                  <span className={"ac-mini-b " + (days <= 3 ? "urgent" : days <= 10 ? "high" : "mid")}>{days <= 0 ? "heute/überfällig" : "in " + days + " T"}</span>
-                </div>;
+                  <span className={"ac-mini-b " + (days <= 3 ? "urgent" : days <= 10 ? "high" : "mid")}>{days <= 0 ? "heute" : "in " + days + " T"}</span>
+                </button>;
               })}
             </div>
           ) : <div className="ac-mod-empty">Keine offenen Fristen.</div>}
         </div>
+      </div>
 
-        {last && (
-          <div className="ac-mod ac-mod-wide" onClick={() => onOpen(last.id)}>
-            <div className="ac-mod-k">Zuletzt bearbeitet</div>
-            <div className="ac-mod-title">{last.position || "—"}{last.company ? ` · ${last.company}` : ""}</div>
-            <span className={"ac-badge " + statusTone(last.status)}>{statusLabel(last.status)}</span>
-          </div>
-        )}
+      {/* Zähl-Kacheln als direkte Einstiege */}
+      <div className="ac-stats">
+        <button className="ac-stat" onClick={() => onNav("aktiv", "active")}><span className="ac-stat-num">{active.length}</span><span className="ac-stat-l">Aktive Bewerbungen</span></button>
+        <button className="ac-stat" onClick={() => onNav("aktiv", "prep")}><span className="ac-stat-num high">{prep.length}</span><span className="ac-stat-l">In Vorbereitung</span></button>
+        <button className="ac-stat" onClick={() => onNav("aktiv", "waiting")}><span className="ac-stat-num accent">{waiting.length}</span><span className="ac-stat-l">Warte auf Antwort</span></button>
+      </div>
+
+      {/* Schnell-Einstiege */}
+      <div className="ac-quick">
+        <button className="ac-qtile accent" onClick={onNew}><span className="ac-qic">＋</span><span className="ac-qt">Neue Stelle</span><span className="ac-qs">Link, Text, PDF oder Screenshot</span></button>
+        {last && <button className="ac-qtile" onClick={() => onOpen(last.id)}><span className="ac-qic">🕘</span><span className="ac-qt">Zuletzt bearbeitet</span><span className="ac-qs">{last.position || last.company || "Bewerbung"}</span></button>}
+        <button className="ac-qtile" onClick={() => onNav("aktiv", "all")}><span className="ac-qic">▤</span><span className="ac-qt">Aktive Bewerbungen</span><span className="ac-qs">{apps.length} {apps.length === 1 ? "Projekt" : "Projekte"}</span></button>
+        <button className="ac-qtile" onClick={() => onNav("unterlagen")}><span className="ac-qic">📎</span><span className="ac-qt">Meine Unterlagen</span><span className="ac-qs">Lebenslauf, Zeugnisse, Zertifikate</span></button>
+        <button className="ac-qtile" onClick={() => onNav("dokumente")}><span className="ac-qic">✍</span><span className="ac-qt">Erstellte Dokumente</span><span className="ac-qs">Anschreiben, Mails, Kurzprofil</span></button>
       </div>
     </div>
   );
@@ -277,20 +286,54 @@ function NewJob({ onCreated, accounts }: any) {
   );
 }
 
-// ============================ Aktive Bewerbungen ============================
-function AppList({ apps, onOpen, onNew }: any) {
+// ============================ Bewerbungsliste (gefiltert) ============================
+const LIST_FILTERS: { key: string; label: string }[] = [
+  { key: "all", label: "Alle" },
+  { key: "active", label: "Aktiv" },
+  { key: "prep", label: "In Vorbereitung" },
+  { key: "waiting", label: "Warte auf Antwort" },
+  { key: "fristen", label: "Mit Frist" }
+];
+function AppList({ apps, filter = "all", onFilter, onOpen, onNew, onReload }: any) {
+  const [busyId, setBusyId] = useState<string | null>(null);
+  function match(a: any) {
+    if (filter === "active") return !["absage", "zusage"].includes(a.status);
+    if (filter === "prep") return ["analyse_offen", "unterlagen", "bereit"].includes(a.status);
+    if (filter === "waiting") return ["beworben", "rueckmeldung", "gespraech"].includes(a.status);
+    if (filter === "fristen") return !!a.deadline;
+    return true;
+  }
+  let items = apps.filter(match);
+  if (filter === "fristen") items = [...items].sort((a: any, b: any) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime());
+  const title = LIST_FILTERS.find((f) => f.key === filter)?.label === "Alle" ? "Bewerbungen" : (LIST_FILTERS.find((f) => f.key === filter)?.label || "Bewerbungen");
+
+  async function del(id: string, e: any) {
+    e.stopPropagation();
+    if (!confirm("Diese Bewerbung inklusive Chat, Analyse, zugeordneten Unterlagen und erstellten Dokumenten wirklich vollständig löschen? Das kann nicht rückgängig gemacht werden.")) return;
+    setBusyId(id);
+    await aj(`/api/applications/${id}`, { method: "DELETE" });
+    setBusyId(null); await onReload();
+  }
+
   return (
     <div className="ac-view">
-      <div className="ac-view-head"><h1>Aktive Bewerbungen</h1><button className="ac-btn primary" onClick={onNew}>＋ Neue Stelle</button></div>
-      {!apps.length ? <div className="ac-card ac-empty2">Noch keine Bewerbungen. Füge eine Stelle ein.</div> : (
+      <div className="ac-view-head"><h1>{title}</h1><button className="ac-btn primary" onClick={onNew}>＋ Neue Stelle</button></div>
+      <div className="ac-filterbar">
+        {LIST_FILTERS.map((f) => <button key={f.key} className={"ac-fchip" + (filter === f.key ? " on" : "")} onClick={() => onFilter && onFilter(f.key)}>{f.label}</button>)}
+      </div>
+      {!items.length ? <div className="ac-card ac-empty2">Keine Bewerbungen in dieser Ansicht. {filter !== "all" && <button className="ac-diaglink" onClick={() => onFilter && onFilter("all")}>Alle anzeigen</button>}</div> : (
         <div className="ac-list">
-          {apps.map((a: any) => (
+          {items.map((a: any) => (
             <div key={a.id} className="ac-row" onClick={() => onOpen(a.id)}>
               <div className="ac-row-main">
                 <div className="ac-row-title">{a.position || "Unbenannte Stelle"}{a.job_type ? <span className="ac-tag">{JOB_TYPE_LABEL[a.job_type] || a.job_type}</span> : null}</div>
                 <div className="ac-row-sub">{a.company || "—"}{a.deadline ? ` · Frist ${new Date(a.deadline).toLocaleDateString("de-DE")}` : ""}</div>
               </div>
               <span className={"ac-badge " + statusTone(a.status)}>{statusLabel(a.status)}</span>
+              <div className="ac-row-actions" onClick={(e) => e.stopPropagation()}>
+                <button className="ac-btn sm" onClick={() => onOpen(a.id)}>Öffnen</button>
+                <button className="ac-iconbtn danger" disabled={busyId === a.id} title="Bewerbung löschen" onClick={(e) => del(a.id, e)}>{busyId === a.id ? "…" : "🗑"}</button>
+              </div>
             </div>
           ))}
         </div>
@@ -302,32 +345,39 @@ function AppList({ apps, onOpen, onNew }: any) {
 // ============================ Erstellte Dokumente (alle) ============================
 function GeneratedDocsAll({ apps, onOpen }: any) {
   const [docs, setDocs] = useState<any[] | null>(null);
-  useEffect(() => {
-    (async () => {
-      const all: any[] = [];
-      for (const a of apps) {
-        const r = await aj(`/api/applications/${a.id}`, { timeoutMs: 20000 });
-        if (r.ok) (r.data.generatedDocs || []).forEach((d: any) => all.push({ ...d, app: a }));
-      }
-      all.sort((x, y) => new Date(y.updated_at).getTime() - new Date(x.updated_at).getTime());
-      setDocs(all);
-    })();
+  const load = useCallback(async () => {
+    const all: any[] = [];
+    for (const a of apps) {
+      const r = await aj(`/api/applications/${a.id}`, { timeoutMs: 20000 });
+      if (r.ok) (r.data.generatedDocs || []).forEach((d: any) => all.push({ ...d, app: a }));
+    }
+    all.sort((x, y) => new Date(y.updated_at).getTime() - new Date(x.updated_at).getTime());
+    setDocs(all);
   }, [apps]);
+  useEffect(() => { load(); }, [load]);
+
+  async function del(id: string, e: any) {
+    e.stopPropagation();
+    if (!confirm("Dieses erstellte Dokument löschen?")) return;
+    await aj(`/api/applications/doc/${id}`, { method: "DELETE" });
+    await load();
+  }
   return (
     <div className="ac-view">
       <div className="ac-view-head"><h1>Erstellte Dokumente</h1></div>
       {docs === null ? <div className="ac-empty"><span className="spin" /></div>
-        : !docs.length ? <div className="ac-card ac-empty2">Noch keine Dokumente erstellt. Öffne eine Bewerbung und erstelle im Chat/rechten Bereich z. B. ein Anschreiben.</div>
+        : !docs.length ? <div className="ac-card ac-empty2">Noch keine Dokumente erstellt. Öffne eine Bewerbung und erstelle im rechten Bereich z. B. ein Anschreiben.</div>
         : <div className="ac-list">
             {docs.map((d) => (
-              <div key={d.id} className="ac-row">
+              <div key={d.id} className="ac-row" onClick={() => onOpen(d.app.id)}>
                 <div className="ac-row-main">
                   <div className="ac-row-title">{d.title || DOC_KINDS.find((k) => k.key === d.kind)?.label || d.kind}</div>
                   <div className="ac-row-sub">{d.app.position || d.app.company || "Bewerbung"} · {new Date(d.updated_at).toLocaleDateString("de-DE")}</div>
                 </div>
-                <div className="ac-row-actions">
+                <div className="ac-row-actions" onClick={(e) => e.stopPropagation()}>
                   <a className="ac-btn sm" href={`/api/applications/doc/${d.id}?format=docx`} target="_blank" rel="noreferrer">DOCX</a>
                   <button className="ac-btn sm" onClick={() => onOpen(d.app.id)}>Öffnen</button>
+                  <button className="ac-iconbtn danger" title="Dokument löschen" onClick={(e) => del(d.id, e)}>🗑</button>
                 </div>
               </div>
             ))}
@@ -468,10 +518,11 @@ function DocDetail({ doc, reload, onDiag }: any) {
 }
 
 // ============================ Arbeitsbereich (offene Bewerbung) ============================
-function Workspace({ id, accounts, sendEnabled, docs, onBack, onChanged, onDiag }: any) {
+function Workspace({ id, accounts, sendEnabled, docs, onBack, onChanged, onDeleted, onDiag }: any) {
   const [d, setD] = useState<any>(null);
   const [pane, setPane] = useState<"stelle" | "chat" | "docs">("chat"); // mobil
   const [error, setError] = useState<string | null>(null);
+  const [menu, setMenu] = useState(false);
 
   const load = useCallback(async () => {
     const r = await aj(`/api/applications/${id}`, { timeoutMs: 25000 });
@@ -484,6 +535,17 @@ function Workspace({ id, accounts, sendEnabled, docs, onBack, onChanged, onDiag 
   const app = d.application;
 
   async function patch(update: any) { await aj(`/api/applications/${id}`, { method: "PATCH", json: update }); await load(); await onChanged(); }
+  async function clearJob() {
+    setMenu(false);
+    if (!confirm("Die eingefügte Stellenanzeige samt Link und Analyse entfernen? Chat, Unterlagen und erstellte Dokumente bleiben erhalten.")) return;
+    await patch({ clearJob: true });
+  }
+  async function deleteApp() {
+    setMenu(false);
+    if (!confirm("Diese Bewerbung vollständig löschen – inklusive Chat, Analyse, Zuordnungen und erstellten Dokumenten? Das kann nicht rückgängig gemacht werden.")) return;
+    await aj(`/api/applications/${id}`, { method: "DELETE" });
+    await onDeleted();
+  }
 
   return (
     <div className="ac-ws">
@@ -495,6 +557,16 @@ function Workspace({ id, accounts, sendEnabled, docs, onBack, onChanged, onDiag 
         </select>
         <div className="ac-ws-panes">
           {(["stelle", "chat", "docs"] as const).map((p) => <button key={p} className={"ac-panebtn" + (pane === p ? " on" : "")} onClick={() => setPane(p)}>{p === "stelle" ? "Stelle" : p === "chat" ? "Chat" : "Dokumente"}</button>)}
+        </div>
+        <div className="ac-ws-menu">
+          <button className="ac-iconbtn" title="Aktionen" onClick={() => setMenu((v) => !v)}>⋯</button>
+          {menu && <>
+            <div className="ac-menu-scrim" onClick={() => setMenu(false)} />
+            <div className="ac-menu">
+              {app.analysis || app.job_url || app.job_text ? <button onClick={clearJob}>Stellenanzeige entfernen</button> : null}
+              <button className="danger" onClick={deleteApp}>Bewerbung löschen</button>
+            </div>
+          </>}
         </div>
       </div>
       <div className="ac-ws-body">
