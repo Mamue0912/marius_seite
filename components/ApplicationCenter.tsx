@@ -392,11 +392,57 @@ function GeneratedDocsAll({ apps, onOpen }: any) {
   );
 }
 
+// Chat über die eigenen Unterlagen (Erklärungen geben, Rückfragen beantworten).
+function DocumentsChat({ onDiag }: any) {
+  const [msgs, setMsgs] = useState<any[]>([]);
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const ctrlRef = useRef<AbortController | null>(null);
+  const endRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { aj("/api/documents/chat", { timeoutMs: 15000 }).then((r) => { if (r.ok) setMsgs(r.data.messages || []); }); }, []);
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs, busy]);
+
+  async function send(text: string) {
+    if (!text.trim() || busy) return;
+    setError(null); setInput("");
+    const hist = msgs.map((m) => ({ role: m.role, content: m.content }));
+    setMsgs((m) => [...m, { id: "u" + Date.now(), role: "user", content: text }]);
+    setBusy(true);
+    const ctrl = new AbortController(); ctrlRef.current = ctrl;
+    const r = await aj("/api/documents/chat", { json: { message: text, history: hist }, timeoutMs: 60000, signal: ctrl.signal });
+    setBusy(false);
+    if (r.ok) setMsgs((m) => [...m, r.data.message]);
+    else setError(errText(r, "Antwort konnte nicht erstellt werden."));
+  }
+  const suggestions = ["Was steht in meinen Zeugnissen?", "Welche Fähigkeiten kannst du belegen?", "Ich habe mein Praktikum bei X gemacht, nicht Y – merke dir das.", "Welche Angaben fehlen dir noch von mir?"];
+
+  return (
+    <div className="ac-card ac-docchat">
+      <div className="ac-panel-h" style={{ position: "static" }}>Unterlagen-Chat</div>
+      <div className="ac-hint" style={{ marginTop: 0, marginBottom: 10 }}>Frag zu deinen Dokumenten, korrigiere Missverständnisse oder beantworte Rückfragen der KI. Die KI nutzt nur deine hochgeladenen Unterlagen.</div>
+      <div className="ac-docchat-scroll">
+        {!msgs.length && <div className="ac-suggests">{suggestions.map((s) => <button key={s} className="ac-suggest" onClick={() => send(s)}>{s}</button>)}</div>}
+        {msgs.map((m) => <div key={m.id} className={"ac-msg " + m.role}><div className="ac-msg-b">{m.content}</div></div>)}
+        {busy && <div className="ac-msg assistant"><div className="ac-msg-b"><span className="spin" /> denkt nach…{ctrlRef.current && <button className="ac-diaglink" onClick={() => ctrlRef.current?.abort()}>Abbrechen</button>}</div></div>}
+        <div ref={endRef} />
+      </div>
+      {error && <div className="ac-note bad">{error} {onDiag && <button className="ac-diaglink" onClick={onDiag}>Diagnose</button>}</div>}
+      <div className="ac-chat-input" style={{ position: "static" }}>
+        <textarea className="ac-chat-ta" placeholder="Nachricht an den Unterlagen-Chat…" value={input} disabled={busy}
+          onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(input); } }} />
+        <button className="ac-btn primary" disabled={busy || !input.trim()} onClick={() => send(input)}>Senden</button>
+      </div>
+    </div>
+  );
+}
+
 // ============================ Meine Unterlagen ============================
 function Documents({ docs, reload, onDiag }: any) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [chatOpen, setChatOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   async function upload(files: FileList) {
@@ -414,11 +460,13 @@ function Documents({ docs, reload, onDiag }: any) {
     <div className="ac-view">
       <div className="ac-view-head"><h1>Meine Unterlagen</h1>
         <div className="ac-row-actions">
+          <button className={"ac-btn" + (chatOpen ? " primary" : "")} onClick={() => setChatOpen((v) => !v)}>💬 Unterlagen-Chat</button>
           <input ref={fileRef} type="file" multiple accept=".pdf,.docx,.txt,image/*" hidden onChange={(e) => { if (e.target.files?.length) upload(e.target.files); e.currentTarget.value = ""; }} />
           <button className="ac-btn primary" disabled={busy} onClick={() => fileRef.current?.click()}>{busy ? <><span className="spin" /> Lädt…</> : "＋ Hochladen"}</button>
         </div>
       </div>
       <div className="ac-hint">Privat gespeichert (kein öffentlicher Link). Unterstützt PDF, DOCX, TXT und Bilder. Die KI erkennt Fakten – nur von dir <b>bestätigte</b> Fakten werden in Bewerbungen verwendet.</div>
+      {chatOpen && <DocumentsChat onDiag={onDiag} />}
       {error && <div className="ac-note bad">{error}</div>}
       {!docs.length ? <div className="ac-card ac-empty2">Noch keine Unterlagen. Lade Lebenslauf, Zeugnisse, Zertifikate usw. hoch.</div> : (
         <div className="ac-doc-grid">

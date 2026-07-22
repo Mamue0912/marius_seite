@@ -1025,3 +1025,7 @@ textarea { resize: vertical; line-height: 1.55; }
 /* "Beantwortet"-Markierung */
 .btn-answered { color: var(--ok); border-color: rgba(74,222,128,.35); background: var(--low-soft); }
 .mrow-status.answered { color: var(--ok); background: var(--low-soft); }
+
+/* Unterlagen-Chat */
+.ac-docchat { margin-bottom: 16px; }
+.ac-docchat-scroll { max-height: 46vh; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 4px 2px 12px; }

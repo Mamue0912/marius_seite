@@ -338,6 +338,34 @@ ${params.docsContext || "(noch keine Entwürfe)"}`;
   return rawText(system, messages, 1600);
 }
 
+// Chat über die hochgeladenen Unterlagen: erklärt, fragt bei Unklarheiten nach,
+// nimmt Korrekturen des Nutzers entgegen. Nutzt Dokumentinhalte + Fakten.
+export async function documentsChatReply(params: {
+  docsContext: string;
+  factsText: string;
+  history: { role: "user" | "assistant"; content: string }[];
+  userMessage: string;
+}): Promise<string> {
+  const system = `${APPLICATION_RULES}
+
+Du bist der Assistent für die persönlichen Unterlagen des Nutzers (Lebenslauf, Zeugnisse, Zertifikate usw.). Deine Aufgaben:
+- Fragen zu den Dokumenten beantworten, ausschließlich anhand des unten stehenden Inhalts.
+- Wenn etwas unklar oder widersprüchlich ist, stelle eine gezielte Rückfrage, statt zu raten.
+- Nimm Korrekturen/Erklärungen des Nutzers ernst – wenn er sagt, dass du etwas falsch verstanden hast, übernimm seine Klarstellung.
+- Erfinde keine Fakten. Wenn eine Information in den Unterlagen fehlt, sag das ehrlich und frage nach.
+
+=== INHALT DER HOCHGELADENEN UNTERLAGEN ===
+${params.docsContext || "(keine lesbaren Unterlagen vorhanden)"}
+
+=== ERKANNTE / BESTÄTIGTE FAKTEN ===
+${params.factsText || "(noch keine Fakten)"}`;
+  const messages = [
+    ...params.history.map((m) => ({ role: m.role, content: m.content })),
+    { role: "user" as const, content: params.userMessage }
+  ];
+  return rawText(system, messages, 1400);
+}
+
 // Bewerbungsdokument erstellen (Anschreiben, Motivation, Mail, Kurzprofil, Gespräch).
 export interface AppDocResult { title: string; body: string; missing_info: string | null; }
 export async function generateApplicationDocument(params: {

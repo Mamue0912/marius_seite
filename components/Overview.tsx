@@ -100,7 +100,10 @@ export default function Overview({ accounts, summary, newest, newestUnread = [],
         <div className="tile">
           <div className="tile-h"><span className="tile-ic">✎</span><span className="tile-t">Antwort nötig</span></div>
           {needsReplyList.length > 0 ? needsReplyList.map((m: any) => (
-            <div className="tile-row" key={m.id}><b>{m.from_name || m.from_address}</b><br /><span className="tile-sub">{m.subject || "(kein Betreff)"}</span></div>
+            <a className="tile-inrow" key={m.id} href={`/mail?open=${m.id}`} title="Mail öffnen">
+              <span className="il"><b>{m.from_name || m.from_address}</b><br /><span style={{ color: "var(--muted)" }}>{m.subject || "(kein Betreff)"}</span></span>
+              <span className="iv">→</span>
+            </a>
           )) : <div className="tile-empty">Keine offenen Antworten. 🎉</div>}
         </div>
       </div>
