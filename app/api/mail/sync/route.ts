@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabaseServer";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { loadMailAccounts } from "@/lib/mailAccounts";
@@ -9,7 +9,9 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 // Manuelle Aktualisierung: holt neue Mails aller IMAP-Konten des Nutzers.
-export async function POST() {
+// ?reseed=1 setzt den UID-Zeiger zurück → die letzten ~40 Mails werden neu
+// abgeholt (Rettung, falls der Zeiger fälschlich vorgerückt war).
+export async function POST(req: NextRequest) {
   const user = await requireUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
@@ -17,6 +19,12 @@ export async function POST() {
   if (!accounts.length) return NextResponse.json({ connected: false });
 
   const admin = supabaseAdmin();
+  const reseed = new URL(req.url).searchParams.get("reseed") === "1";
+  if (reseed) {
+    await admin.from("mail_accounts").update({ inbox_last_uid: 0, inbox_uidvalidity: null }).eq("user_id", user.id);
+    // frisch geladene Konten mit zurückgesetztem Zeiger verwenden
+    for (const a of accounts as any[]) { a.inbox_last_uid = 0; a.inbox_uidvalidity = null; }
+  }
   let processed = 0;
   const errors: string[] = [];
   const report: any[] = [];

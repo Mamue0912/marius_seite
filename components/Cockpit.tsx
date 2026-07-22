@@ -309,20 +309,22 @@ export default function Cockpit({
   }
 
   const syncingRef = useRef(false);
-  async function manualSync() {
+  async function manualSync(reseed = false) {
     if (syncingRef.current) return; // kein paralleler Sync
     syncingRef.current = true;
     setStatus((s: any) => ({ ...s, syncing: true }));
     let errors: string[] = [];
     let report: any = null;
     try {
-      const r = await fetch("/api/mail/sync", { method: "POST" });
+      const r = await fetch("/api/mail/sync" + (reseed ? "?reseed=1" : ""), { method: "POST" });
       if (r.ok) { const j = await r.json(); errors = j.errors || []; report = j.report || null; }
+      else errors = [`Sync-Route HTTP ${r.status}`];
     } catch { errors = ["Netzwerkfehler beim Synchronisieren"]; }
     // Nach dem Sync alle Queries neu laden (Badge + Liste + Übersicht aus einer Quelle).
     await reloadMessages();
     setStatus({ syncing: false, errors, report, syncedAt: new Date().toISOString() });
     syncingRef.current = false;
+    if (reseed) runClassify();
   }
 
   // ---- Entwurf erzeugen (aus Vorschlag oder Freitext) ----
@@ -466,7 +468,7 @@ export default function Cockpit({
         </div>
         <div className="spacer" />
         {statusView()}
-        {connected && <button className="btn small ghost" onClick={manualSync} aria-label="Aktualisieren" title="Aktualisieren">↻</button>}
+        {connected && <button className="btn small ghost" onClick={() => manualSync()} aria-label="Aktualisieren" title="Aktualisieren">↻</button>}
         <a className="btn small ghost" href="/settings" title="Einstellungen" aria-label="Einstellungen">⚙</a>
         {connected && <button className="btn small" onClick={() => setCompose({ fromAccountId: accounts[0]?.id, to: "", cc: "", bcc: "", subject: "", body: "", instruction: "" })}>Neue E-Mail</button>}
         <button className="btn btn-primary small" onClick={() => setShowConnect((v) => !v)}>
@@ -526,7 +528,7 @@ export default function Cockpit({
             <div className="mlist-top">
               <button className="mback" onClick={() => setMobilePane("nav")} aria-label="Ordner">☰</button>
               <input className="f-search" placeholder="Suchen…" value={q} onChange={(e) => setQ(e.target.value)} />
-              <button className="btn small ghost" onClick={manualSync} title="Aktualisieren">↻</button>
+              <button className="btn small ghost" onClick={() => manualSync()} title="Aktualisieren">↻</button>
             </div>
             {classify && (
               <div className="classify-banner">
@@ -600,14 +602,14 @@ export default function Cockpit({
         visibleCount: msgs.filter(visible).length,
         unreadInboxDb: unreadInbox(),
         sel, report: status?.report, syncedAt: status?.syncedAt, syncing: !!status?.syncing, classifyError: status?.classifyError
-      }} />}
+      }} onReseed={() => { setMailDiag(false); manualSync(true); }} />}
       {compose && <ComposeModal compose={compose} setCompose={setCompose} accounts={accounts} sendEnabled={sendEnabled} />}
     </>
   );
 }
 
 // Owner-Diagnose der Mail-Synchronisierung (keine Passwörter/Tokens/Inhalte).
-function MailDiagModal({ onClose, client }: any) {
+function MailDiagModal({ onClose, client, onReseed }: any) {
   const [s, setS] = useState<any>({ loading: true });
   useEffect(() => { fetch("/api/mail/diag").then((r) => r.json()).then((d) => setS({ loading: false, ...d })).catch(() => setS({ loading: false, error: true })); }, []);
   return (
@@ -667,7 +669,10 @@ function MailDiagModal({ onClose, client }: any) {
           )}
           <div className="note" style={{ fontSize: 12, marginTop: 12 }}>Keine Passwörter, Tokens oder Mailinhalte werden angezeigt.</div>
         </div>
-        <div className="df"><button className="btn" onClick={onClose}>Schließen</button></div>
+        <div className="df">
+          {onReseed && <button className="btn btn-primary" onClick={onReseed} title="Setzt den Sync-Zeiger zurück und holt die letzten ~40 Mails neu">Posteingang neu einlesen</button>}
+          <button className="btn" onClick={onClose}>Schließen</button>
+        </div>
       </div>
     </>
   );
