@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 export async function POST(req: NextRequest) {
   const user = await requireUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const { messageId, category, hidden, ruleScope, needs_reply, user_labels, relevance, message_type, ruleLabel, ruleNeverReply } = await req.json();
+  const { messageId, category, hidden, ruleScope, needs_reply, user_labels, relevance, message_type, ruleLabel, ruleNeverReply, answered } = await req.json();
   const admin = supabaseAdmin();
 
   const { data: msg } = await admin.from("messages").select("*").eq("id", messageId).eq("user_id", user.id).maybeSingle();
@@ -27,6 +27,19 @@ export async function POST(req: NextRequest) {
     update.user_needs_reply = !!needs_reply;
     update.action_status = needs_reply ? "reply_required" : "no_action";
     update.user_action_status = needs_reply ? "reply_required" : "no_action";
+  }
+  // Manuell als beantwortet / wieder offen markieren.
+  if (answered != null) {
+    if (answered) {
+      update.draft_status = "gesendet";
+      update.reply_sent_at = new Date().toISOString();
+      update.needs_reply = false; update.user_needs_reply = false;
+      update.action_status = "no_action"; update.user_action_status = "no_action";
+    } else {
+      update.draft_status = null; update.reply_sent_at = null;
+      update.needs_reply = true; update.user_needs_reply = true;
+      update.action_status = "reply_required"; update.user_action_status = "reply_required";
+    }
   }
   if (Array.isArray(user_labels)) update.user_labels = user_labels;
   await admin.from("messages").update(update).eq("id", msg.id);

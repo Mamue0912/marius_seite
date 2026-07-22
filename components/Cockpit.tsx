@@ -16,6 +16,7 @@ function labelsOfMsg(m: any): string[] {
 function statusChip(m: any): { text: string; tone: string } | null {
   const isSent = m.folder_type === "sent";
   if (isSent) return null;
+  if (m.reply_sent_at || m.draft_status === "gesendet") return { text: "Beantwortet", tone: "answered" };
   const rel = m.user_relevance || m.relevance;
   const action = m.user_action_status || m.action_status;
   const needs = m.user_needs_reply != null ? m.user_needs_reply : m.needs_reply;
@@ -440,6 +441,16 @@ export default function Cockpit({
     await fetch("/api/mail/categorize", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messageId: m.id, needs_reply: needs }) });
   }
 
+  // Manuell als beantwortet markieren (falls die App es nicht selbst erkennt).
+  async function markAnswered(m: Msg, answered: boolean) {
+    const patch: any = answered
+      ? { reply_sent_at: new Date().toISOString(), draft_status: "gesendet", needs_reply: false, user_needs_reply: false, action_status: "no_action" }
+      : { reply_sent_at: null, draft_status: null, needs_reply: true, user_needs_reply: true, action_status: "reply_required" };
+    setMsgs((prev) => prev.map((x) => x.id === m.id ? { ...x, ...patch } : x));
+    setReading((s: any) => s && s.msg.id === m.id ? { ...s, msg: { ...s.msg, ...patch } } : s);
+    await fetch("/api/mail/categorize", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messageId: m.id, answered }) });
+  }
+
   async function addLabel(m: Msg, label: string, remove = false) {
     const cur = (m.user_labels && m.user_labels.length ? m.user_labels : (m.labels || [])) as string[];
     const next = remove ? cur.filter((l) => l !== label) : Array.from(new Set([...cur, label]));
@@ -586,7 +597,7 @@ export default function Cockpit({
             {reading ? (
               <Reader reading={reading} account={accById[reading.msg.mail_account_id]} onClose={() => { setReading(null); setMobilePane("list"); }}
                 onReply={(opts: any) => { openDraft(reading.msg, opts); }} suggests={suggests[reading.msg.id]} suggestsLoading={!!suggestLoading[reading.msg.id]} ensure={ensureSuggestions}
-                onCategorize={categorize} onCorrect={categorize} onLoadImages={() => openReader(reading.msg, true)} onAction={mailAction} onSetReply={setReplyFlag} onAddLabel={addLabel} onDiag={() => setDiag(true)} />
+                onCategorize={categorize} onCorrect={categorize} onLoadImages={() => openReader(reading.msg, true)} onAction={mailAction} onSetReply={setReplyFlag} onAnswered={markAnswered} onAddLabel={addLabel} onDiag={() => setDiag(true)} />
             ) : (
               <div className="mread-empty"><div className="ic">✉</div><div>Wähle eine Nachricht zum Lesen.</div></div>
             )}
@@ -819,7 +830,7 @@ function MailFrame({ html, hasImages, withImages, onLoadImages, mode }: any) {
   );
 }
 
-function Reader({ reading, account, onClose, onReply, suggests, suggestsLoading, ensure, onCategorize, onCorrect, onLoadImages, onAction, onSetReply, onAddLabel, onDiag }: any) {
+function Reader({ reading, account, onClose, onReply, suggests, suggestsLoading, ensure, onCategorize, onCorrect, onLoadImages, onAction, onSetReply, onAnswered, onAddLabel, onDiag }: any) {
   const m = reading.msg;
   const isSent = m.folder_type === "sent";
   const [takingJob, setTakingJob] = useState(false);
@@ -965,6 +976,11 @@ function Reader({ reading, account, onClose, onReply, suggests, suggestsLoading,
       </div>
       <div className="df">
         {canReply && <button className="btn btn-primary" onClick={() => onReply({ custom: true })}>Antworten</button>}
+        {!isSent && onAnswered && (
+          m.reply_sent_at
+            ? <button className="btn btn-answered" onClick={() => onAnswered(m, false)} title="Doch nicht beantwortet – wieder als offen markieren">✓ Beantwortet</button>
+            : <button className="btn" onClick={() => onAnswered(m, true)} title="Diese Mail manuell als beantwortet markieren">Beantwortet</button>
+        )}
         {!isSent && m.needs_reply && <button className="btn" onClick={() => onSetReply(m, false)} title="Als erledigt/keine Antwort">Keine Antwort nötig</button>}
         <button className="btn" onClick={() => onAction(m, "archive")}>Archivieren</button>
         <button className="btn" onClick={() => onAction(m, "spam")}>Spam</button>
