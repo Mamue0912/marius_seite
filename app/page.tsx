@@ -17,7 +17,7 @@ export default async function Home() {
   // Zusammenfassungen (keine langen Listen) aus echten Daten.
   const { data: inbox } = await admin
     .from("messages")
-    .select("id,from_name,from_address,subject,received_at,is_read,needs_reply,semantic_category,mail_account_id,deadline_at,folder_type,hidden")
+    .select("id,from_name,from_address,subject,received_at,is_read,needs_reply,semantic_category,relevance,mail_account_id,deadline_at,folder_type,hidden")
     .eq("user_id", user.id)
     .eq("is_deleted", false)
     .eq("folder_type", "inbox")
@@ -25,16 +25,17 @@ export default async function Home() {
     .limit(400);
 
   const rows = inbox || [];
+  // Ungelesen = Posteingang, nicht gelesen (gleiche Regel wie Liste & Nav-Badge).
   const perAccount = accounts.map((a) => ({
     id: a.id, email: a.email, provider: a.provider,
-    unread: rows.filter((m) => m.mail_account_id === a.id && !m.is_read && !m.hidden).length
+    unread: rows.filter((m) => m.mail_account_id === a.id && !m.is_read).length
   }));
   const needsReply = rows.filter((m) => m.needs_reply && !m.hidden);
-  const unreadImportant = rows.filter((m) => !m.is_read && !m.hidden && (m.semantic_category === "Wichtig" || m.needs_reply));
-  const newest = rows.find((m) => !m.hidden) || null;
+  const unreadImportant = rows.filter((m) => !m.is_read && (m.relevance === "wichtig" || m.relevance === "sehr_wichtig" || m.semantic_category === "Wichtig" || m.needs_reply));
+  const newest = rows[0] || null;
   // Zwei bis drei neueste ungelesene für die Übersicht (klickbar → direkt öffnen).
   const acctById = Object.fromEntries(accounts.map((a) => [a.id, a]));
-  const newestUnread = rows.filter((m) => !m.is_read && !m.hidden).slice(0, 3).map((m) => ({
+  const newestUnread = rows.filter((m) => !m.is_read).slice(0, 3).map((m) => ({
     id: m.id, from: m.from_name || m.from_address || "", subject: m.subject || "(kein Betreff)",
     at: m.received_at, provider: acctById[m.mail_account_id]?.provider || "", email: acctById[m.mail_account_id]?.email || ""
   }));
@@ -74,7 +75,7 @@ export default async function Home() {
       <Overview
         accounts={perAccount}
         summary={{
-          totalUnread: rows.filter((m) => !m.is_read && !m.hidden).length,
+          totalUnread: rows.filter((m) => !m.is_read).length,
           needsReply: needsReply.length,
           unreadImportant: unreadImportant.length,
           deadlines: deadlines.length
