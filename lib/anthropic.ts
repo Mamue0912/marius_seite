@@ -188,7 +188,8 @@ Aufgabe: Formuliere eine vollständige, sendefertige Antwort-E-Mail (nur Body al
 // =====================================================================
 export type Block =
   | { type: "text"; text: string }
-  | { type: "image"; source: { type: "base64"; media_type: string; data: string } };
+  | { type: "image"; source: { type: "base64"; media_type: string; data: string } }
+  | { type: "document"; source: { type: "base64"; media_type: "application/pdf"; data: string } };
 
 async function rawJson<T>(system: string, content: string | Block[], schema: any, maxTokens = 2600): Promise<T> {
   if (!aiConfigured()) throw new Error("Fehlende Umgebungsvariable: ANTHROPIC_API_KEY");

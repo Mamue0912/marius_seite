@@ -13,9 +13,19 @@ export function imageBlock(buffer: Buffer, mime: string): Block {
   return { type: "image", source: { type: "base64", media_type: mt, data: buffer.toString("base64") } };
 }
 
+// PDF direkt an Claude als Dokument (liest auch gescannte PDFs ohne Textebene).
+export function pdfBlock(buffer: Buffer): Block {
+  return { type: "document", source: { type: "base64", media_type: "application/pdf", data: buffer.toString("base64") } };
+}
+
+export function isPdf(mime: string, name: string): boolean {
+  return (mime || "").toLowerCase().includes("pdf") || /\.pdf$/i.test(name || "");
+}
+
 export interface ExtractResult {
-  text: string | null;   // null bei Bildern (dann via Vision)
+  text: string | null;   // null bei Bildern/gescannten PDFs (dann via Vision/Dokument)
   isImage: boolean;
+  isPdf?: boolean;
   mediaType?: string;
 }
 
@@ -31,9 +41,11 @@ export async function extractText(buffer: Buffer, mime: string, name: string): P
       const { PDFParse } = await import("pdf-parse");
       const parser = new PDFParse({ data: new Uint8Array(buffer) });
       const res = await parser.getText();
-      return { text: (res?.text || "").trim() || null, isImage: false };
+      const text = (res?.text || "").trim();
+      // Kein Text (z. B. gescanntes PDF) → als PDF-Dokument an die KI weiterreichen.
+      return { text: text || null, isImage: false, isPdf: true };
     } catch {
-      return { text: null, isImage: false };
+      return { text: null, isImage: false, isPdf: true };
     }
   }
   if (m.includes("wordprocessingml") || lower.endsWith(".docx")) {

@@ -63,12 +63,11 @@ export async function POST(req: NextRequest) {
         content = [imageBlock(buffer, mime)];
         mode = "screenshot";
       } else {
-        const { extractText } = await import("@/lib/docExtract");
+        const { extractText, isPdf, pdfBlock } = await import("@/lib/docExtract");
         const res = await extractText(buffer, mime, file.name || "stelle.pdf");
-        if (!res.text) return NextResponse.json({ error: "no_text", message: "Aus dieser Datei konnte kein Text gelesen werden." }, { status: 422 });
-        content = res.text.slice(0, 14000);
-        jobText = content;
-        mode = "pdf";
+        if (res.text) { content = res.text.slice(0, 14000); jobText = content; mode = "pdf"; }
+        else if (isPdf(mime, file.name || "")) { content = [pdfBlock(buffer)]; mode = "pdf"; } // gescanntes PDF
+        else return NextResponse.json({ error: "no_text", message: "Aus dieser Datei konnte kein Text gelesen werden." }, { status: 422 });
       }
     } else {
       const body = await req.json().catch(() => ({}));

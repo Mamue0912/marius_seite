@@ -48,13 +48,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "upload_failed", message: "Speichern fehlgeschlagen. Ist der Storage-Bucket 'documents' als privat angelegt? Details: " + detail }, { status: 502 });
   }
 
-  // Textextraktion (Bilder werden später per Vision gelesen).
+  // Textextraktion. Bilder + gescannte PDFs (ohne Textebene) werden per
+  // Vision/Dokument gelesen → Status "neu" statt "fehler".
   let extracted: string | null = null;
   let status = "neu";
   try {
     const res = await extractText(buffer, mime, name);
-    if (!res.isImage) { extracted = res.text; status = res.text ? "verarbeitet" : "fehler"; }
-    else status = "neu"; // Bild → Fakten via Vision on demand
+    if (res.text) { extracted = res.text; status = "verarbeitet"; }
+    else if (res.isImage || res.isPdf) status = "neu";
+    else status = "fehler";
   } catch { status = "fehler"; }
 
   const { data: row, error } = await supabaseAdmin().from("app_documents").insert({

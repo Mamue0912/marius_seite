@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabaseServer";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { downloadDocument } from "@/lib/storage";
-import { imageBlock, isImageMime } from "@/lib/docExtract";
+import { imageBlock, isImageMime, isPdf, pdfBlock } from "@/lib/docExtract";
 import { extractDocumentFacts, aiConfigured, aiErrorInfo, Block } from "@/lib/anthropic";
 import { recordAiEvent } from "@/lib/aiDiagnostics";
 import { env } from "@/lib/env";
@@ -59,13 +59,13 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     let content: string | Block[];
     if (doc.extracted_text) {
       content = doc.extracted_text.slice(0, 12000);
-    } else if (isImageMime(doc.mime) || doc.processing_status === "neu") {
+    } else {
+      // Kein Text vorhanden → Datei laden und als Bild bzw. PDF-Dokument an die KI.
       const dl = await downloadDocument(doc.storage_path);
       if (!dl) return NextResponse.json({ error: "no_content", message: "Dateiinhalt konnte nicht gelesen werden." }, { status: 502 });
-      if (isImageMime(dl.mime) || isImageMime(doc.mime)) content = [imageBlock(dl.buffer, doc.mime || dl.mime)];
+      if (isImageMime(doc.mime) || isImageMime(dl.mime)) content = [imageBlock(dl.buffer, doc.mime || dl.mime)];
+      else if (isPdf(doc.mime, doc.name)) content = [pdfBlock(dl.buffer)];
       else return NextResponse.json({ error: "no_text", message: "Aus dieser Datei konnte kein Text gelesen werden." }, { status: 422 });
-    } else {
-      return NextResponse.json({ error: "no_text", message: "Kein lesbarer Inhalt vorhanden." }, { status: 422 });
     }
 
     const { facts } = await extractDocumentFacts({ content });
