@@ -125,6 +125,7 @@ export default function Cockpit({
   const [suggestLoading, setSuggestLoading] = useState<Record<string, boolean>>({});
   const [diag, setDiag] = useState<boolean>(false);
   const [classify, setClassify] = useState<{ total: number; done: number } | null>(null);
+  const [classifyErr, setClassifyErr] = useState<string | null>(null);
   const accById: Record<string, Account> = Object.fromEntries(accounts.map((a) => [a.id, a]));
   const filter = { account: sel.account, folder: sel.ftype, cat: "all", unread: false, needs: false, q };
   const [drawer, setDrawer] = useState<any>(null); // { msg, mode, loading, draft, body, tone, customInstruction, confirmBinding, sending }
@@ -184,37 +185,37 @@ export default function Cockpit({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [msgs, initialOpenId]);
 
-  // ---- Einmalige Nachklassifizierung bereits gespeicherter Mails ----
-  // Läuft nur, wenn es noch nicht eingeordnete Nachrichten gibt; verarbeitet
-  // in Stapeln mit sichtbarem Fortschritt und lädt danach die Liste neu.
+  // ---- Nachklassifizierung bereits gespeicherter Mails (mit sichtbarem Fehler) ----
+  async function runClassify() {
+    setClassifyErr(null);
+    try {
+      const g = await fetch("/api/mail/classify");
+      if (!g.ok) { setClassifyErr(`Einordnung nicht erreichbar (HTTP ${g.status}). Ist der neue Stand deployt?`); return; }
+      const s = await g.json();
+      if (!s || !s.remaining) { setClassify(null); await reloadMessages(); return; }
+      setClassify({ total: s.total, done: s.classified });
+      let remaining = s.remaining;
+      let guard = 0;
+      while (remaining > 0 && guard < 200) {
+        guard++;
+        const p = await fetch("/api/mail/classify", { method: "POST" });
+        if (!p.ok) { setClassifyErr(`Einordnung fehlgeschlagen (HTTP ${p.status}).`); break; }
+        const r = await p.json();
+        remaining = r.remaining;
+        setClassify({ total: r.total, done: r.classified });
+        if (r.error) setClassifyErr(`Datenbank meldet: ${r.error}`);
+        if (!r.processed) { if (!r.error) setClassifyErr("Es konnte keine Nachricht eingeordnet werden (0 verarbeitet)."); break; }
+      }
+      await reloadMessages();
+    } catch (e: any) {
+      setClassifyErr("Netzwerk-/Serverfehler bei der Einordnung: " + (e?.message || "unbekannt"));
+    } finally {
+      setTimeout(() => setClassify(null), 1500);
+    }
+  }
   useEffect(() => {
     if (!connected) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const s = await (await fetch("/api/mail/classify")).json();
-        if (cancelled || !s || !s.remaining) return;
-        setClassify({ total: s.total, done: s.classified });
-        let remaining = s.remaining;
-        let guard = 0;
-        while (remaining > 0 && !cancelled && guard < 200) {
-          guard++;
-          const r = await (await fetch("/api/mail/classify", { method: "POST" })).json();
-          remaining = r.remaining;
-          setClassify({ total: r.total, done: r.classified });
-          if (r.error) setStatus((st: any) => ({ ...st, classifyError: r.error }));
-          if (!r.processed) break; // Schutz vor Endlosschleife
-        }
-        // Ergebnisse frisch laden, damit die intelligenten Ansichten greifen.
-        try {
-          const supabase = supabaseBrowser();
-          const { data } = await supabase.from("messages").select("*").eq("is_deleted", false).order("received_at", { ascending: false });
-          if (!cancelled && data) setMsgs(data);
-        } catch {}
-      } catch {}
-      if (!cancelled) setTimeout(() => setClassify(null), 1500);
-    })();
-    return () => { cancelled = true; };
+    runClassify();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connected]);
 
@@ -531,6 +532,12 @@ export default function Cockpit({
               <div className="classify-banner">
                 <span className="spin" />
                 <span>Nachrichten werden eingeordnet: {classify.done} von {classify.total}</span>
+              </div>
+            )}
+            {classifyErr && (
+              <div className="filter-banner" style={{ background: "var(--urgent-soft)", borderColor: "rgba(255,105,97,.35)", color: "#ffd9d6" }}>
+                <span>Einordnung: {classifyErr}</span>
+                <button className="mini-link" onClick={runClassify}>Erneut</button>
               </div>
             )}
             {status?.syncing && (
