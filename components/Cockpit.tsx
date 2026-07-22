@@ -196,10 +196,13 @@ export default function Cockpit({
         if (cancelled || !s || !s.remaining) return;
         setClassify({ total: s.total, done: s.classified });
         let remaining = s.remaining;
-        while (remaining > 0 && !cancelled) {
+        let guard = 0;
+        while (remaining > 0 && !cancelled && guard < 200) {
+          guard++;
           const r = await (await fetch("/api/mail/classify", { method: "POST" })).json();
           remaining = r.remaining;
           setClassify({ total: r.total, done: r.classified });
+          if (r.error) setStatus((st: any) => ({ ...st, classifyError: r.error }));
           if (!r.processed) break; // Schutz vor Endlosschleife
         }
         // Ergebnisse frisch laden, damit die intelligenten Ansichten greifen.
@@ -233,9 +236,6 @@ export default function Cockpit({
 
   // Zähler IMMER aus derselben Quelle wie die Liste (messages), nie aus IMAP-STATUS.
   const unreadInbox = (accId?: string) => msgs.filter((m: any) => !m.is_deleted && (m.folder_type || "inbox") === "inbox" && !m.is_read && (!accId || m.mail_account_id === accId)).length;
-  // Vom Server (IMAP-STATUS) gemeldete, aber noch NICHT gespeicherte Nachrichten.
-  const imapUnread = (accId?: string) => folders.filter((f) => f.folder_type === "inbox" && (!accId || f.account_id === accId)).reduce((s, f) => s + (f.unread || 0), 0);
-  const pendingInbox = (accId?: string) => Math.max(0, imapUnread(accId) - unreadInbox(accId));
 
   // Gespeicherte Klassifizierung – Nutzer-Overrides haben immer Vorrang.
   const labelsOf = (m: Msg): string[] => (m.user_labels && m.user_labels.length ? m.user_labels : (m.labels || []));
@@ -484,20 +484,17 @@ export default function Cockpit({
             <button className={"mfolder top" + (sel.account === "all" && !sel.view && sel.ftype === "inbox" ? " active" : "")} onClick={() => selectFolder("all", "inbox")}>
               <span className="mf-ic">📥</span><span className="mf-lbl">Alle Postfächer</span>
               {unreadInbox() > 0 && <span className="mf-count">{unreadInbox()}</span>}
-              {pendingInbox() > 0 && <span className="mf-pending" title={`${pendingInbox()} werden synchronisiert`}>⟳{pendingInbox()}</span>}
             </button>
             {accounts.map((a) => {
               const fl = foldersFor(a.id);
               const open = expanded[a.id] !== false;
               const accUnread = unreadInbox(a.id);
-              const accPending = pendingInbox(a.id);
               return (
                 <div className="macct" key={a.id}>
                   <button className="macct-h" onClick={() => setExpanded((e) => ({ ...e, [a.id]: !open }))}>
                     <span className={"chev" + (open ? " open" : "")}>›</span>
                     <span className="macct-name">{PROVIDERS[a.provider]?.label || a.provider}</span>
                     {accUnread > 0 && <span className="mf-count">{accUnread}</span>}
-                    {accPending > 0 && <span className="mf-pending" title={`${accPending} werden synchronisiert`}>⟳{accPending}</span>}
                   </button>
                   {open && (
                     <div className="macct-folders">
@@ -536,11 +533,10 @@ export default function Cockpit({
                 <span>Nachrichten werden eingeordnet: {classify.done} von {classify.total}</span>
               </div>
             )}
-            {pendingInbox() > 0 && (
+            {status?.syncing && (
               <div className="sync-banner">
                 <span className="spin" />
-                <span>{pendingInbox()} {pendingInbox() === 1 ? "Nachricht wird" : "Nachrichten werden"} synchronisiert…</span>
-                <button className="mini-link" onClick={manualSync}>Jetzt laden</button>
+                <span>Neue Nachrichten werden abgerufen…</span>
               </div>
             )}
             {(sel.view || sel.ftype !== "inbox" || sel.account !== "all") && unreadInbox() > 0 && (
@@ -596,7 +592,7 @@ export default function Cockpit({
         loadedTotal: msgs.length,
         visibleCount: msgs.filter(visible).length,
         unreadInboxDb: unreadInbox(),
-        sel, report: status?.report, syncedAt: status?.syncedAt, syncing: !!status?.syncing
+        sel, report: status?.report, syncedAt: status?.syncedAt, syncing: !!status?.syncing, classifyError: status?.classifyError
       }} />}
       {compose && <ComposeModal compose={compose} setCompose={setCompose} accounts={accounts} sendEnabled={sendEnabled} />}
     </>
@@ -621,6 +617,7 @@ function MailDiagModal({ onClose, client }: any) {
             <span className="k">Aktiver Filter</span><span className="v">{client.sel.view ? "Ansicht: " + client.sel.view : `Konto: ${client.sel.account} · Ordner: ${client.sel.ftype}`}</span>
             <span className="k">Letzter Sync</span><span className="v">{client.syncing ? "läuft…" : client.syncedAt ? new Date(client.syncedAt).toLocaleTimeString("de-DE") : "—"}</span>
           </div>
+          {client.classifyError && <div className="note binding-warn" style={{ marginTop: 8 }}>Einordnung meldet: {client.classifyError}</div>}
           {client.report && client.report.length > 0 && (
             <>
               <div className="label">Letzter Sync-Lauf</div>

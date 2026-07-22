@@ -37,12 +37,16 @@ export async function POST(req: NextRequest) {
   }
 
   const rules = await loadRules(user.id);
+  // Bewusst nur robuste Basisspalten selektieren, damit die Abfrage nicht an
+  // einer evtl. noch fehlenden Spalte scheitert.
   const { data: batch } = await admin.from("messages")
-    .select("id,from_address,from_name,reply_to_addresses,subject,preview,is_bulk,has_list_unsub,folder_type,in_reply_to,classification_source,mail_account_id")
+    .select("id,from_address,from_name,reply_to_addresses,subject,preview,is_bulk,has_list_unsub,folder_type,in_reply_to,mail_account_id,user_relevance,user_labels")
     .eq("user_id", user.id).eq("is_deleted", false).is("classified_at", null)
     .order("received_at", { ascending: false }).limit(BATCH);
 
   let processed = 0;
+  let failed = 0;
+  let firstError: string | null = null;
   for (const m of batch || []) {
     const res = classifyMessage({
       from_address: m.from_address, from_name: m.from_name, reply_to: m.reply_to_addresses,
@@ -50,16 +54,15 @@ export async function POST(req: NextRequest) {
       folder_type: m.folder_type, in_thread: !!m.in_reply_to
     });
     const now = new Date().toISOString();
-    // Nutzer-Overrides niemals überschreiben – nur Zusammenfassung/Zeitstempel.
-    if (m.classification_source === "user_override") {
-      await admin.from("messages").update({ summary: res.summary, classified_at: now }).eq("id", m.id);
-      processed++; continue;
-    }
+    // Nutzerkorrekturen bleiben erhalten: user_*-Felder werden nie geschrieben,
+    // und die UI liest user_* mit Vorrang. Basiswerte dürfen wir neu setzen.
     const update: any = {
       labels: res.labels, message_type: res.message_type, action_status: res.action_status,
       relevance: res.relevance, priority: res.priority, needs_reply: res.needs_reply,
       summary: res.summary, classified_at: now, classification_source: "auto"
     };
+    // Vorhandene Nutzer-Labels behalten (zusammenführen).
+    if (Array.isArray(m.user_labels) && m.user_labels.length) update.labels = Array.from(new Set([...res.labels, ...m.user_labels]));
     // Nutzerregeln (immer als Label / nie antwortpflichtig / Kategorie) anwenden.
     const r = applyRules(rules, m);
     if (r.matched) {
@@ -70,10 +73,17 @@ export async function POST(req: NextRequest) {
       if (r.needs_reply === true) { update.needs_reply = true; update.action_status = "reply_required"; }
       update.classification_source = "rule";
     }
-    await admin.from("messages").update(update).eq("id", m.id);
-    processed++;
+    // Fehlertolerant: Supabase wirft nicht, sondern liefert { error }. Schlägt
+    // das volle Update fehl (z. B. weil eine Spalte noch fehlt), wird ein
+    // minimales Update versucht, damit die Nachricht NICHT dauerhaft im Zustand
+    // "Wird eingeordnet…" hängen bleibt.
+    const { error: upErr } = await admin.from("messages").update(update).eq("id", m.id);
+    if (!upErr) { processed++; continue; }
+    if (!firstError) firstError = upErr.message;
+    failed++;
+    await admin.from("messages").update({ summary: res.summary, classified_at: now, relevance: res.relevance, needs_reply: res.needs_reply }).eq("id", m.id);
   }
 
   const c = await counts(user.id);
-  return NextResponse.json({ processed, ...c });
+  return NextResponse.json({ processed, failed, error: firstError, ...c });
 }
