@@ -9,6 +9,43 @@ function client(): Anthropic {
   return _client;
 }
 
+// Ist die KI-Verbindung überhaupt eingerichtet? (ohne zu werfen)
+export function aiConfigured(): boolean {
+  return !!process.env.ANTHROPIC_API_KEY;
+}
+
+// Serverseitiges Zeitlimit für einen KI-Aufruf. Bewusst kleiner als das
+// Vercel-Funktionslimit (maxDuration), damit wir eine verständliche Fehler-
+// meldung zurückgeben, statt hart abgeschnitten zu werden.
+const AI_TIMEOUT_MS = 38000;
+
+export type AiErrorCategory = "not_configured" | "auth" | "rate_limit" | "timeout" | "overloaded" | "api_error";
+
+export interface AiErrorInfo { category: AiErrorCategory; message: string; }
+
+// Übersetzt einen KI-Fehler in eine verständliche Meldung – ohne je
+// Schlüssel oder private Inhalte preiszugeben.
+export function aiErrorInfo(e: any): AiErrorInfo {
+  const msg = String(e?.message || e || "");
+  const status = e?.status || e?.statusCode;
+  if (!aiConfigured() || /Fehlende Umgebungsvariable: ANTHROPIC_API_KEY/i.test(msg)) {
+    return { category: "not_configured", message: "Die KI-Verbindung ist noch nicht vollständig eingerichtet." };
+  }
+  if (status === 401 || status === 403 || /authentication|invalid x-api-key|permission/i.test(msg)) {
+    return { category: "auth", message: "Der KI-Zugang wurde abgelehnt. Bitte den API-Schlüssel prüfen." };
+  }
+  if (status === 429 || /rate limit/i.test(msg)) {
+    return { category: "rate_limit", message: "Die KI ist gerade ausgelastet. Bitte in einem Moment erneut versuchen." };
+  }
+  if (status === 529 || /overloaded/i.test(msg)) {
+    return { category: "overloaded", message: "Die KI ist derzeit überlastet. Bitte gleich noch einmal versuchen." };
+  }
+  if (e?.name === "APIConnectionTimeoutError" || /timeout|timed out|aborted/i.test(msg)) {
+    return { category: "timeout", message: "Die KI hat zu lange gebraucht. Der Vorgang wurde abgebrochen – bitte erneut versuchen." };
+  }
+  return { category: "api_error", message: "Die KI-Antwort konnte nicht erstellt werden. Bitte erneut versuchen." };
+}
+
 export interface ThreadMessage {
   from: string;
   date: string;
@@ -44,6 +81,8 @@ function renderThread(thread: ThreadMessage[]): string {
 }
 
 async function parseJson<T>(system: string, user: string, schema: any): Promise<T> {
+  // Fehlender Schlüssel: sofort mit klarer Kategorie werfen (kein 38-s-Hänger).
+  if (!aiConfigured()) throw new Error("Fehlende Umgebungsvariable: ANTHROPIC_API_KEY");
   const res = await client().messages.create({
     model: env.anthropicModel(),
     max_tokens: 2000,
@@ -53,7 +92,7 @@ async function parseJson<T>(system: string, user: string, schema: any): Promise<
     // vom SDK im Request-Body durchgereicht; das Cast umgeht nur die Typprüfung
     // der installierten SDK-Version.
     output_config: { format: { type: "json_schema", schema } }
-  } as any);
+  } as any, { timeout: AI_TIMEOUT_MS, maxRetries: 1 });
   const text = res.content.map((b: any) => (b.type === "text" ? b.text : "")).join("");
   return JSON.parse(text) as T;
 }
@@ -110,6 +149,7 @@ export async function generateDraft(params: {
   intentLabel?: string;
   customInstruction?: string; // "Eigene Antwort"
   tone: string; // Professionell | Freundlich | Kurz und direkt | Förmlich | Locker
+  length?: string; // optional: kurz | mittel | ausführlich
   accountContext?: string; // welches eigene Konto, privat/schulisch/beruflich
 }): Promise<DraftResult> {
   const schema = {
@@ -136,7 +176,7 @@ Aufgabe: Formuliere eine vollständige, sendefertige Antwort-E-Mail (nur Body al
 - Automatische Tonwahl: formell bei Unternehmen/Behörden/Lehrern/Trainern/Unbekannten; professionell-freundlich bei Bewerbungen/beruflichem; lockerer bei bekannten Personen; kurz/direkt bei kurzer bisheriger Unterhaltung.
 - setze binding=true, wenn die Antwort eine verbindliche/sensible Entscheidung enthält (Jobannahme/-absage, finanzielle/vertragliche/rechtliche Zusage, verbindliche Terminbestätigung, Weitergabe sensibler Infos).
 - setze needs_attachment=true, wenn im Thread Unterlagen/Anhänge angefordert werden oder der Entwurf auf Anhänge verweist.
-- missing_info: kurze Beschreibung fehlender wichtiger Angaben, sonst null. Erfinde nichts – bei fehlenden Angaben stattdessen eine Rückfrage in den Text aufnehmen.`;
+- missing_info: kurze Beschreibung fehlender wichtiger Angaben, sonst null. Erfinde nichts – bei fehlenden Angaben stattdessen eine Rückfrage in den Text aufnehmen.${params.length ? `\n- Gewünschte Länge: ${params.length}.` : ""}`;
   const ctx = params.accountContext ? `\n\nKontext zum eigenen Konto: ${params.accountContext}` : "";
   const user = `${intentLine}${ctx}\n\nE-Mail-Thread:\n\n${renderThread(params.thread)}`;
   return parseJson(system, user, schema);

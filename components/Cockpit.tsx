@@ -26,6 +26,32 @@ const LABEL_COLORS: Record<string, string> = {
 const TONES = ["Professionell", "Freundlich", "Kurz und direkt", "Förmlich", "Locker"];
 const COMMANDS = ["Kürzer", "Freundlicher", "Förmlicher", "Direkter", "Wärmer", "Weniger begeistert", "Mehr Kontext", "Rechtschreibung prüfen"];
 
+// Robuster fetch mit hartem Zeitlimit und optionalem externen Abbruch.
+// Verhindert unendliches Laden: nach timeoutMs bricht der Request sicher ab.
+async function fetchJson(
+  url: string,
+  opts: { method?: string; body?: string; headers?: Record<string, string>; timeoutMs?: number; signal?: AbortSignal } = {}
+): Promise<{ ok: boolean; status: number; data: any; timedOut: boolean; aborted: boolean }> {
+  const { timeoutMs = 45000, signal: extSignal, ...rest } = opts;
+  const ctrl = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; ctrl.abort(new DOMException("timeout", "TimeoutError")); }, timeoutMs);
+  const onExt = () => ctrl.abort(new DOMException("cancel", "AbortError"));
+  if (extSignal) extSignal.addEventListener("abort", onExt, { once: true });
+  try {
+    const r = await fetch(url, { ...rest, signal: ctrl.signal });
+    let data: any = {};
+    try { data = (await r.json()) || {}; } catch {}
+    return { ok: r.ok, status: r.status, data, timedOut: false, aborted: false };
+  } catch (e: any) {
+    const aborted = !timedOut && (e?.name === "AbortError" || !!extSignal?.aborted);
+    return { ok: false, status: 0, data: {}, timedOut, aborted };
+  } finally {
+    clearTimeout(timer);
+    if (extSignal) extSignal.removeEventListener("abort", onExt);
+  }
+}
+
 type Account = { id: string; email: string; provider: string };
 
 type Folder = { account_id: string; path: string; folder_type: string; unread: number; total: number };
@@ -67,6 +93,8 @@ export default function Cockpit({
   const [folderLoading, setFolderLoading] = useState(false);
   const [mobilePane, setMobilePane] = useState<"nav" | "list" | "read">("list");
   const [suggests, setSuggests] = useState<Record<string, any[]>>({});
+  const [suggestLoading, setSuggestLoading] = useState<Record<string, boolean>>({});
+  const [diag, setDiag] = useState<boolean>(false);
   const accById: Record<string, Account> = Object.fromEntries(accounts.map((a) => [a.id, a]));
   const filter = { account: sel.account, folder: sel.ftype, cat: "all", unread: false, needs: false, q };
   const [drawer, setDrawer] = useState<any>(null); // { msg, mode, loading, draft, body, tone, customInstruction, confirmBinding, sending }
@@ -111,10 +139,15 @@ export default function Cockpit({
     if (suggests[m.id]) return;
     if (m.suggested_replies) { setSuggests((s) => ({ ...s, [m.id]: m.suggested_replies })); return; }
     setSuggests((s) => ({ ...s, [m.id]: [] })); // Platzhalter, verhindert Doppelabruf
-    try {
-      const r = await fetch("/api/reply/suggest", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messageId: m.id }) });
-      if (r.ok) { const j = await r.json(); setSuggests((s) => ({ ...s, [m.id]: j.suggestions || [] })); }
-    } catch {}
+    setSuggestLoading((s) => ({ ...s, [m.id]: true }));
+    const { ok, data } = await fetchJson("/api/reply/suggest", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ messageId: m.id }), timeoutMs: 45000
+    });
+    // Nach dem Laden endet der Spinner IMMER (auch bei Fehler/leer). Der Nutzer
+    // kann dann "Eigene Antwort" wählen. Fehlerdetails in der KI-Diagnose.
+    setSuggests((s) => ({ ...s, [m.id]: ok ? (data.suggestions || []) : [] }));
+    setSuggestLoading((s) => ({ ...s, [m.id]: false }));
   }
 
   const labelsOf = (m: Msg): string[] => (m.user_labels && m.user_labels.length ? m.user_labels : (m.labels || []));
@@ -196,35 +229,40 @@ export default function Cockpit({
     await generate(m, { intent: opts.intent, intentLabel: opts.intentLabel, tone: undefined });
   }
 
-  async function generate(m: Msg, p: { intent?: string; intentLabel?: string; customInstruction?: string; tone?: string }) {
-    setDrawer((d: any) => ({ ...d, loading: true }));
-    try {
-      const r = await fetch("/api/reply/generate", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ messageId: m.id, intent: p.intent, intentLabel: p.intentLabel, customInstruction: p.customInstruction, tone: p.tone })
-      });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.error || "Fehler");
-      setDrawer((d: any) => ({
-        ...d, mode: "generated", loading: false, draft: j.draft, body: j.draft.body,
-        tone: j.draft.tone,
+  async function generate(m: Msg, p: { intent?: string; intentLabel?: string; customInstruction?: string; tone?: string; length?: string }) {
+    // Eigener Abbruch-Controller je Generierung → "Abbrechen"-Button möglich.
+    const ctrl = new AbortController();
+    setDrawer((d: any) => ({ ...d, loading: true, error: null, abort: () => ctrl.abort(new DOMException("cancel", "AbortError")) }));
+    const { ok, status, data, timedOut, aborted } = await fetchJson("/api/mail/generate-reply", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ messageId: m.id, intent: p.intent, intentLabel: p.intentLabel, customInstruction: p.customInstruction, tone: p.tone, length: p.length }),
+      timeoutMs: 45000, signal: ctrl.signal
+    });
+    if (ok) {
+      setDrawer((d: any) => d ? ({
+        ...d, mode: "generated", loading: false, error: null, abort: null,
+        draft: data.draft, body: data.draft.body, tone: data.draft.tone,
         fromAccountId: d.fromAccountId || m.mail_account_id,
         intent: p.intent, intentLabel: p.intentLabel, customInstruction: p.customInstruction, confirmBinding: false
-      }));
-    } catch (e: any) {
-      setDrawer((d: any) => ({ ...d, loading: false, error: e.message }));
+      }) : d);
+      return;
     }
+    const error = aborted ? "Abgebrochen."
+      : timedOut ? "Die KI hat zu lange gebraucht. Bitte erneut versuchen."
+      : status === 0 ? "Keine Verbindung zum Server. Bitte Internet/Deployment prüfen."
+      : data.message || "Die KI-Antwort konnte nicht erstellt werden.";
+    setDrawer((d: any) => d ? ({ ...d, loading: false, abort: null, error }) : d);
   }
 
   async function refine(command: string) {
     if (!drawer) return;
-    setDrawer((d: any) => ({ ...d, refining: true }));
-    try {
-      const r = await fetch("/api/reply/refine", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messageId: drawer.msg.id, command }) });
-      const j = await r.json();
-      if (r.ok) setDrawer((d: any) => ({ ...d, body: j.body, refining: false }));
-      else setDrawer((d: any) => ({ ...d, refining: false }));
-    } catch { setDrawer((d: any) => ({ ...d, refining: false })); }
+    setDrawer((d: any) => ({ ...d, refining: true, refineError: null }));
+    const { ok, data, timedOut, aborted } = await fetchJson("/api/reply/refine", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ messageId: drawer.msg.id, command }), timeoutMs: 45000
+    });
+    if (ok) setDrawer((d: any) => d ? ({ ...d, body: data.body, refining: false }) : d);
+    else setDrawer((d: any) => d ? ({ ...d, refining: false, refineError: aborted ? "Abgebrochen." : timedOut ? "Zu lange gebraucht." : (data.message || "Bearbeitung fehlgeschlagen.") }) : d);
   }
 
   async function changeTone(tone: string) {
@@ -240,14 +278,15 @@ export default function Cockpit({
 
   async function send() {
     if (!drawer) return;
-    setDrawer((d: any) => ({ ...d, sending: true }));
+    setDrawer((d: any) => ({ ...d, sending: true, error: null }));
     await saveEdited(); // aktuellen (ggf. bearbeiteten) Text sichern
-    try {
-      const r = await fetch("/api/reply/send", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messageId: drawer.msg.id, confirm: true, fromAccountId: drawer.fromAccountId }) });
-      const j = await r.json();
-      if (r.ok) setDrawer(null);
-      else setDrawer((d: any) => ({ ...d, sending: false, error: j.message || j.error }));
-    } catch (e: any) { setDrawer((d: any) => ({ ...d, sending: false, error: e.message })); }
+    const { ok, data, timedOut } = await fetchJson("/api/reply/send", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ messageId: drawer.msg.id, confirm: true, fromAccountId: drawer.fromAccountId }),
+      timeoutMs: 45000
+    });
+    if (ok) { setDrawer(null); return; }
+    setDrawer((d: any) => d ? ({ ...d, sending: false, error: timedOut ? "Der Versand hat zu lange gebraucht. Bitte Status prüfen." : (data.message || data.error || "Versand fehlgeschlagen.") }) : d);
   }
 
   async function openReader(m: Msg, images = false) {
@@ -397,8 +436,8 @@ export default function Cockpit({
             <button className="mback mread-back" onClick={() => setMobilePane("list")} aria-label="Zurück">‹ Liste</button>
             {reading ? (
               <Reader reading={reading} account={accById[reading.msg.mail_account_id]} onClose={() => { setReading(null); setMobilePane("list"); }}
-                onReply={(opts: any) => { openDraft(reading.msg, opts); }} suggests={suggests[reading.msg.id]} ensure={ensureSuggestions}
-                onCategorize={categorize} onLoadImages={() => openReader(reading.msg, true)} onAction={mailAction} onSetReply={setReplyFlag} onAddLabel={addLabel} />
+                onReply={(opts: any) => { openDraft(reading.msg, opts); }} suggests={suggests[reading.msg.id]} suggestsLoading={!!suggestLoading[reading.msg.id]} ensure={ensureSuggestions}
+                onCategorize={categorize} onLoadImages={() => openReader(reading.msg, true)} onAction={mailAction} onSetReply={setReplyFlag} onAddLabel={addLabel} onDiag={() => setDiag(true)} />
             ) : (
               <div className="mread-empty"><div className="ic">✉</div><div>Wähle eine Nachricht zum Lesen.</div></div>
             )}
@@ -413,10 +452,11 @@ export default function Cockpit({
           onGenerateCustom={() => generate(drawer.msg, { customInstruction: drawer.customInstruction, tone: drawer.tone })}
           onRefine={refine} onChangeTone={changeTone} onSend={send}
           onRegenerate={() => generate(drawer.msg, { intent: drawer.intent, intentLabel: drawer.intentLabel, customInstruction: drawer.customInstruction, tone: drawer.tone })}
-          accounts={accounts}
+          accounts={accounts} onDiag={() => setDiag(true)}
         />}
       </aside>
 
+      {diag && <DiagModal onClose={() => setDiag(false)} />}
       {compose && <ComposeModal compose={compose} setCompose={setCompose} accounts={accounts} sendEnabled={sendEnabled} />}
     </>
   );
@@ -544,7 +584,7 @@ function MailFrame({ html, hasImages, withImages, onLoadImages, mode }: any) {
   );
 }
 
-function Reader({ reading, account, onClose, onReply, suggests, ensure, onCategorize, onLoadImages, onAction, onSetReply, onAddLabel }: any) {
+function Reader({ reading, account, onClose, onReply, suggests, suggestsLoading, ensure, onCategorize, onLoadImages, onAction, onSetReply, onAddLabel, onDiag }: any) {
   const m = reading.msg;
   const isSent = m.folder_type === "sent";
   // Ansichtsmodus der geöffneten Mail: standardmäßig "Angepasst" (Dark-Mode-harmonisch).
@@ -628,12 +668,13 @@ function Reader({ reading, account, onClose, onReply, suggests, ensure, onCatego
 
         {canReply ? (
           <div className="rd-actions">
-            <div className="label">KI-Antwortvorschläge</div>
+            <div className="label rd-actions-head">KI-Antwortvorschläge {onDiag && <button className="rd-diaglink" onClick={onDiag} title="KI-Diagnose öffnen">Diagnose</button>}</div>
             <div className="suggests">
               {(suggests && suggests.length ? suggests : []).map((s: any, i: number) => (
                 <button key={i} className={"sug" + (s.binding ? " binding" : "")} title={s.explanation} onClick={() => onReply({ intent: s.intent, intentLabel: s.label })}>{s.label}</button>
               ))}
-              {(!suggests || !suggests.length) && <span className="sug" style={{ pointerEvents: "none" }}><span className="spin" /></span>}
+              {suggestsLoading && <span className="sug" style={{ pointerEvents: "none" }}><span className="spin" /></span>}
+              {!suggestsLoading && (!suggests || !suggests.length) && <span className="note" style={{ margin: 0, fontSize: 12.5 }}>Keine Vorschläge verfügbar – du kannst frei antworten.</span>}
               <button className="sug custom" onClick={() => onReply({ custom: true })}>Eigene Antwort</button>
             </div>
           </div>
@@ -647,6 +688,7 @@ function Reader({ reading, account, onClose, onReply, suggests, ensure, onCatego
             </div>
             <div className="chips" style={{ marginTop: 10 }}>
               <button className="chip" onClick={() => onSetReply(m, true)}>Doch Antwort nötig</button>
+              <button className="chip" onClick={() => onReply({ custom: true })} title="KI-Antwort trotzdem erstellen">Trotzdem mit KI antworten</button>
               <button className="chip" onClick={() => onCategorize(m, { hidden: true, ruleScope: "sender" })}>Newsletter ausblenden</button>
             </div>
           </div>
@@ -842,7 +884,7 @@ function MailCard({ m, account, onCategorize, onOpen, selected }: any) {
   );
 }
 
-function DraftPanel({ drawer, setDrawer, sendEnabled, onGenerateCustom, onRefine, onChangeTone, onSend, onRegenerate, accounts }: any) {
+function DraftPanel({ drawer, setDrawer, sendEnabled, onGenerateCustom, onRefine, onChangeTone, onSend, onRegenerate, accounts, onDiag }: any) {
   const m = drawer.msg;
   const d = drawer.draft;
   return (
@@ -860,17 +902,34 @@ function DraftPanel({ drawer, setDrawer, sendEnabled, onGenerateCustom, onRefine
           <>
             <div className="label">Wie möchtest du antworten?</div>
             <input className="custom-input" placeholder="Zum Beispiel: Zusagen und nach dem Startdatum fragen."
-              value={drawer.customInstruction} autoFocus
+              value={drawer.customInstruction} autoFocus disabled={drawer.loading}
               onChange={(e) => setDrawer((x: any) => ({ ...x, customInstruction: e.target.value }))} />
+            {drawer.error && <div className="note binding-warn" style={{ marginTop: 10 }}>{drawer.error} {onDiag && <button className="rd-diaglink" onClick={onDiag}>Diagnose</button>}</div>}
             <div className="df" style={{ padding: "14px 0 0", borderTop: 0 }}>
               <button className="btn btn-primary" disabled={!drawer.customInstruction?.trim() || drawer.loading} onClick={onGenerateCustom}>
                 {drawer.loading ? <><span className="spin" /> Erstelle…</> : "Entwurf erstellen"}
               </button>
-              <button className="btn" onClick={() => setDrawer(null)}>Abbrechen</button>
+              {drawer.loading && drawer.abort
+                ? <button className="btn" onClick={() => drawer.abort()}>Abbrechen</button>
+                : <button className="btn" onClick={() => setDrawer(null)}>Schließen</button>}
             </div>
           </>
-        ) : drawer.loading || !d ? (
-          <div className="empty"><span className="spin" /> <div style={{ marginTop: 12 }}>Antwort wird formuliert…</div></div>
+        ) : drawer.loading ? (
+          <div className="empty">
+            <span className="spin" />
+            <div style={{ marginTop: 12 }}>Antwort wird formuliert…</div>
+            {drawer.abort && <button className="btn" style={{ marginTop: 14 }} onClick={() => drawer.abort()}>Abbrechen</button>}
+          </div>
+        ) : !d ? (
+          // Kein Entwurf und nicht (mehr) am Laden → verständlicher Fehler statt Dauerspinner.
+          <div className="empty">
+            <div className="note binding-warn" style={{ marginTop: 0 }}>{drawer.error || "Es konnte kein Entwurf erstellt werden."}</div>
+            <div className="chips" style={{ marginTop: 12, justifyContent: "center" }}>
+              <button className="btn btn-primary" onClick={onRegenerate}>Erneut versuchen</button>
+              {onDiag && <button className="btn" onClick={onDiag}>KI-Diagnose</button>}
+              <button className="btn" onClick={() => setDrawer(null)}>Schließen</button>
+            </div>
+          </div>
         ) : (
           <>
             <div className="meta-row">
@@ -903,11 +962,12 @@ function DraftPanel({ drawer, setDrawer, sendEnabled, onGenerateCustom, onRefine
               ))}
               {drawer.refining && <span className="spin" style={{ alignSelf: "center" }} />}
             </div>
+            {drawer.refineError && <div className="note binding-warn">{drawer.refineError}</div>}
 
             {d.missing_info && <div className="note warn"><b>Fehlende Information:</b> {d.missing_info} — bitte vor dem Senden prüfen.</div>}
             {d.needs_attachment && <div className="note warn"><b>Anhang beachten:</b> In dieser Unterhaltung werden Unterlagen angefordert. Anhänge werden aktuell nicht mitgesendet – bei Bedarf separat verschicken.</div>}
             {d.binding && <div className="note binding-warn"><b>Achtung – verbindliche Antwort:</b> Diese Antwort enthält eine verbindliche oder sensible Entscheidung. Bitte prüfe den Text genau vor dem Senden.</div>}
-            {drawer.error && <div className="note binding-warn">{drawer.error}</div>}
+            {drawer.error && <div className="note binding-warn">{drawer.error} {onDiag && <button className="rd-diaglink" onClick={onDiag}>Diagnose</button>}</div>}
           </>
         )}
       </div>
@@ -929,6 +989,60 @@ function DraftPanel({ drawer, setDrawer, sendEnabled, onGenerateCustom, onRefine
           <button className="btn" onClick={() => setDrawer(null)}>Abbrechen</button>
         </div>
       )}
+    </>
+  );
+}
+
+// Owner-eigene KI-Diagnose: Konfiguration + letzte Anfragen (Zeit, Erfolg,
+// Dauer, Modell, Fehlerkategorie). Keine Schlüssel, keine Mailinhalte.
+function DiagModal({ onClose }: { onClose: () => void }) {
+  const [state, setState] = useState<any>({ loading: true });
+  useEffect(() => {
+    (async () => {
+      const { ok, data } = await fetchJson("/api/mail/ai-diagnostics", { timeoutMs: 15000 });
+      setState(ok ? { loading: false, ...data } : { loading: false, error: true });
+    })();
+  }, []);
+  const catLabel: Record<string, string> = {
+    not_configured: "Nicht eingerichtet", auth: "Authentifizierung", rate_limit: "Rate-Limit",
+    timeout: "Zeitüberschreitung", overloaded: "Überlastet", api_error: "API-Fehler"
+  };
+  return (
+    <>
+      <div className="scrim open" onClick={onClose} />
+      <div className="modal">
+        <div className="dh"><h3>KI-Diagnose</h3><button className="x" onClick={onClose}>✕</button></div>
+        <div className="db">
+          {state.loading ? <div className="empty"><span className="spin" /></div> : state.error ? (
+            <div className="note binding-warn">Diagnose konnte nicht geladen werden.</div>
+          ) : (
+            <>
+              <div className="meta-row">
+                <span className="k">KI-Verbindung</span>
+                <span className="v">{state.configured ? "✅ eingerichtet" : "❌ nicht eingerichtet (ANTHROPIC_API_KEY fehlt)"}</span>
+                <span className="k">Modell</span><span className="v">{state.model || "—"}</span>
+                <span className="k">Versand</span><span className="v">{state.sendEnabled ? "aktiviert" : "deaktiviert"}</span>
+              </div>
+              <div className="label">Letzte KI-Anfragen</div>
+              {(!state.events || !state.events.length) ? (
+                <div className="note" style={{ marginTop: 0 }}>Noch keine KI-Anfragen protokolliert. (Tabelle <code>ai_events</code> ggf. per <code>schema_ai.sql</code> anlegen.)</div>
+              ) : (
+                <div className="diag-list">
+                  {state.events.map((e: any, i: number) => (
+                    <div key={i} className={"diag-row" + (e.ok ? "" : " bad")}>
+                      <span className="diag-ic">{e.ok ? "✅" : "⚠️"}</span>
+                      <span className="diag-kind">{e.kind}</span>
+                      <span className="diag-meta">{e.created_at ? new Date(e.created_at).toLocaleString("de-DE") : ""} · {e.duration_ms != null ? Math.round(e.duration_ms / 100) / 10 + " s" : "—"}{e.error_category ? " · " + (catLabel[e.error_category] || e.error_category) : ""}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="note" style={{ marginTop: 12, fontSize: 12 }}>Es werden bewusst keine Schlüssel und keine vollständigen Mailinhalte gespeichert.</div>
+            </>
+          )}
+        </div>
+        <div className="df"><button className="btn" onClick={onClose}>Schließen</button></div>
+      </div>
     </>
   );
 }

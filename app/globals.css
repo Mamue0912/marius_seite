@@ -407,6 +407,16 @@ a.tile:hover { border-color: var(--line-strong); transform: translateY(-2px); ba
 .rd-html table { max-width: 100%; border-collapse: collapse; }
 .rd-html td, .rd-html th { border: 1px solid var(--line); padding: 6px 8px; }
 .rd-actions { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line-2); }
+.rd-actions-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.rd-diaglink { border: 0; background: transparent; color: var(--muted); font-size: 11.5px; font-weight: 560; cursor: pointer; padding: 2px 4px; text-decoration: underline; }
+.rd-diaglink:hover { color: var(--ink-2); }
+
+/* KI-Diagnose */
+.diag-list { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.diag-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--surface-2); border: 1px solid var(--line-2); border-radius: var(--r-sm); font-size: 12.5px; }
+.diag-row.bad { border-color: rgba(255,105,97,.4); }
+.diag-kind { font-weight: 620; text-transform: capitalize; }
+.diag-meta { color: var(--muted); margin-left: auto; text-align: right; }
 
 /* Ansichtsauswahl der geöffneten Mail (Angepasst / Original / Nur Text) */
 .rd-viewsel { display: inline-flex; gap: 2px; padding: 3px; margin-bottom: 12px; background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 999px; }

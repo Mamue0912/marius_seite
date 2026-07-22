@@ -3,7 +3,9 @@ import { requireUser } from "@/lib/supabaseServer";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { loadMailAccount, MailAccount } from "@/lib/mailAccounts";
 import { buildThreadContext } from "@/lib/imapFetch";
-import { refineDraft } from "@/lib/anthropic";
+import { refineDraft, aiConfigured, aiErrorInfo } from "@/lib/anthropic";
+import { recordAiEvent } from "@/lib/aiDiagnostics";
+import { env } from "@/lib/env";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,15 +22,18 @@ export async function POST(req: NextRequest) {
   const { data: msg } = await admin.from("messages").select("*").eq("id", messageId).eq("user_id", user.id).maybeSingle();
   if (!msg || !msg.draft_body) return NextResponse.json({ error: "no_draft" }, { status: 404 });
 
+  const started = Date.now();
   try {
     let body: string;
     if (editedBody != null) {
-      body = editedBody; // manuelle Bearbeitung direkt übernehmen
+      body = editedBody; // manuelle Bearbeitung direkt übernehmen (kein KI-Aufruf)
     } else {
+      if (!aiConfigured()) return NextResponse.json({ error: "not_configured", message: "Die KI-Verbindung ist noch nicht vollständig eingerichtet." }, { status: 503 });
       const account = msg.mail_account_id ? await loadMailAccount(msg.mail_account_id) : null;
       const thread = account ? await buildThreadContext(account as MailAccount, msg) : [];
       const r = await refineDraft({ body: msg.draft_body, command, thread });
       body = r.body;
+      await recordAiEvent({ userId: user.id, kind: "refine", ok: true, durationMs: Date.now() - started, model: env.anthropicModel(), subjectHint: msg.subject });
     }
 
     await admin.from("messages")
@@ -36,7 +41,9 @@ export async function POST(req: NextRequest) {
       .eq("id", msg.id);
     return NextResponse.json({ body });
   } catch (e) {
-    console.error("refine failed:", (e as Error).message);
-    return NextResponse.json({ error: "generation_failed" }, { status: 502 });
+    const info = aiErrorInfo(e);
+    console.error("refine failed:", info.category, (e as Error).message);
+    if (editedBody == null) await recordAiEvent({ userId: user.id, kind: "refine", ok: false, durationMs: Date.now() - started, model: env.anthropicModel(), errorCategory: info.category, subjectHint: msg.subject });
+    return NextResponse.json({ error: info.category, message: info.message }, { status: info.category === "not_configured" ? 503 : 502 });
   }
 }

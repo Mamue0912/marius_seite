@@ -3,8 +3,10 @@ import { requireUser } from "@/lib/supabaseServer";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { loadMailAccount, MailAccount } from "@/lib/mailAccounts";
 import { buildThreadContext } from "@/lib/imapFetch";
-import { generateSuggestions } from "@/lib/anthropic";
+import { generateSuggestions, aiConfigured, aiErrorInfo } from "@/lib/anthropic";
 import { accountContextLine } from "@/lib/accountContext";
+import { recordAiEvent } from "@/lib/aiDiagnostics";
+import { env } from "@/lib/env";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,18 +26,24 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ suggestions: msg.suggested_replies, language: msg.draft_language || null });
   }
 
+  if (!aiConfigured()) return NextResponse.json({ error: "not_configured", message: "Die KI-Verbindung ist noch nicht vollständig eingerichtet." }, { status: 503 });
+
   const account = msg.mail_account_id ? await loadMailAccount(msg.mail_account_id) : null;
   if (!account) return NextResponse.json({ error: "no_account" }, { status: 400 });
 
+  const started = Date.now();
   try {
     const thread = await buildThreadContext(account as MailAccount, msg);
     const { language, suggestions } = await generateSuggestions(thread, accountContextLine(account as MailAccount));
     await admin.from("messages")
       .update({ suggested_replies: suggestions, draft_language: language, last_generated_at: new Date().toISOString() })
       .eq("id", msg.id);
+    await recordAiEvent({ userId: user.id, kind: "suggest", ok: true, durationMs: Date.now() - started, model: env.anthropicModel(), subjectHint: msg.subject });
     return NextResponse.json({ suggestions, language });
   } catch (e) {
-    console.error("suggest failed:", (e as Error).message);
-    return NextResponse.json({ error: "generation_failed" }, { status: 502 });
+    const info = aiErrorInfo(e);
+    console.error("suggest failed:", info.category, (e as Error).message);
+    await recordAiEvent({ userId: user.id, kind: "suggest", ok: false, durationMs: Date.now() - started, model: env.anthropicModel(), errorCategory: info.category, subjectHint: msg.subject });
+    return NextResponse.json({ error: info.category, message: info.message }, { status: info.category === "not_configured" ? 503 : 502 });
   }
 }
