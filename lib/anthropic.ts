@@ -182,6 +182,208 @@ Aufgabe: Formuliere eine vollständige, sendefertige Antwort-E-Mail (nur Body al
   return parseJson(system, user, schema);
 }
 
+// =====================================================================
+// Gemeinsamer KI-Service (Mail, Stellenanalyse, Bewerbungs-Chat, Dokumente)
+// Alle Aufrufe teilen Timeout (AI_TIMEOUT_MS), Retry und Fehlerkategorien.
+// =====================================================================
+export type Block =
+  | { type: "text"; text: string }
+  | { type: "image"; source: { type: "base64"; media_type: string; data: string } };
+
+async function rawJson<T>(system: string, content: string | Block[], schema: any, maxTokens = 2600): Promise<T> {
+  if (!aiConfigured()) throw new Error("Fehlende Umgebungsvariable: ANTHROPIC_API_KEY");
+  const res = await client().messages.create({
+    model: env.anthropicModel(), max_tokens: maxTokens, system,
+    messages: [{ role: "user", content: content as any }],
+    output_config: { format: { type: "json_schema", schema } }
+  } as any, { timeout: AI_TIMEOUT_MS, maxRetries: 1 });
+  const text = res.content.map((b: any) => (b.type === "text" ? b.text : "")).join("");
+  return JSON.parse(text) as T;
+}
+
+async function rawText(system: string, messages: any[], maxTokens = 2000): Promise<string> {
+  if (!aiConfigured()) throw new Error("Fehlende Umgebungsvariable: ANTHROPIC_API_KEY");
+  const res = await client().messages.create({
+    model: env.anthropicModel(), max_tokens: maxTokens, system, messages
+  } as any, { timeout: AI_TIMEOUT_MS, maxRetries: 1 });
+  return res.content.map((b: any) => (b.type === "text" ? b.text : "")).join("").trim();
+}
+
+const APPLICATION_RULES = `Du bist ein sorgfältiger, ehrlicher Bewerbungs-Assistent. Absolute Regeln:
+- Erfinde NIEMALS Fakten: keine Praktika, Noten, Fähigkeiten, Sprachkenntnisse, Berufserfahrung, Abschlüsse, sportliche Erfolge, Verfügbarkeiten oder Ansprechpartner.
+- Verwende ausschließlich BESTÄTIGTE Fakten des Nutzers und den Inhalt der Stellenanzeige.
+- Fehlt eine wichtige Angabe, stelle eine gezielte Rückfrage – fülle nichts Erfundenes ein.
+- Keine künstlich genaue Prozentangabe bei Übereinstimmungen; nutze "starke Übereinstimmung", "teilweise Übereinstimmung", "offene Punkte".
+- Schreibe natürlich, klar und ohne übertriebene Begeisterung. Deutsche Sprache, außer die Stelle verlangt ausdrücklich eine andere.`;
+
+export interface JobAnalysis {
+  job_type: "praktikum" | "nebenjob" | "ausbildung" | "stelle" | "unbekannt";
+  company: string | null;
+  position: string | null;
+  summary: string;
+  tasks: string[];
+  requirements_must: string[];
+  requirements_nice: string[];
+  documents_required: string[];
+  deadline: string | null;
+  contact: string | null;
+  application_tips: string[];
+  matches_strong: string[];
+  matches_partial: string[];
+  open_points: string[];
+  language: string;
+}
+
+// Stellenanzeige analysieren (Text oder Screenshot per Vision).
+export async function analyzeJobPosting(input: {
+  content: string | Block[];
+  confirmedFactsText?: string;
+}): Promise<JobAnalysis> {
+  const schema = {
+    type: "object", additionalProperties: false,
+    required: ["job_type", "company", "position", "summary", "tasks", "requirements_must", "requirements_nice", "documents_required", "deadline", "contact", "application_tips", "matches_strong", "matches_partial", "open_points", "language"],
+    properties: {
+      job_type: { type: "string", enum: ["praktikum", "nebenjob", "ausbildung", "stelle", "unbekannt"] },
+      company: { type: ["string", "null"] },
+      position: { type: ["string", "null"] },
+      summary: { type: "string" },
+      tasks: { type: "array", items: { type: "string" } },
+      requirements_must: { type: "array", items: { type: "string" } },
+      requirements_nice: { type: "array", items: { type: "string" } },
+      documents_required: { type: "array", items: { type: "string" } },
+      deadline: { type: ["string", "null"] },
+      contact: { type: ["string", "null"] },
+      application_tips: { type: "array", items: { type: "string" } },
+      matches_strong: { type: "array", items: { type: "string" } },
+      matches_partial: { type: "array", items: { type: "string" } },
+      open_points: { type: "array", items: { type: "string" } },
+      language: { type: "string" }
+    }
+  };
+  const facts = input.confirmedFactsText?.trim();
+  const system = `${APPLICATION_RULES}
+
+Aufgabe: Analysiere die folgende Stellenanzeige und erkläre sie verständlich.
+- job_type: Praktikum, Nebenjob, Ausbildungsplatz, reguläre Stelle oder unbekannt.
+- Erkenne Unternehmen und Position.
+- tasks: welche Aufgaben erwarten die Person.
+- requirements_must: zwingende Voraussetzungen. requirements_nice: nur wünschenswerte.
+- documents_required: welche Unterlagen verlangt werden (Lebenslauf, Zeugnisse …).
+- deadline: Bewerbungsfrist als ISO-Datum (YYYY-MM-DD), sonst kurzer Text, sonst null.
+- contact: Ansprechpartner, sonst null.
+- application_tips: worauf bei der Bewerbung besonders zu achten ist.
+- matches_strong / matches_partial / open_points: NUR anhand der unten bestätigten Fakten. matches_strong = passt besonders gut, matches_partial = teilweise, open_points = Anforderungen, die aktuell nicht belegt sind. ${facts ? "" : "Wenn keine bestätigten Fakten vorliegen, gib in open_points den Hinweis, dass noch keine bestätigten Unterlagen vorhanden sind, und lasse matches_strong/matches_partial leer."}
+- Erfinde nichts. Wenn etwas nicht in der Anzeige steht, lass es weg oder setze null.`;
+  const factLine = facts ? `\n\nBestätigte Fakten des Nutzers (nur diese für die Übereinstimmung nutzen):\n${facts}` : "\n\n(Es liegen noch keine bestätigten Fakten vor.)";
+  let content: string | Block[];
+  if (typeof input.content === "string") {
+    content = `Stellenanzeige:\n\n${input.content}${factLine}`;
+  } else {
+    content = [...input.content, { type: "text", text: `Bitte lies die Stellenanzeige aus dem Bild/den Bildern.${factLine}` }];
+  }
+  return rawJson<JobAnalysis>(system, content, schema, 2600);
+}
+
+// Fakten aus einem hochgeladenen Dokument extrahieren (Text oder Bild).
+export async function extractDocumentFacts(input: { content: string | Block[] }): Promise<{ facts: { category: string; value: string }[] }> {
+  const schema = {
+    type: "object", additionalProperties: false, required: ["facts"],
+    properties: {
+      facts: {
+        type: "array",
+        items: {
+          type: "object", additionalProperties: false, required: ["category", "value"],
+          properties: {
+            category: { type: "string", enum: ["schule", "abschluss", "note", "praktikum", "erfahrung", "sprache", "projekt", "zertifikat", "sport", "faehigkeit", "sonstiges"] },
+            value: { type: "string" }
+          }
+        }
+      }
+    }
+  };
+  const system = `${APPLICATION_RULES}
+
+Aufgabe: Extrahiere aus dem Dokument NUR belegbare, tatsächlich enthaltene Fakten (Schule, Abschluss, Noten, Praktika, Erfahrungen, Sprachkenntnisse, Projekte, Zertifikate, sportliche Erfolge, Fähigkeiten). Erfinde nichts. Gib jede Angabe kurz und prägnant als eigenen Fakt zurück. Wenn nichts Belegbares erkennbar ist, gib eine leere Liste zurück.`;
+  const content: string | Block[] = typeof input.content === "string"
+    ? `Dokumentinhalt:\n\n${input.content}`
+    : [...input.content, { type: "text", text: "Extrahiere belegbare Fakten aus dem Dokument/Bild." }];
+  return rawJson(system, content, schema, 1800);
+}
+
+// Durchgehender Bewerbungs-Chat (Text) mit vollem Kontext.
+export async function applicationChatReply(params: {
+  jobContext: string;
+  factsText: string;
+  docsContext: string;
+  history: { role: "user" | "assistant"; content: string }[];
+  userMessage: string;
+}): Promise<string> {
+  const system = `${APPLICATION_RULES}
+
+Du bist der Chat-Assistent einer konkreten Bewerbung. Du hast Zugriff auf die Stellenausschreibung, die bestätigten Fakten des Nutzers und bereits erstellte Entwürfe. Beziehe dich darauf. Wenn dir für eine Antwort eine wichtige Angabe fehlt, frage konkret nach – erfinde nichts. Formuliere hilfreich und konkret.
+
+=== STELLENAUSSCHREIBUNG / ANALYSE ===
+${params.jobContext || "(noch keine Analyse vorhanden)"}
+
+=== BESTÄTIGTE FAKTEN DES NUTZERS ===
+${params.factsText || "(noch keine bestätigten Fakten)"}
+
+=== BEREITS ERSTELLTE ENTWÜRFE DIESER BEWERBUNG ===
+${params.docsContext || "(noch keine Entwürfe)"}`;
+  const messages = [
+    ...params.history.map((m) => ({ role: m.role, content: m.content })),
+    { role: "user" as const, content: params.userMessage }
+  ];
+  return rawText(system, messages, 1600);
+}
+
+// Bewerbungsdokument erstellen (Anschreiben, Motivation, Mail, Kurzprofil, Gespräch).
+export interface AppDocResult { title: string; body: string; missing_info: string | null; }
+export async function generateApplicationDocument(params: {
+  kind: "anschreiben" | "motivation" | "bewerbungsmail" | "kurzprofil" | "gespraech";
+  tone: string;
+  jobContext: string;
+  factsText: string;
+  instruction?: string;
+}): Promise<AppDocResult> {
+  const schema = {
+    type: "object", additionalProperties: false, required: ["title", "body", "missing_info"],
+    properties: { title: { type: "string" }, body: { type: "string" }, missing_info: { type: ["string", "null"] } }
+  };
+  const kindLabel: Record<string, string> = {
+    anschreiben: "ein vollständiges Bewerbungsanschreiben",
+    motivation: "ein Motivationsschreiben",
+    bewerbungsmail: "eine kurze, höfliche Bewerbungsmail (Anschreiben als Anhang erwähnen)",
+    kurzprofil: "ein prägnantes Kurzprofil",
+    gespraech: "eine strukturierte Vorbereitung auf das Vorstellungsgespräch (mögliche Fragen, gute Antwortansätze aus den bestätigten Fakten, eigene Rückfragen)"
+  };
+  const system = `${APPLICATION_RULES}
+
+Aufgabe: Erstelle ${kindLabel[params.kind]}. Tonalität: ${params.tone}.
+- Nutze ausschließlich die bestätigten Fakten und die Stellenanzeige. Erfinde nichts.
+- body: sauberer Fließtext mit sinnvollen Absätzen (kein Markdown, keine Platzhalter wie "[Name]", wenn die Angabe fehlt – dann in missing_info vermerken).
+- missing_info: kurz auflisten, welche wichtigen Angaben fehlen (sonst null).
+${params.instruction ? `- Zusätzliche Anweisung des Nutzers: "${params.instruction}"` : ""}
+
+=== STELLENAUSSCHREIBUNG / ANALYSE ===
+${params.jobContext || "(keine Analyse vorhanden)"}
+
+=== BESTÄTIGTE FAKTEN ===
+${params.factsText || "(keine bestätigten Fakten)"}`;
+  return rawJson<AppDocResult>(system, "Erstelle das Dokument jetzt.", schema, 2400);
+}
+
+// Generische Textüberarbeitung (kürzer, persönlicher, …) für Bewerbungsdokumente.
+export async function refineText(params: { body: string; command: string; jobContext?: string; factsText?: string }): Promise<{ body: string }> {
+  const schema = { type: "object", additionalProperties: false, required: ["body"], properties: { body: { type: "string" } } };
+  const system = `${APPLICATION_RULES}
+
+Aufgabe: Überarbeite NUR den vorliegenden Text gemäß Anweisung "${params.command}". Ändere keine zugesagten Inhalte, erfinde nichts Neues, behalte belegte Fakten bei.
+${params.jobContext ? `\nStellenkontext:\n${params.jobContext}` : ""}
+${params.factsText ? `\nBestätigte Fakten:\n${params.factsText}` : ""}`;
+  return rawJson(system, `Anweisung: ${params.command}\n\nText:\n${params.body}`, schema, 2200);
+}
+
 // ---- Semantische Kategorien (getrennt von Ordnern & Priorität) ----
 export const SEMANTIC_CATEGORIES = [
   "Wichtig", "Antwort erforderlich", "Schule", "Bewerbungen und Karriere",

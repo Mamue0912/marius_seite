@@ -14,10 +14,13 @@
     "@anthropic-ai/sdk": "^0.68.0",
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.45.4",
+    "docx": "^9.7.1",
     "imapflow": "^1.4.8",
     "mailparser": "^3.9.14",
+    "mammoth": "^1.12.0",
     "next": "^14.2.35",
     "nodemailer": "^6.10.1",
+    "pdf-parse": "^2.4.5",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "sanitize-html": "^2.17.6"

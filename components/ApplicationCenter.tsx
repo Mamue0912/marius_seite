@@ -1,0 +1,789 @@
+"use client";
+import { useEffect, useRef, useState, useCallback } from "react";
+
+// ============================ Konstanten ============================
+const STATUS: { key: string; label: string; tone: string }[] = [
+  { key: "interessant", label: "Interessant", tone: "mid" },
+  { key: "analyse_offen", label: "Analyse offen", tone: "mid" },
+  { key: "unterlagen", label: "Unterlagen in Vorbereitung", tone: "high" },
+  { key: "bereit", label: "Bereit zum Senden", tone: "high" },
+  { key: "beworben", label: "Beworben", tone: "accent" },
+  { key: "rueckmeldung", label: "Rückmeldung ausstehend", tone: "accent" },
+  { key: "gespraech", label: "Vorstellungsgespräch", tone: "low" },
+  { key: "zusage", label: "Zusage", tone: "low" },
+  { key: "absage", label: "Absage", tone: "urgent" }
+];
+const statusLabel = (k: string) => STATUS.find((s) => s.key === k)?.label || k;
+const statusTone = (k: string) => STATUS.find((s) => s.key === k)?.tone || "mid";
+
+const TONES = ["professionell und natürlich", "selbstbewusst", "zurückhaltend", "persönlich", "kurz und präzise", "formell", "modern"];
+const DOC_KINDS: { key: string; label: string }[] = [
+  { key: "anschreiben", label: "Anschreiben" },
+  { key: "motivation", label: "Motivationsschreiben" },
+  { key: "bewerbungsmail", label: "Bewerbungsmail" },
+  { key: "kurzprofil", label: "Kurzprofil" },
+  { key: "gespraech", label: "Gesprächsvorbereitung" }
+];
+const REFINE = ["kürzer", "persönlicher", "professioneller", "konkreter", "weniger übertrieben", "stärker auf die Stelle eingehen", "Einleitung neu schreiben", "Schluss neu schreiben"];
+const FACT_CATS = ["schule", "abschluss", "note", "praktikum", "erfahrung", "sprache", "projekt", "zertifikat", "sport", "faehigkeit", "sonstiges"];
+const JOB_TYPE_LABEL: Record<string, string> = { praktikum: "Praktikum", nebenjob: "Nebenjob", ausbildung: "Ausbildungsplatz", stelle: "Stelle", unbekannt: "Art unklar" };
+
+// Robuster fetch mit Zeitlimit + optionalem Abbruch (kein Endlos-Laden).
+async function aj(url: string, opts: { method?: string; body?: any; json?: any; timeoutMs?: number; signal?: AbortSignal } = {}) {
+  const { timeoutMs = 45000, signal: ext, json, ...rest } = opts;
+  const ctrl = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; ctrl.abort(); }, timeoutMs);
+  const onExt = () => ctrl.abort();
+  if (ext) ext.addEventListener("abort", onExt, { once: true });
+  try {
+    const init: any = { ...rest, signal: ctrl.signal };
+    if (json !== undefined) { init.headers = { "content-type": "application/json" }; init.body = JSON.stringify(json); init.method = init.method || "POST"; }
+    const r = await fetch(url, init);
+    let data: any = {}; try { data = (await r.json()) || {}; } catch {}
+    return { ok: r.ok, status: r.status, data, timedOut, aborted: !!(ext?.aborted && !timedOut) };
+  } catch (e: any) {
+    return { ok: false, status: 0, data: {}, timedOut, aborted: !timedOut };
+  } finally { clearTimeout(timer); if (ext) ext.removeEventListener("abort", onExt); }
+}
+function errText(r: { data: any; timedOut: boolean; aborted: boolean; status: number }, fallback = "Es ist ein Fehler aufgetreten.") {
+  if (r.aborted) return "Abgebrochen.";
+  if (r.timedOut) return "Die Anfrage hat zu lange gedauert.";
+  if (r.status === 0) return "Keine Verbindung zum Server.";
+  return r.data?.message || fallback;
+}
+
+type Account = { id: string; email: string; provider: string };
+
+// ============================ Hauptkomponente ============================
+export default function ApplicationCenter({ accounts, sendEnabled }: { accounts: Account[]; sendEnabled: boolean }) {
+  const [section, setSection] = useState<"uebersicht" | "neu" | "aktiv" | "unterlagen" | "dokumente">("uebersicht");
+  const [apps, setApps] = useState<any[]>([]);
+  const [docs, setDocs] = useState<any[]>([]);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [diag, setDiag] = useState(false);
+
+  const loadApps = useCallback(async () => {
+    const r = await aj("/api/applications", { timeoutMs: 20000 });
+    if (r.ok) setApps(r.data.applications || []);
+  }, []);
+  const loadDocs = useCallback(async () => {
+    const r = await aj("/api/documents", { timeoutMs: 20000 });
+    if (r.ok) setDocs(r.data.documents || []);
+  }, []);
+  useEffect(() => { (async () => { await Promise.all([loadApps(), loadDocs()]); setLoading(false); })(); }, [loadApps, loadDocs]);
+
+  const NAV: { key: any; label: string; ic: string }[] = [
+    { key: "uebersicht", label: "Übersicht", ic: "◉" },
+    { key: "neu", label: "Neue Stelle", ic: "＋" },
+    { key: "aktiv", label: "Aktive Bewerbungen", ic: "▤" },
+    { key: "chat", label: "Bewerbungs-Chat", ic: "💬" } as any,
+    { key: "unterlagen", label: "Meine Unterlagen", ic: "📎" },
+    { key: "dokumente", label: "Erstellte Dokumente", ic: "✍" }
+  ];
+
+  function go(key: any) {
+    if (key === "chat") {
+      const target = openId || (apps[0] && apps[0].id);
+      if (target) { setOpenId(target); }
+      else { setSection("neu"); }
+      return;
+    }
+    setSection(key); setOpenId(null);
+  }
+  function openApp(id: string) { setOpenId(id); }
+
+  return (
+    <div className={"ac" + (openId ? " ac-workspace-open" : "")}>
+      <aside className="ac-side">
+        <div className="ac-side-head"><span className="ac-mark" /> Bewerbungen</div>
+        <nav className="ac-nav">
+          {NAV.map((n) => (
+            <button key={n.key} className={"ac-nav-item" + ((!openId && section === n.key) || (openId && n.key === "chat") ? " on" : "")} onClick={() => go(n.key)}>
+              <span className="ac-nav-ic">{n.ic}</span><span>{n.label}</span>
+            </button>
+          ))}
+        </nav>
+        <div className="ac-side-foot">
+          <button className="ac-diaglink" onClick={() => setDiag(true)}>KI-Diagnose</button>
+        </div>
+      </aside>
+
+      <main className="ac-main">
+        {loading ? <div className="ac-empty"><span className="spin" /></div>
+          : openId ? <Workspace id={openId} accounts={accounts} sendEnabled={sendEnabled} docs={docs} onBack={() => setOpenId(null)} onChanged={loadApps} onDiag={() => setDiag(true)} />
+          : section === "uebersicht" ? <Overview apps={apps} onOpen={openApp} onNew={() => setSection("neu")} />
+          : section === "neu" ? <NewJob onCreated={async (id: string) => { await loadApps(); setOpenId(id); }} accounts={accounts} />
+          : section === "aktiv" ? <AppList apps={apps} onOpen={openApp} onNew={() => setSection("neu")} />
+          : section === "unterlagen" ? <Documents docs={docs} reload={loadDocs} onDiag={() => setDiag(true)} />
+          : <GeneratedDocsAll apps={apps} onOpen={openApp} />}
+      </main>
+
+      {diag && <DiagModal onClose={() => setDiag(false)} />}
+    </div>
+  );
+}
+
+// ============================ Übersicht ============================
+function Overview({ apps, onOpen, onNew }: any) {
+  const now = Date.now();
+  const active = apps.filter((a: any) => !["absage", "zusage"].includes(a.status));
+  const prep = apps.filter((a: any) => ["analyse_offen", "unterlagen", "bereit"].includes(a.status));
+  const waiting = apps.filter((a: any) => ["beworben", "rueckmeldung", "gespraech"].includes(a.status));
+  const deadlines = apps.filter((a: any) => a.deadline).map((a: any) => ({ a, d: new Date(a.deadline).getTime() }))
+    .filter((x: any) => x.d >= now - 864e5).sort((x: any, y: any) => x.d - y.d);
+  const last = [...apps].sort((a: any, b: any) => new Date(b.last_activity_at).getTime() - new Date(a.last_activity_at).getTime())[0];
+  const nextAction = (() => {
+    const bereit = apps.find((a: any) => a.status === "bereit");
+    if (bereit) return { t: `„${bereit.position || bereit.company || "Bewerbung"}" ist bereit zum Senden.`, a: bereit };
+    const analyse = apps.find((a: any) => a.status === "analyse_offen");
+    if (analyse) return { t: `Unterlagen für „${analyse.position || analyse.company}" vorbereiten.`, a: analyse };
+    const dl = deadlines[0];
+    if (dl) return { t: `Frist für „${dl.a.position || dl.a.company}" am ${new Date(dl.a.deadline).toLocaleDateString("de-DE")}.`, a: dl.a };
+    return null;
+  })();
+
+  if (!apps.length) {
+    return (
+      <div className="ac-view">
+        <div className="ac-hero">
+          <h1>Bewerbungszentrale</h1>
+          <p>Dein spezialisierter Arbeitsbereich für Praktika, Nebenjobs, Ausbildung und Stellen. Füge eine Stellenanzeige ein – die KI analysiert sie, und du bekommst pro Stelle ein eigenes Projekt mit Chat, Unterlagen und Dokumenten.</p>
+          <button className="ac-btn primary lg" onClick={onNew}>Erste Stelle einfügen</button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="ac-view">
+      <div className="ac-view-head"><h1>Übersicht</h1><button className="ac-btn primary" onClick={onNew}>＋ Neue Stelle</button></div>
+      <div className="ac-grid">
+        {nextAction && (
+          <div className="ac-mod ac-mod-wide ac-mod-primary" onClick={() => onOpen(nextAction.a.id)}>
+            <div className="ac-mod-k">Nächste sinnvolle Handlung</div>
+            <div className="ac-mod-big">{nextAction.t}</div>
+            <div className="ac-mod-cta">Bewerbung öffnen →</div>
+          </div>
+        )}
+        <div className="ac-mod"><div className="ac-mod-k">Aktive Bewerbungen</div><div className="ac-mod-num">{active.length}</div></div>
+        <div className="ac-mod"><div className="ac-mod-k">In Vorbereitung</div><div className="ac-mod-num">{prep.length}</div></div>
+        <div className="ac-mod"><div className="ac-mod-k">Warte auf Antwort</div><div className="ac-mod-num">{waiting.length}</div></div>
+
+        <div className="ac-mod ac-mod-tall">
+          <div className="ac-mod-k">Offene Fristen</div>
+          {deadlines.length ? (
+            <div className="ac-mini-list">
+              {deadlines.slice(0, 5).map(({ a, d }: any) => {
+                const days = Math.ceil((d - now) / 864e5);
+                return <div key={a.id} className="ac-mini" onClick={() => onOpen(a.id)}>
+                  <span className="ac-mini-t">{a.position || a.company || "Bewerbung"}</span>
+                  <span className={"ac-mini-b " + (days <= 3 ? "urgent" : days <= 10 ? "high" : "mid")}>{days <= 0 ? "heute/überfällig" : "in " + days + " T"}</span>
+                </div>;
+              })}
+            </div>
+          ) : <div className="ac-mod-empty">Keine offenen Fristen.</div>}
+        </div>
+
+        {last && (
+          <div className="ac-mod ac-mod-wide" onClick={() => onOpen(last.id)}>
+            <div className="ac-mod-k">Zuletzt bearbeitet</div>
+            <div className="ac-mod-title">{last.position || "—"}{last.company ? ` · ${last.company}` : ""}</div>
+            <span className={"ac-badge " + statusTone(last.status)}>{statusLabel(last.status)}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================ Neue Stelle ============================
+function NewJob({ onCreated, accounts }: any) {
+  const [tab, setTab] = useState<"url" | "text" | "datei" | "email">("url");
+  const [url, setUrl] = useState("");
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [showFallback, setShowFallback] = useState(false);
+  const ctrlRef = useRef<AbortController | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  async function analyzeJson(payload: any) {
+    setBusy(true); setError(null);
+    const ctrl = new AbortController(); ctrlRef.current = ctrl;
+    const r = await aj("/api/applications/analyze", { json: payload, timeoutMs: 60000, signal: ctrl.signal });
+    setBusy(false);
+    if (r.ok) { onCreated(r.data.applicationId); return; }
+    if (r.data?.error === "fetch_failed") setShowFallback(true);
+    setError(errText(r, "Die Stellenanzeige konnte nicht verarbeitet werden."));
+  }
+  async function analyzeFile(file: File) {
+    setBusy(true); setError(null);
+    const ctrl = new AbortController(); ctrlRef.current = ctrl;
+    const fd = new FormData(); fd.append("file", file); fd.append("mode", "datei");
+    const r = await aj("/api/applications/analyze", { method: "POST", body: fd, timeoutMs: 60000, signal: ctrl.signal });
+    setBusy(false);
+    if (r.ok) { onCreated(r.data.applicationId); return; }
+    setError(errText(r, "Die Datei konnte nicht verarbeitet werden."));
+  }
+
+  return (
+    <div className="ac-view">
+      <div className="ac-view-head"><h1>Neue Stelle</h1></div>
+      <div className="ac-card ac-import">
+        <label className="ac-label">Link zur Stellenanzeige einfügen</label>
+        <div className="ac-import-row">
+          <input className="ac-input" placeholder="https://… (StepStone, Unternehmensseite, Praktikumsplattform)" value={url}
+            onChange={(e) => setUrl(e.target.value)} disabled={busy} onKeyDown={(e) => { if (e.key === "Enter" && url.trim()) analyzeJson({ mode: "url", url: url.trim() }); }} />
+          <button className="ac-btn primary" disabled={busy || !url.trim()} onClick={() => analyzeJson({ mode: "url", url: url.trim() })}>
+            {busy ? <><span className="spin" /> Analysiere…</> : "Analysieren"}
+          </button>
+          {busy && <button className="ac-btn" onClick={() => ctrlRef.current?.abort()}>Abbrechen</button>}
+        </div>
+        <div className="ac-hint">Kann die Seite nicht automatisch gelesen werden, nutze eine der Alternativen unten.</div>
+
+        <div className={"ac-tabs" + (showFallback ? " ac-tabs-glow" : "")}>
+          {(["text", "datei", "email"] as const).map((t) => (
+            <button key={t} className={"ac-tab" + (tab === t ? " on" : "")} onClick={() => setTab(t)}>
+              {t === "text" ? "Text einfügen" : t === "datei" ? "PDF/Screenshot" : "E-Mail übernehmen"}
+            </button>
+          ))}
+        </div>
+
+        {tab === "text" && (
+          <div className="ac-fallback">
+            <textarea className="ac-textarea" placeholder="Text der Stellenanzeige hier einfügen…" value={text} onChange={(e) => setText(e.target.value)} disabled={busy} />
+            <button className="ac-btn primary" disabled={busy || text.trim().length < 40} onClick={() => analyzeJson({ mode: "text", text })}>{busy ? <><span className="spin" /> Analysiere…</> : "Text analysieren"}</button>
+          </div>
+        )}
+        {tab === "datei" && (
+          <div className="ac-fallback">
+            <input ref={fileRef} type="file" accept=".pdf,image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) analyzeFile(f); e.currentTarget.value = ""; }} />
+            <button className="ac-drop" onClick={() => fileRef.current?.click()} disabled={busy}>
+              {busy ? <><span className="spin" /> Analysiere…</> : "PDF oder Screenshot hochladen"}
+            </button>
+            <div className="ac-hint">PDF wird ausgelesen, Screenshots werden per Bilderkennung analysiert.</div>
+          </div>
+        )}
+        {tab === "email" && (
+          <div className="ac-fallback">
+            <div className="ac-hint">E-Mail-Übernahme: Öffne im E-Mail-Bereich die betreffende Nachricht und wähle dort künftig „Als Stelle übernehmen". Alternativ Text der Mail hier einfügen.</div>
+          </div>
+        )}
+
+        {error && <div className="ac-note bad">{error}</div>}
+      </div>
+    </div>
+  );
+}
+
+// ============================ Aktive Bewerbungen ============================
+function AppList({ apps, onOpen, onNew }: any) {
+  return (
+    <div className="ac-view">
+      <div className="ac-view-head"><h1>Aktive Bewerbungen</h1><button className="ac-btn primary" onClick={onNew}>＋ Neue Stelle</button></div>
+      {!apps.length ? <div className="ac-card ac-empty2">Noch keine Bewerbungen. Füge eine Stelle ein.</div> : (
+        <div className="ac-list">
+          {apps.map((a: any) => (
+            <div key={a.id} className="ac-row" onClick={() => onOpen(a.id)}>
+              <div className="ac-row-main">
+                <div className="ac-row-title">{a.position || "Unbenannte Stelle"}{a.job_type ? <span className="ac-tag">{JOB_TYPE_LABEL[a.job_type] || a.job_type}</span> : null}</div>
+                <div className="ac-row-sub">{a.company || "—"}{a.deadline ? ` · Frist ${new Date(a.deadline).toLocaleDateString("de-DE")}` : ""}</div>
+              </div>
+              <span className={"ac-badge " + statusTone(a.status)}>{statusLabel(a.status)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================ Erstellte Dokumente (alle) ============================
+function GeneratedDocsAll({ apps, onOpen }: any) {
+  const [docs, setDocs] = useState<any[] | null>(null);
+  useEffect(() => {
+    (async () => {
+      const all: any[] = [];
+      for (const a of apps) {
+        const r = await aj(`/api/applications/${a.id}`, { timeoutMs: 20000 });
+        if (r.ok) (r.data.generatedDocs || []).forEach((d: any) => all.push({ ...d, app: a }));
+      }
+      all.sort((x, y) => new Date(y.updated_at).getTime() - new Date(x.updated_at).getTime());
+      setDocs(all);
+    })();
+  }, [apps]);
+  return (
+    <div className="ac-view">
+      <div className="ac-view-head"><h1>Erstellte Dokumente</h1></div>
+      {docs === null ? <div className="ac-empty"><span className="spin" /></div>
+        : !docs.length ? <div className="ac-card ac-empty2">Noch keine Dokumente erstellt. Öffne eine Bewerbung und erstelle im Chat/rechten Bereich z. B. ein Anschreiben.</div>
+        : <div className="ac-list">
+            {docs.map((d) => (
+              <div key={d.id} className="ac-row">
+                <div className="ac-row-main">
+                  <div className="ac-row-title">{d.title || DOC_KINDS.find((k) => k.key === d.kind)?.label || d.kind}</div>
+                  <div className="ac-row-sub">{d.app.position || d.app.company || "Bewerbung"} · {new Date(d.updated_at).toLocaleDateString("de-DE")}</div>
+                </div>
+                <div className="ac-row-actions">
+                  <a className="ac-btn sm" href={`/api/applications/doc/${d.id}?format=docx`} target="_blank" rel="noreferrer">DOCX</a>
+                  <button className="ac-btn sm" onClick={() => onOpen(d.app.id)}>Öffnen</button>
+                </div>
+              </div>
+            ))}
+          </div>}
+    </div>
+  );
+}
+
+// ============================ Meine Unterlagen ============================
+function Documents({ docs, reload, onDiag }: any) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  async function upload(files: FileList) {
+    setError(null);
+    for (const file of Array.from(files)) {
+      setBusy(true);
+      const fd = new FormData(); fd.append("file", file);
+      const r = await aj("/api/documents", { method: "POST", body: fd, timeoutMs: 60000 });
+      if (!r.ok) setError(errText(r, "Upload fehlgeschlagen."));
+    }
+    setBusy(false); await reload();
+  }
+
+  return (
+    <div className="ac-view">
+      <div className="ac-view-head"><h1>Meine Unterlagen</h1>
+        <div className="ac-row-actions">
+          <input ref={fileRef} type="file" multiple accept=".pdf,.docx,.txt,image/*" hidden onChange={(e) => { if (e.target.files?.length) upload(e.target.files); e.currentTarget.value = ""; }} />
+          <button className="ac-btn primary" disabled={busy} onClick={() => fileRef.current?.click()}>{busy ? <><span className="spin" /> Lädt…</> : "＋ Hochladen"}</button>
+        </div>
+      </div>
+      <div className="ac-hint">Privat gespeichert (kein öffentlicher Link). Unterstützt PDF, DOCX, TXT und Bilder. Die KI erkennt Fakten – nur von dir <b>bestätigte</b> Fakten werden in Bewerbungen verwendet.</div>
+      {error && <div className="ac-note bad">{error}</div>}
+      {!docs.length ? <div className="ac-card ac-empty2">Noch keine Unterlagen. Lade Lebenslauf, Zeugnisse, Zertifikate usw. hoch.</div> : (
+        <div className="ac-doc-grid">
+          {docs.map((d: any) => (
+            <div key={d.id} className={"ac-doc" + (openId === d.id ? " on" : "")}>
+              <div className="ac-doc-head" onClick={() => setOpenId(openId === d.id ? null : d.id)}>
+                <span className="ac-doc-ic">{/(png|jpe?g|webp|gif)/i.test(d.mime || "") ? "🖼" : d.mime?.includes("pdf") ? "📄" : "📝"}</span>
+                <div className="ac-doc-main">
+                  <div className="ac-doc-name">{d.name}</div>
+                  <div className="ac-doc-sub">{d.doc_type || "sonstiges"} · {new Date(d.created_at).toLocaleDateString("de-DE")} · <span className={"ac-dot " + (d.processing_status === "verarbeitet" ? "ok" : d.processing_status === "fehler" ? "bad" : "wait")} />{d.processing_status}</div>
+                </div>
+                <div className="ac-doc-badges">
+                  {d.factCounts?.bestaetigt ? <span className="ac-badge low">{d.factCounts.bestaetigt} bestätigt</span> : null}
+                  {d.factCounts?.offen ? <span className="ac-badge high">{d.factCounts.offen} offen</span> : null}
+                </div>
+              </div>
+              {openId === d.id && <DocDetail doc={d} reload={reload} onDiag={onDiag} />}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DocDetail({ doc, reload, onDiag }: any) {
+  const [detail, setDetail] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [addCat, setAddCat] = useState("faehigkeit");
+  const [addVal, setAddVal] = useState("");
+  const replaceRef = useRef<HTMLInputElement>(null);
+
+  const load = useCallback(async () => {
+    const r = await aj(`/api/documents/${doc.id}`, { timeoutMs: 20000 });
+    if (r.ok) setDetail(r.data);
+  }, [doc.id]);
+  useEffect(() => { load(); }, [load]);
+
+  async function factAction(payload: any) {
+    const r = await aj(`/api/documents/${doc.id}/facts`, { json: payload, timeoutMs: 50000 });
+    if (!r.ok) { setError(errText(r, "Aktion fehlgeschlagen.")); return false; }
+    await load(); await reload(); return true;
+  }
+  async function extract() { setBusy(true); setError(null); const ok = await factAction({ action: "extract" }); setBusy(false); }
+  async function rename() {
+    const name = prompt("Neuer Name:", doc.name); if (name == null) return;
+    await aj(`/api/documents/${doc.id}`, { method: "PATCH", json: { name } }); await reload();
+  }
+  async function setAllowed(v: boolean) { await aj(`/api/documents/${doc.id}`, { method: "PATCH", json: { allowed_for_applications: v } }); await reload(); }
+  async function del() { if (!confirm("Dieses Dokument wirklich löschen?")) return; await aj(`/api/documents/${doc.id}`, { method: "DELETE" }); await reload(); }
+  async function replace(file: File) { setBusy(true); const fd = new FormData(); fd.append("file", file); const r = await aj(`/api/documents/${doc.id}`, { method: "PUT", body: fd, timeoutMs: 60000 }); setBusy(false); if (r.ok) { await load(); await reload(); } else setError(errText(r)); }
+
+  const facts = detail?.facts || [];
+  const offen = facts.filter((f: any) => f.status === "offen");
+  const bestaetigt = facts.filter((f: any) => f.status === "bestaetigt");
+
+  return (
+    <div className="ac-doc-detail">
+      <div className="ac-doc-tools">
+        <input ref={replaceRef} type="file" hidden accept=".pdf,.docx,.txt,image/*" onChange={(e) => { const f = e.target.files?.[0]; if (f) replace(f); e.currentTarget.value = ""; }} />
+        {detail?.previewUrl && <a className="ac-btn sm" href={detail.previewUrl} target="_blank" rel="noreferrer">Vorschau</a>}
+        <button className="ac-btn sm" onClick={rename}>Umbenennen</button>
+        <button className="ac-btn sm" onClick={() => replaceRef.current?.click()}>Ersetzen</button>
+        <button className="ac-btn sm" onClick={() => setAllowed(!doc.allowed_for_applications)}>{doc.allowed_for_applications ? "Für Bewerbungen: an" : "Für Bewerbungen: aus"}</button>
+        <button className="ac-btn sm danger" onClick={del}>Löschen</button>
+        <button className="ac-btn sm primary" disabled={busy} onClick={extract}>{busy ? <><span className="spin" /> Erkenne…</> : "Fakten erkennen"}</button>
+      </div>
+      {error && <div className="ac-note bad">{error} <button className="ac-diaglink" onClick={onDiag}>Diagnose</button></div>}
+
+      {!!offen.length && <>
+        <div className="ac-label sm">Zur Bestätigung erkannt (KI) – bitte prüfen</div>
+        <div className="ac-facts">
+          {offen.map((f: any) => (
+            <div key={f.id} className="ac-fact offen">
+              <span className="ac-fact-cat">{f.category}</span><span className="ac-fact-val">{f.value}</span>
+              <span className="ac-fact-act">
+                <button title="Bestätigen" onClick={() => factAction({ action: "confirm", factId: f.id })}>✓</button>
+                <button title="Löschen" onClick={() => factAction({ action: "delete", factId: f.id })}>✕</button>
+              </span>
+            </div>
+          ))}
+        </div>
+      </>}
+
+      <div className="ac-label sm">Bestätigte Fakten (nur diese werden in Bewerbungen genutzt)</div>
+      <div className="ac-facts">
+        {bestaetigt.map((f: any) => (
+          <div key={f.id} className="ac-fact ok">
+            <span className="ac-fact-cat">{f.category}</span><span className="ac-fact-val">{f.value}</span>
+            <span className="ac-fact-act"><button title="Entfernen" onClick={() => factAction({ action: "delete", factId: f.id })}>✕</button></span>
+          </div>
+        ))}
+        {!bestaetigt.length && <div className="ac-mod-empty">Noch keine bestätigten Fakten.</div>}
+      </div>
+      <div className="ac-fact-add">
+        <select className="ac-select sm" value={addCat} onChange={(e) => setAddCat(e.target.value)}>{FACT_CATS.map((c) => <option key={c} value={c}>{c}</option>)}</select>
+        <input className="ac-input sm" placeholder="Eigenen Fakt ergänzen…" value={addVal} onChange={(e) => setAddVal(e.target.value)} />
+        <button className="ac-btn sm" disabled={!addVal.trim()} onClick={async () => { if (await factAction({ action: "add", category: addCat, value: addVal })) setAddVal(""); }}>Hinzufügen</button>
+      </div>
+    </div>
+  );
+}
+
+// ============================ Arbeitsbereich (offene Bewerbung) ============================
+function Workspace({ id, accounts, sendEnabled, docs, onBack, onChanged, onDiag }: any) {
+  const [d, setD] = useState<any>(null);
+  const [pane, setPane] = useState<"stelle" | "chat" | "docs">("chat"); // mobil
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    const r = await aj(`/api/applications/${id}`, { timeoutMs: 25000 });
+    if (r.ok) setD(r.data); else setError(errText(r, "Bewerbung konnte nicht geladen werden."));
+  }, [id]);
+  useEffect(() => { setD(null); load(); }, [load]);
+
+  if (error) return <div className="ac-view"><button className="ac-btn" onClick={onBack}>‹ Zurück</button><div className="ac-note bad" style={{ marginTop: 12 }}>{error}</div></div>;
+  if (!d) return <div className="ac-empty"><span className="spin" /></div>;
+  const app = d.application;
+
+  async function patch(update: any) { await aj(`/api/applications/${id}`, { method: "PATCH", json: update }); await load(); await onChanged(); }
+
+  return (
+    <div className="ac-ws">
+      <div className="ac-ws-top">
+        <button className="ac-btn sm" onClick={onBack}>‹ Bewerbungen</button>
+        <div className="ac-ws-title">{app.position || "Bewerbung"}{app.company ? <span className="ac-ws-co"> · {app.company}</span> : null}</div>
+        <select className="ac-select sm" value={app.status} onChange={(e) => patch({ status: e.target.value })}>
+          {STATUS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+        </select>
+        <div className="ac-ws-panes">
+          {(["stelle", "chat", "docs"] as const).map((p) => <button key={p} className={"ac-panebtn" + (pane === p ? " on" : "")} onClick={() => setPane(p)}>{p === "stelle" ? "Stelle" : p === "chat" ? "Chat" : "Dokumente"}</button>)}
+        </div>
+      </div>
+      <div className="ac-ws-body">
+        <section className={"ac-ws-col ac-col-stelle" + (pane === "stelle" ? " show" : "")}><JobPanel app={app} docs={docs} onPatch={patch} onReload={load} /></section>
+        <section className={"ac-ws-col ac-col-chat" + (pane === "chat" ? " show" : "")}><ChatPanel app={app} messages={d.messages} onReload={load} onDiag={onDiag} /></section>
+        <section className={"ac-ws-col ac-col-docs" + (pane === "docs" ? " show" : "")}><DocsPanel app={app} data={d} accounts={accounts} sendEnabled={sendEnabled} onReload={load} onDiag={onDiag} /></section>
+      </div>
+    </div>
+  );
+}
+
+function Chip({ children, tone }: any) { return <span className={"ac-chipv " + (tone || "")}>{children}</span>; }
+
+function JobPanel({ app, docs, onPatch, onReload }: any) {
+  const a = app.analysis;
+  const assignedIds: string[] = []; // aus data.assignedDocuments – hier via docs prop nicht nötig
+  return (
+    <div className="ac-panel">
+      <div className="ac-panel-h">Stelle</div>
+      <div className="ac-jobcard">
+        <div className="ac-jobtype">{JOB_TYPE_LABEL[app.job_type] || "Stelle"}</div>
+        <div className="ac-jobpos">{app.position || "—"}</div>
+        <div className="ac-jobco">{app.company || "—"}</div>
+        <div className="ac-metaline">
+          {app.deadline && <Chip tone="high">Frist {new Date(app.deadline).toLocaleDateString("de-DE")}</Chip>}
+          {app.contact && <Chip>Kontakt: {app.contact}</Chip>}
+          {app.job_url && <a className="ac-chipv link" href={app.job_url} target="_blank" rel="noreferrer">Anzeige ↗</a>}
+        </div>
+      </div>
+      {!a ? <div className="ac-mod-empty">Noch keine Analyse vorhanden.</div> : (
+        <div className="ac-analysis">
+          {a.summary && <p className="ac-sum">{a.summary}</p>}
+          <Sec title="Aufgaben" items={a.tasks} />
+          <Sec title="Zwingende Voraussetzungen" items={a.requirements_must} tone="must" />
+          <Sec title="Wünschenswert" items={a.requirements_nice} />
+          <Sec title="Verlangte Unterlagen" items={a.documents_required} />
+          <Sec title="Worauf achten" items={a.application_tips} />
+          <div className="ac-match">
+            <MatchCol title="Starke Übereinstimmung" items={a.matches_strong} tone="low" />
+            <MatchCol title="Teilweise" items={a.matches_partial} tone="high" />
+            <MatchCol title="Offene Punkte" items={a.open_points} tone="urgent" />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+function Sec({ title, items, tone }: any) { if (!items || !items.length) return null; return <div className="ac-sec"><div className="ac-sec-t">{title}</div><ul className={"ac-ul " + (tone || "")}>{items.map((x: string, i: number) => <li key={i}>{x}</li>)}</ul></div>; }
+function MatchCol({ title, items, tone }: any) { return <div className={"ac-matchcol " + tone}><div className="ac-matchcol-t">{title}</div>{(items && items.length) ? <ul>{items.map((x: string, i: number) => <li key={i}>{x}</li>)}</ul> : <div className="ac-mod-empty sm">—</div>}</div>; }
+
+function ChatPanel({ app, messages, onReload, onDiag }: any) {
+  const [msgs, setMsgs] = useState<any[]>(messages || []);
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const ctrlRef = useRef<AbortController | null>(null);
+  const endRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { setMsgs(messages || []); }, [messages]);
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs, busy]);
+
+  async function send(text: string) {
+    if (!text.trim() || busy) return;
+    setError(null); setInput("");
+    const optimistic = { id: "tmp", role: "user", content: text };
+    setMsgs((m) => [...m, optimistic]); setBusy(true);
+    const ctrl = new AbortController(); ctrlRef.current = ctrl;
+    const r = await aj("/api/applications/chat", { json: { applicationId: app.id, message: text }, timeoutMs: 60000, signal: ctrl.signal });
+    setBusy(false);
+    if (r.ok) { setMsgs((m) => [...m.filter((x) => x.id !== "tmp"), { id: "u" + Date.now(), role: "user", content: text }, r.data.message]); onReload(); }
+    else { setMsgs((m) => m.filter((x) => x.id !== "tmp")); setError(errText(r, "Antwort konnte nicht erstellt werden.")); }
+  }
+
+  const suggestions = ["Fass mir die Stelle zusammen.", "Welche Punkte aus meinem Lebenslauf passen besonders gut?", "Was fehlt mir für diese Stelle?", "Schreib mir ein Anschreiben.", "Erstelle eine kurze Bewerbungsmail.", "Bereite mich auf das Vorstellungsgespräch vor.", "Welche Rückfragen sollte ich stellen?"];
+
+  return (
+    <div className="ac-panel ac-chat">
+      <div className="ac-panel-h">Bewerbungs-Chat</div>
+      <div className="ac-chat-scroll">
+        {!msgs.length && (
+          <div className="ac-chat-intro">
+            <p>Dieser Chat kennt die Stelle und deine <b>bestätigten</b> Unterlagen. Frag zum Beispiel:</p>
+            <div className="ac-suggests">{suggestions.map((s) => <button key={s} className="ac-suggest" onClick={() => send(s)}>{s}</button>)}</div>
+          </div>
+        )}
+        {msgs.map((m) => <div key={m.id} className={"ac-msg " + m.role}><div className="ac-msg-b">{m.content}</div></div>)}
+        {busy && <div className="ac-msg assistant"><div className="ac-msg-b"><span className="spin" /> denkt nach…{ctrlRef.current && <button className="ac-diaglink" onClick={() => ctrlRef.current?.abort()}>Abbrechen</button>}</div></div>}
+        <div ref={endRef} />
+      </div>
+      {error && <div className="ac-note bad">{error} <button className="ac-diaglink" onClick={onDiag}>Diagnose</button></div>}
+      <div className="ac-chat-input">
+        <textarea className="ac-chat-ta" placeholder="Nachricht an den Bewerbungs-Chat…" value={input} disabled={busy}
+          onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(input); } }} />
+        <button className="ac-btn primary" disabled={busy || !input.trim()} onClick={() => send(input)}>Senden</button>
+      </div>
+    </div>
+  );
+}
+
+function DocsPanel({ app, data, accounts, sendEnabled, onReload, onDiag }: any) {
+  const [tone, setTone] = useState(TONES[0]);
+  const [kind, setKind] = useState("anschreiben");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [missing, setMissing] = useState<string | null>(null);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editBody, setEditBody] = useState("");
+  const [refining, setRefining] = useState(false);
+  const [sendOpen, setSendOpen] = useState(false);
+  const ctrlRef = useRef<AbortController | null>(null);
+  const gdocs = data.generatedDocs || [];
+  const assigned = data.assignedDocuments || [];
+  const editing = gdocs.find((x: any) => x.id === editId);
+
+  async function generate() {
+    setBusy(true); setError(null); setMissing(null);
+    const ctrl = new AbortController(); ctrlRef.current = ctrl;
+    const r = await aj("/api/applications/generate-doc", { json: { applicationId: app.id, kind, tone }, timeoutMs: 60000, signal: ctrl.signal });
+    setBusy(false);
+    if (r.ok) { setMissing(r.data.missing_info || null); await onReload(); setEditId(r.data.doc.id); setEditBody(r.data.doc.body); }
+    else setError(errText(r, "Dokument konnte nicht erstellt werden."));
+  }
+  function openEdit(doc: any) { setEditId(doc.id); setEditBody(doc.body); }
+  async function saveEdit() { if (!editId) return; await aj(`/api/applications/doc/${editId}`, { method: "PATCH", json: { body: editBody } }); await onReload(); }
+  async function refine(cmd: string) {
+    if (!editId) return; setRefining(true); setError(null);
+    const r = await aj("/api/applications/refine-doc", { json: { docId: editId, command: cmd }, timeoutMs: 60000 });
+    setRefining(false);
+    if (r.ok) { setEditBody(r.data.body); await onReload(); } else setError(errText(r, "Anpassung fehlgeschlagen."));
+  }
+  async function delDoc(docId: string) { if (!confirm("Dokument löschen?")) return; await aj(`/api/applications/doc/${docId}`, { method: "DELETE" }); if (editId === docId) setEditId(null); await onReload(); }
+  async function assign(documentId: string, action: string) { await aj(`/api/applications/${app.id}/assign`, { json: { documentId, action } }); await onReload(); }
+
+  return (
+    <div className="ac-panel">
+      <div className="ac-panel-h">Dokumente & Entwurf</div>
+
+      <div className="ac-gen">
+        <div className="ac-gen-row">
+          <select className="ac-select sm" value={kind} onChange={(e) => setKind(e.target.value)}>{DOC_KINDS.map((k) => <option key={k.key} value={k.key}>{k.label}</option>)}</select>
+          <select className="ac-select sm" value={tone} onChange={(e) => setTone(e.target.value)}>{TONES.map((t) => <option key={t} value={t}>{t}</option>)}</select>
+        </div>
+        <div className="ac-gen-row">
+          <button className="ac-btn primary" disabled={busy} onClick={generate}>{busy ? <><span className="spin" /> Erstelle…</> : "Erstellen"}</button>
+          {busy && <button className="ac-btn sm" onClick={() => ctrlRef.current?.abort()}>Abbrechen</button>}
+        </div>
+      </div>
+      {error && <div className="ac-note bad">{error} <button className="ac-diaglink" onClick={onDiag}>Diagnose</button></div>}
+      {missing && <div className="ac-note warn"><b>Bitte prüfen – fehlende Angaben:</b> {missing}</div>}
+
+      {!!gdocs.length && (
+        <div className="ac-gdocs">
+          {gdocs.map((doc: any) => (
+            <div key={doc.id} className={"ac-gdoc" + (editId === doc.id ? " on" : "")}>
+              <div className="ac-gdoc-h" onClick={() => (editId === doc.id ? setEditId(null) : openEdit(doc))}>
+                <span className="ac-gdoc-t">{doc.title || DOC_KINDS.find((k) => k.key === doc.kind)?.label}</span>
+                <span className="ac-gdoc-meta">{new Date(doc.updated_at).toLocaleDateString("de-DE")}</span>
+              </div>
+              {editId === doc.id && (
+                <div className="ac-editor-wrap">
+                  <textarea className="ac-editor" value={editBody} onChange={(e) => setEditBody(e.target.value)} onBlur={saveEdit} />
+                  <div className="ac-chips">
+                    {REFINE.map((c) => <button key={c} className="ac-chip" disabled={refining} onClick={() => refine(c)}>{c}</button>)}
+                    {refining && <span className="spin" />}
+                  </div>
+                  <div className="ac-gdoc-actions">
+                    <button className="ac-btn sm" onClick={saveEdit}>Speichern</button>
+                    <a className="ac-btn sm primary" href={`/api/applications/doc/${doc.id}?format=docx`} target="_blank" rel="noreferrer">DOCX herunterladen</a>
+                    <button className="ac-btn sm danger" onClick={() => delDoc(doc.id)}>Löschen</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="ac-label sm">Angehängte Unterlagen</div>
+      <div className="ac-assign">
+        {(data.assignedDocuments || []).map((d: any) => (
+          <span key={d.id} className="ac-chipv low">{d.name}<button className="ac-x" onClick={() => assign(d.id, "remove")}>×</button></span>
+        ))}
+        <AssignPicker app={app} assigned={assigned} onAssign={(id: string) => assign(id, "add")} />
+      </div>
+
+      <button className="ac-btn primary block" onClick={() => setSendOpen(true)}>Bewerbungsmail vorbereiten</button>
+      {sendOpen && <SendModal app={app} data={data} accounts={accounts} sendEnabled={sendEnabled} onClose={() => setSendOpen(false)} onSent={onReload} onDiag={onDiag} />}
+    </div>
+  );
+}
+
+function AssignPicker({ assigned, onAssign }: any) {
+  const [docs, setDocs] = useState<any[] | null>(null);
+  const [open, setOpen] = useState(false);
+  useEffect(() => { if (open && !docs) aj("/api/documents", { timeoutMs: 20000 }).then((r) => { if (r.ok) setDocs((r.data.documents || []).filter((d: any) => d.allowed_for_applications)); }); }, [open, docs]);
+  const assignedIds = new Set(assigned.map((a: any) => a.id));
+  return (
+    <span className="ac-assign-pick">
+      <button className="ac-chipv add" onClick={() => setOpen((v) => !v)}>＋ Unterlage</button>
+      {open && <div className="ac-assign-menu">
+        {docs === null ? <span className="spin" /> : !docs.length ? <div className="ac-mod-empty sm">Keine freigegebenen Unterlagen.</div> :
+          docs.map((d) => <button key={d.id} disabled={assignedIds.has(d.id)} onClick={() => { onAssign(d.id); setOpen(false); }}>{d.name}</button>)}
+      </div>}
+    </span>
+  );
+}
+
+function SendModal({ app, data, accounts, sendEnabled, onClose, onSent, onDiag }: any) {
+  const mailDoc = (data.generatedDocs || []).find((d: any) => d.kind === "bewerbungsmail");
+  const [fromAccountId, setFrom] = useState(accounts[0]?.id || "");
+  const [to, setTo] = useState(app.contact && /@/.test(app.contact) ? app.contact.match(/[\w.+-]+@[\w.-]+/)?.[0] || "" : "");
+  const [cc, setCc] = useState("");
+  const [subject, setSubject] = useState(`Bewerbung als ${app.position || ""}${app.company ? " – " + app.company : ""}`.trim());
+  const [text, setText] = useState(mailDoc?.body || "");
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [checked, setChecked] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [sent, setSent] = useState(false);
+  const attachIds = (data.assignedDocuments || []).map((d: any) => d.id);
+
+  useEffect(() => {
+    (async () => {
+      const r = await aj("/api/applications/send", { json: { applicationId: app.id, mode: "check", attachmentDocIds: attachIds }, timeoutMs: 25000 });
+      if (r.ok) { setWarnings(r.data.warnings || []); }
+      setChecked(true);
+    })();
+  }, []); // eslint-disable-line
+
+  async function doSend() {
+    setBusy(true); setError(null);
+    const r = await aj("/api/applications/send", { json: { applicationId: app.id, mode: "send", confirm: true, fromAccountId, to, cc, subject, text, attachmentDocIds: attachIds, generatedDocId: mailDoc ? null : (data.generatedDocs || []).find((d: any) => d.kind === "anschreiben")?.id || null }, timeoutMs: 60000 });
+    setBusy(false);
+    if (r.ok) { setSent(true); await onSent(); setTimeout(onClose, 1200); }
+    else setError(errText(r, "Versand fehlgeschlagen."));
+  }
+
+  return (
+    <div className="ac-modal-scrim" onClick={() => !busy && onClose()}>
+      <div className="ac-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="ac-modal-h"><h3>Bewerbungsmail</h3><button className="ac-x" onClick={() => !busy && onClose()}>✕</button></div>
+        <div className="ac-modal-b">
+          {sent ? <div className="ac-note ok">Gesendet ✓ Status auf „Beworben" gesetzt.</div> : <>
+            <div className="ac-field"><label>Von</label>
+              <select className="ac-select" value={fromAccountId} onChange={(e) => setFrom(e.target.value)}>{accounts.map((a: any) => <option key={a.id} value={a.id}>{a.email}</option>)}</select></div>
+            <div className="ac-field"><label>An</label><input className="ac-input" value={to} onChange={(e) => setTo(e.target.value)} placeholder="empfaenger@unternehmen.de" /></div>
+            <div className="ac-field"><label>CC</label><input className="ac-input" value={cc} onChange={(e) => setCc(e.target.value)} placeholder="optional" /></div>
+            <div className="ac-field"><label>Betreff</label><input className="ac-input" value={subject} onChange={(e) => setSubject(e.target.value)} /></div>
+            <div className="ac-field"><label>Text</label><textarea className="ac-textarea" value={text} onChange={(e) => setText(e.target.value)} placeholder="Text der Bewerbungsmail…" /></div>
+            <div className="ac-field"><label>Anhänge</label>
+              <div className="ac-attaches">
+                {(data.assignedDocuments || []).length ? (data.assignedDocuments).map((d: any) => <span key={d.id} className="ac-chipv">{d.name}</span>) : <span className="ac-mod-empty sm">Keine Unterlagen angehängt.</span>}
+              </div>
+            </div>
+            {checked && warnings.map((w, i) => <div key={i} className="ac-note warn">{w}</div>)}
+            {error && <div className="ac-note bad">{error} <button className="ac-diaglink" onClick={onDiag}>Diagnose</button></div>}
+            {!sendEnabled && <div className="ac-note warn">Versand ist nicht aktiviert (ENABLE_SEND=false). Du kannst alles vorbereiten, aber noch nicht senden.</div>}
+          </>}
+        </div>
+        {!sent && <div className="ac-modal-f">
+          <button className="ac-btn primary" disabled={busy || !sendEnabled || !to.trim() || !text.trim()} onClick={doSend}>{busy ? <><span className="spin" /> Sende…</> : "Senden"}</button>
+          <button className="ac-btn" onClick={() => !busy && onClose()}>Abbrechen</button>
+        </div>}
+      </div>
+    </div>
+  );
+}
+
+// ============================ KI-Diagnose ============================
+function DiagModal({ onClose }: { onClose: () => void }) {
+  const [s, setS] = useState<any>({ loading: true });
+  useEffect(() => { aj("/api/mail/ai-diagnostics", { timeoutMs: 15000 }).then((r) => setS(r.ok ? { loading: false, ...r.data } : { loading: false, error: true })); }, []);
+  const cat: Record<string, string> = { not_configured: "Nicht eingerichtet", auth: "Authentifizierung", rate_limit: "Rate-Limit", timeout: "Zeitüberschreitung", overloaded: "Überlastet", api_error: "API-Fehler" };
+  return (
+    <div className="ac-modal-scrim" onClick={onClose}>
+      <div className="ac-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="ac-modal-h"><h3>KI-Diagnose</h3><button className="ac-x" onClick={onClose}>✕</button></div>
+        <div className="ac-modal-b">
+          {s.loading ? <div className="ac-empty"><span className="spin" /></div> : s.error ? <div className="ac-note bad">Diagnose nicht verfügbar.</div> : <>
+            <div className="ac-field"><label>KI-Verbindung</label><div>{s.configured ? "✅ eingerichtet" : "❌ nicht eingerichtet (ANTHROPIC_API_KEY fehlt)"}</div></div>
+            <div className="ac-field"><label>Modell</label><div>{s.model || "—"}</div></div>
+            <div className="ac-field"><label>Versand</label><div>{s.sendEnabled ? "aktiviert" : "deaktiviert"}</div></div>
+            <div className="ac-label sm">Letzte KI-Anfragen</div>
+            {(!s.events || !s.events.length) ? <div className="ac-mod-empty">Noch keine protokolliert. (Tabelle ai_events via schema_ai.sql.)</div> :
+              <div className="ac-diag-list">{s.events.map((e: any, i: number) => <div key={i} className={"ac-diag-row" + (e.ok ? "" : " bad")}><span>{e.ok ? "✅" : "⚠️"}</span><span className="ac-diag-kind">{e.kind}</span><span className="ac-diag-meta">{new Date(e.created_at).toLocaleString("de-DE")} · {e.duration_ms != null ? Math.round(e.duration_ms / 100) / 10 + "s" : "—"}{e.error_category ? " · " + (cat[e.error_category] || e.error_category) : ""}</span></div>)}</div>}
+            <div className="ac-hint">Keine Schlüssel und keine vollständigen Inhalte werden gespeichert.</div>
+          </>}
+        </div>
+        <div className="ac-modal-f"><button className="ac-btn" onClick={onClose}>Schließen</button></div>
+      </div>
+    </div>
+  );
+}

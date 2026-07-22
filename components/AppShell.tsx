@@ -4,6 +4,7 @@ import { useState } from "react";
 const NAV = [
   { href: "/", label: "Übersicht", icon: "◉" },
   { href: "/mail", label: "E-Mails", icon: "✉" },
+  { href: "/applications", label: "Bewerbungen", icon: "💼" },
   { href: "/calendar", label: "Kalender", icon: "▦" },
   { href: "/tasks", label: "Aufgaben", icon: "☑" },
   { href: "/deadlines", label: "Fristen", icon: "◎" },
@@ -37,7 +38,7 @@ export default function AppShell({ active, topbar, children }: { active: string;
       </div>
 
       <nav className="bottomnav">
-        {NAV.filter((n) => n.href !== "/settings").map((n) => (
+        {NAV.filter((n) => !["/settings", "/deadlines"].includes(n.href)).map((n) => (
           <a key={n.href} href={n.href} className={"bn-item" + (active === n.href ? " active" : "")}>
             <span className="bn-ic">{n.icon}</span>
             <span className="bn-lbl">{n.label}</span>

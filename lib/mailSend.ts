@@ -11,6 +11,7 @@ export interface SendParams {
   inReplyTo?: string | null;
   references?: string | null;
   fromName?: string | null;
+  attachments?: { filename: string; content: Buffer; contentType?: string }[];
 }
 
 function transport(acc: MailAccount) {
@@ -44,7 +45,8 @@ export async function sendMail(acc: MailAccount, p: SendParams): Promise<string>
     subject: p.subject,
     text: p.text,
     inReplyTo: p.inReplyTo || undefined,
-    references: p.references || undefined
+    references: p.references || undefined,
+    attachments: p.attachments && p.attachments.length ? p.attachments.map((a) => ({ filename: a.filename, content: a.content, contentType: a.contentType })) : undefined
   });
   t.close();
   return info.messageId || "";

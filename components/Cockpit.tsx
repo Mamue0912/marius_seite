@@ -587,6 +587,7 @@ function MailFrame({ html, hasImages, withImages, onLoadImages, mode }: any) {
 function Reader({ reading, account, onClose, onReply, suggests, suggestsLoading, ensure, onCategorize, onLoadImages, onAction, onSetReply, onAddLabel, onDiag }: any) {
   const m = reading.msg;
   const isSent = m.folder_type === "sent";
+  const [takingJob, setTakingJob] = useState(false);
   // Ansichtsmodus der geöffneten Mail: standardmäßig "Angepasst" (Dark-Mode-harmonisch).
   const [view, setView] = useState<"angepasst" | "original" | "text">("angepasst");
   useEffect(() => { setView("angepasst"); }, [m.id]); // eslint-disable-line
@@ -700,6 +701,18 @@ function Reader({ reading, account, onClose, onReply, suggests, suggestsLoading,
         <button className="btn" onClick={() => onAction(m, "archive")}>Archivieren</button>
         <button className="btn" onClick={() => onAction(m, "spam")}>Spam</button>
         <button className="btn btn-danger" onClick={() => onAction(m, "delete")}>Löschen</button>
+        {!isSent && !m.readonly && (
+          <button className="btn" disabled={takingJob} title="Diese Mail als Stellenanzeige in die Bewerbungszentrale übernehmen"
+            onClick={async () => {
+              setTakingJob(true);
+              const { ok, data } = await fetchJson("/api/applications/analyze", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: "email", messageId: m.id }), timeoutMs: 60000 });
+              setTakingJob(false);
+              if (ok) window.location.href = "/applications";
+              else alert(data.message || "Übernahme fehlgeschlagen.");
+            }}>
+            {takingJob ? "Übernehme…" : "Als Stelle übernehmen"}
+          </button>
+        )}
         <button className="btn" onClick={onClose}>Schließen</button>
       </div>
     </>
