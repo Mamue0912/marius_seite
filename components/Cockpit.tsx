@@ -25,7 +25,7 @@ function statusChip(m: any): { text: string; tone: string } | null {
   if (rel === "sehr_wichtig") return { text: "Sehr wichtig", tone: "urgent" };
   if (rel === "wichtig") return { text: "Wichtig", tone: "high" };
   if (action === "review_recommended" || action === "action_no_reply") return { text: "Prüfen", tone: "mid" };
-  if (action === "no_action" || rel === "irrelevant" || rel === "niedrig") return { text: "Nur Info", tone: "muted" };
+  if (action === "no_action" || action === "information_only" || rel === "irrelevant" || rel === "niedrig") return { text: "Nur Info", tone: "muted" };
   return null;
 }
 
@@ -336,6 +336,13 @@ export default function Cockpit({
     if (!confirm("Alle gespeicherten Mails werden gelöscht und komplett neu eingelesen. Das korrigiert falsche Kontozuordnungen. Manuelle Labels/Einstufungen auf einzelnen Mails gehen dabei verloren. Fortfahren?")) return;
     manualSync(false, true);
   }
+  // Bestehende Mails neu einordnen (Mails bleiben, nur Labels/Relevanz neu).
+  async function reclassifyAll() {
+    if (!confirm("Alle Mails werden neu eingeordnet (z. B. damit Google-Sicherheitshinweise nicht mehr als dringend gelten). Deine manuellen Einstufungen bleiben erhalten. Fortfahren?")) return;
+    setClassifyErr(null);
+    try { await fetch("/api/mail/classify?reset=1", { method: "POST" }); } catch {}
+    await runClassify();
+  }
 
   // ---- Entwurf erzeugen (aus Vorschlag oder Freitext) ----
   async function openDraft(m: Msg, opts: { intent?: string; intentLabel?: string; custom?: boolean }) {
@@ -622,14 +629,14 @@ export default function Cockpit({
         visibleCount: msgs.filter(visible).length,
         unreadInboxDb: unreadInbox(),
         sel, report: status?.report, syncedAt: status?.syncedAt, syncing: !!status?.syncing, classifyError: status?.classifyError, errors: status?.errors
-      }} onReseed={() => { setMailDiag(false); manualSync(true); }} onClean={() => { setMailDiag(false); cleanResync(); }} />}
+      }} onReseed={() => { setMailDiag(false); manualSync(true); }} onClean={() => { setMailDiag(false); cleanResync(); }} onReclassify={() => { setMailDiag(false); reclassifyAll(); }} />}
       {compose && <ComposeModal compose={compose} setCompose={setCompose} accounts={accounts} sendEnabled={sendEnabled} />}
     </>
   );
 }
 
 // Owner-Diagnose der Mail-Synchronisierung (keine Passwörter/Tokens/Inhalte).
-function MailDiagModal({ onClose, client, onReseed, onClean }: any) {
+function MailDiagModal({ onClose, client, onReseed, onClean, onReclassify }: any) {
   const [s, setS] = useState<any>({ loading: true });
   useEffect(() => { fetch("/api/mail/diag").then((r) => r.json()).then((d) => setS({ loading: false, ...d })).catch(() => setS({ loading: false, error: true })); }, []);
   return (
@@ -696,6 +703,7 @@ function MailDiagModal({ onClose, client, onReseed, onClean }: any) {
           <div className="note" style={{ fontSize: 12, marginTop: 12 }}>Keine Passwörter, Tokens oder Mailinhalte werden angezeigt.</div>
         </div>
         <div className="df" style={{ flexWrap: "wrap" }}>
+          {onReclassify && <button className="btn" onClick={onReclassify} title="Alle Mails neu einordnen (Labels/Relevanz), ohne sie zu löschen">Alles neu einordnen</button>}
           {onReseed && <button className="btn" onClick={onReseed} title="Setzt den Sync-Zeiger zurück und holt die letzten ~40 Mails neu">Posteingang neu einlesen</button>}
           {onClean && <button className="btn btn-primary" onClick={onClean} title="Alle Mails löschen und sauber neu einlesen – korrigiert falsche Kontozuordnung">Bereinigt neu einlesen</button>}
           <button className="btn" onClick={onClose}>Schließen</button>

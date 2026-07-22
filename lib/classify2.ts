@@ -32,7 +32,9 @@ const R = {
   payment: /(paypal|rechnung|zahlung|payment|invoice|beleg|quittung|receipt|lastschrift|überweisung|kontoauszug|mahnung|betrag|abbuchung|kauf|purchase|order confirmation)/i,
   travel: /(flug|flight|hotel|booking|reise|bahn|deutsche bahn|ryanair|lufthansa|airbnb|check-in|boarding|reservierung|reservation|buchung|unterkunft|mietwagen)/i,
   travelChange: /(storniert|stornierung|cancel(l?)ed|cancellation|geändert|changed|umbuchung|verschoben|rebooked|refund|erstattung|verspätung|delayed|annulliert)/i,
-  security: /(sicherheitswarnung|security alert|verdächtig|suspicious|unbekannt(e|er)? (login|anmeldung|gerät)|new (sign-?in|device|login)|neues gerät|neue anmeldung|2fa|zwei-faktor|verifizierung|bestätigungscode|verification code|einmalcode|one-?time|otp|passwort zurücksetzen|reset your password)/i,
+  security: /(sicherheitswarnung|sicherheitshinweis|security alert|security notification|unbekannt(e|er)? (login|anmeldung|gerät)|new (sign-?in|device|login)|neues gerät|neue anmeldung|angemeldet|signed in|2fa|zwei-faktor|verifizierung|bestätigungscode|verification code|einmalcode|one-?time|otp|passwort zurücksetzen|reset your password|sicherheitseinstellungen|security checkup)/i,
+  // Nur GENUIN kritische Warnungen (echte Bedrohung) → dringend.
+  securityCritical: /(kritische sicherheitswarnung|critical security alert|verdächtig|suspicious|ungewöhnlich|unusual (activity|sign)|wurde blockiert|was blocked|blockiert|gehackt|hacked|compromis|jemand (hat|anderes)|someone (has|just|else)|zugriff verweigert|zugriffsversuch)/i,
   securityBenign: /(passwort (wurde )?geändert|password (was )?(changed|updated)|erfolgreich geändert|successfully (changed|updated)|änderung bestätigt|wurde aktualisiert)/i,
   welcome: /(welcome to|willkommen bei|willkommen im|get started|erste schritte|confirm your email|verify your email|bestätige deine e-?mail|e-?mail bestätigen|konto erstellt|account created|thanks for signing up|registrierung)/i,
   survey: /(umfrage|feedback|bewerten|bewertung|wie war|wie zufrieden|how did we do|rate your|review your|share your|zufriedenheit|deine meinung|your experience|erlebnis|nps)/i,
@@ -77,8 +79,11 @@ export function classifyMessage(input: ClassifyInput): ClassifyResult {
   let type = "unknown";
   if (input.folder_type === "sent") type = "personal_direct";
   else if (has(R.spam, hay)) type = "spam";
-  else if (has(R.security, hay) && !has(R.securityBenign, hay)) type = "security_alert";
+  // Sicherheit: nur genuin kritische Mails sind dringend. Routine-Hinweise
+  // (Anmeldung, Bestätigungscodes, allgemeine Sicherheitstipps) → ruhig.
+  else if (has(R.securityCritical, hay)) type = "security_alert";
   else if (has(R.securityBenign, hay)) type = "system_notification";
+  else if (has(R.security, hay)) type = "security_info";
   else if (has(R.travel, hay) && has(R.travelChange, hay)) type = "booking_change";
   else if (has(R.payment, hay) && (bulk || noReply || has(R.order, hay))) type = "invoice_receipt";
   else if (has(R.survey, hay) && (bulk || noReply)) type = "survey_feedback";
@@ -97,7 +102,7 @@ export function classifyMessage(input: ClassifyInput): ClassifyResult {
   if (["system_notification", "welcome", "auto_confirmation"].includes(type)) labels.add("Automatisch");
   if (type === "invoice_receipt") labels.add("Zahlungen");
   if (type === "booking_change") labels.add("Reisen");
-  if (type === "security_alert") labels.add("Sicherheit");
+  if (type === "security_alert" || type === "security_info") labels.add("Sicherheit");
   if (type === "job_offer") labels.add("Bewerbungen");
   if (type === "personal_direct" || type === "personal_thread") labels.add("Persönlich");
   if (labels.size === 0) labels.add("Sonstiges");
@@ -111,6 +116,9 @@ export function classifyMessage(input: ClassifyInput): ClassifyResult {
   switch (type) {
     case "security_alert":
       action = "act_now"; relevance = "sehr_wichtig"; needs = false; break;
+    case "security_info":
+      // Routine-Sicherheitshinweis (meist selbst ausgelöst) – keine Dringlichkeit.
+      action = "information_only"; relevance = "niedrig"; needs = false; break;
     case "booking_change":
       action = "review_recommended"; relevance = "wichtig"; needs = false; break;
     case "invoice_receipt":
@@ -160,7 +168,8 @@ function summarize(type: string, action: string, needs: boolean, subject: string
   switch (type) {
     case "invoice_receipt": return "Automatischer Kaufbeleg/Rechnung. Keine Antwort erforderlich.";
     case "booking_change": return `${s}Buchungsänderung – bitte Rückerstattung und Reiseplanung prüfen.`;
-    case "security_alert": return "Sicherheitswarnung – bitte prüfen, ob du das selbst ausgelöst hast.";
+    case "security_alert": return "Kritische Sicherheitswarnung – bitte prüfen, ob du das selbst warst.";
+    case "security_info": return "Routine-Sicherheitshinweis (meist selbst ausgelöst). Nur prüfen, falls du das nicht warst.";
     case "welcome": return "Willkommens-/Registrierungsmail. Keine Aktion nötig.";
     case "system_notification": return "Automatische Systembenachrichtigung. Keine Aktion nötig.";
     case "auto_confirmation": return "Bestell-/Versandbestätigung. Nur zur Information.";
