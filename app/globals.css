@@ -872,16 +872,29 @@ textarea { resize: vertical; line-height: 1.55; }
   .ac-nav-item { padding: 9px 12px; }
   .ac-side-foot { margin: 0; padding: 0; }
   .ac-main { overflow: visible; }
-  .ac-ws { height: auto; }
   .ac-ws-body { display: block; }
-  .ac-ws-col { display: none; border-right: 0; overflow: visible; }
+  .ac-ws-col { display: none; border-right: 0; }
   .ac-ws-col.show { display: block; }
   .ac-ws-panes { display: flex; }
-  .ac-chat { height: auto; }
-  .ac-chat-scroll { min-height: 40dvh; }
   .ac-grid { grid-template-columns: 1fr; }
   .ac-mod-primary, .ac-mod-wide, .ac-mod-tall { grid-column: span 1; }
   .ac-modal { max-height: 92dvh; }
+
+  /* Offenes Bewerbungsprojekt: app-artiges, begrenztes Layout – nur INNEN scrollen. */
+  .content:has(.ac-workspace-open) { overflow: hidden; padding-bottom: 0; }
+  .ac.ac-workspace-open { height: calc(100dvh - 64px); overflow: hidden; }
+  .ac-workspace-open .ac-main { flex: 1; min-height: 0; overflow: hidden; }
+  .ac-workspace-open .ac-ws { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+  .ac-workspace-open .ac-ws-top { flex: none; position: sticky; top: 0; z-index: 12; row-gap: 8px; }
+  .ac-workspace-open .ac-ws-panes { order: 3; width: 100%; }
+  .ac-workspace-open .ac-panebtn { flex: 1; text-align: center; }
+  .ac-workspace-open .ac-ws-body { flex: 1; min-height: 0; overflow: hidden; }
+  .ac-workspace-open .ac-ws-col.show { height: 100%; }
+  .ac-workspace-open .ac-col-stelle.show, .ac-workspace-open .ac-col-docs.show { overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+  .ac-workspace-open .ac-col-chat.show { overflow: hidden; }
+  .ac-workspace-open .ac-chat { height: 100%; display: flex; flex-direction: column; min-height: 0; padding-bottom: 0; }
+  .ac-workspace-open .ac-chat-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+  .ac-workspace-open .ac-chat-input { flex: none; position: static; padding-bottom: calc(10px + env(safe-area-inset-bottom)); background: var(--bg-1); }
 }
 
 /* =========================================================================
@@ -1029,3 +1042,11 @@ textarea { resize: vertical; line-height: 1.55; }
 /* Unterlagen-Chat */
 .ac-docchat { margin-bottom: 16px; }
 .ac-docchat-scroll { max-height: 46vh; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 4px 2px 12px; }
+
+/* Korrektur-Panel: Speicher-Status */
+.rc-status { font-size: 12px; color: var(--accent-ink); display: flex; align-items: center; gap: 6px; padding-top: 2px; }
+.rc-status.err { color: var(--urgent); }
+
+/* Ordneranzeige-Bearbeitung (Einstellungen) */
+.folder-edit .fe-name { flex: 1; min-width: 0; }
+.folder-edit .fe-type { width: 130px; }

@@ -4,13 +4,50 @@ import { PROVIDERS } from "@/lib/mailProviders";
 
 const CATEGORIES = ["Wichtig", "Antwort erforderlich", "Schule", "Bewerbungen und Karriere", "Sport und Karate", "Reisen", "Termine und Veranstaltungen", "Rechnungen und Finanzen", "Bestellungen und Lieferungen", "Verträge und Versicherungen", "Behörden", "Konten und Sicherheit", "Persönlich", "Newsletter und Werbung", "Automatische Benachrichtigungen", "Sonstiges"];
 
-type Rule = { id: string; match_type: string; match_value: string; set_category: string | null; set_hidden: boolean };
+type Rule = { id: string; match_type: string; match_value: string; set_category: string | null; set_hidden: boolean; set_label?: string | null; set_needs_reply?: boolean | null };
+
+function ruleEffect(r: Rule): string {
+  const parts: string[] = [];
+  if (r.set_label) parts.push(`Label „${r.set_label}"`);
+  if (r.set_category) parts.push(r.set_category);
+  if (r.set_hidden) parts.push("ausblenden");
+  if (r.set_needs_reply === false) parts.push("nie antwortpflichtig");
+  if (r.set_needs_reply === true) parts.push("immer antwortpflichtig");
+  return parts.length ? parts.join(" · ") : "—";
+}
 type Account = { id: string; email: string; provider: string };
 
-export default function Settings({ accounts, initialRules, sendEnabled }: { accounts: Account[]; initialRules: Rule[]; sendEnabled: boolean }) {
+const FOLDER_TYPES = [["inbox", "Posteingang"], ["sent", "Gesendet"], ["drafts", "Entwürfe"], ["archive", "Archiv"], ["spam", "Junk"], ["trash", "Papierkorb"], ["other", "Weitere"]];
+const FTYPE_LABEL: Record<string, string> = Object.fromEntries(FOLDER_TYPES);
+
+export default function Settings({ accounts, initialRules, initialFolders = [], sendEnabled }: { accounts: Account[]; initialRules: Rule[]; initialFolders?: any[]; sendEnabled: boolean }) {
   const [rules, setRules] = useState<Rule[]>(initialRules);
+  const [folders, setFolders] = useState<any[]>(initialFolders);
   const [form, setForm] = useState({ match_type: "sender", match_value: "", set_category: CATEGORIES[0], set_hidden: false });
   const [busy, setBusy] = useState(false);
+
+  async function patchFolder(f: any, patch: any) {
+    setFolders((fs) => fs.map((x) => (x.account_id === f.account_id && x.path === f.path) ? { ...x, ...patch } : x));
+    await fetch("/api/mail/folders", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ account_id: f.account_id, path: f.path, ...patch }) });
+  }
+  function foldersOf(accId: string) {
+    return folders.filter((f) => f.account_id === accId)
+      .sort((a, b) => (a.sort_order ?? 999) - (b.sort_order ?? 999));
+  }
+  async function move(accId: string, f: any, dir: number) {
+    const list = foldersOf(accId);
+    const i = list.findIndex((x) => x.path === f.path);
+    const j = i + dir;
+    if (j < 0 || j >= list.length) return;
+    await patchFolder(list[i], { sort_order: j });
+    await patchFolder(list[j], { sort_order: i });
+  }
+  function folderName(f: any) {
+    if (f.display_name) return f.display_name;
+    const t = f.type_override || f.folder_type;
+    if (t === "other" && f.path) { const s = String(f.path).split(/[/.]/).filter(Boolean); return s[s.length - 1] || "Weitere"; }
+    return FTYPE_LABEL[t] || t;
+  }
 
   async function add() {
     if (!form.match_value.trim()) return;
@@ -84,7 +121,7 @@ export default function Settings({ accounts, initialRules, sendEnabled }: { acco
             {rules.map((r) => (
               <div className="mail" key={r.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <span style={{ flex: 1, fontSize: 13 }}>
-                  <b>{r.match_type === "account" ? accLabel(r.match_value) : r.match_value}</b> → {r.set_hidden ? "ausblenden" : r.set_category}
+                  <b>{r.match_type === "account" ? accLabel(r.match_value) : r.match_value}</b> → {ruleEffect(r)}
                   <span style={{ opacity: 0.5 }}> ({r.match_type})</span>
                 </span>
                 <button className="btn small btn-danger" onClick={() => del(r.id)}>Löschen</button>
@@ -92,6 +129,35 @@ export default function Settings({ accounts, initialRules, sendEnabled }: { acco
             ))}
             {rules.length === 0 && <div className="empty" style={{ padding: 30 }}>Noch keine Regeln.</div>}
           </div>
+        </div>
+
+        <div className="bucket">
+          <div className="bh"><span className="bt">Ordneranzeige</span></div>
+          <div className="note" style={{ marginTop: 0, marginBottom: 12 }}>
+            Nur die <b>Anzeige im Cockpit</b> – umbenennen, aus-/einblenden, Reihenfolge und Typ ändern. Der tatsächliche IMAP-Ordner auf dem Server bleibt unverändert.
+          </div>
+          {accounts.map((a) => {
+            const fl = foldersOf(a.id);
+            if (!fl.length) return null;
+            return (
+              <div key={a.id} style={{ marginBottom: 14 }}>
+                <div className="label" style={{ margin: "0 0 6px" }}>{PROVIDERS[a.provider]?.label || a.provider} · {a.email}</div>
+                {fl.map((f) => (
+                  <div className="mail folder-edit" key={f.path} style={{ display: "flex", alignItems: "center", gap: 8, opacity: f.hidden ? 0.5 : 1 }}>
+                    <input className="fe-name" value={folderName(f)} onChange={(e) => setFolders((fs) => fs.map((x) => (x.account_id === f.account_id && x.path === f.path) ? { ...x, display_name: e.target.value } : x))}
+                      onBlur={(e) => patchFolder(f, { display_name: e.target.value })} title={f.path} />
+                    <select className="fe-type" value={f.type_override || f.folder_type} onChange={(e) => patchFolder(f, { type_override: e.target.value })} title="Typ (nur Anzeige)">
+                      {FOLDER_TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                    </select>
+                    <button className="btn small" onClick={() => move(a.id, f, -1)} title="Nach oben">↑</button>
+                    <button className="btn small" onClick={() => move(a.id, f, 1)} title="Nach unten">↓</button>
+                    <button className="btn small" onClick={() => patchFolder(f, { hidden: !f.hidden })}>{f.hidden ? "Einblenden" : "Ausblenden"}</button>
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+          {folders.length === 0 && <div className="empty" style={{ padding: 20 }}>Noch keine Ordner geladen. Öffne einmal den E-Mail-Bereich.</div>}
         </div>
 
         <div className="bucket">

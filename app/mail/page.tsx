@@ -11,9 +11,11 @@ export default async function MailPage({ searchParams }: { searchParams?: { open
   const user = await requireUser();
   if (!user) return <LoginForm />;
   const accounts = await loadMailAccounts(user.id);
-  const { data: folders } = await supabaseAdmin()
-    .from("mail_folders").select("account_id,path,folder_type,unread,total")
-    .eq("user_id", user.id);
+  // Erweiterte Auswahl (mit Anzeigeeinstellungen); Fallback, falls Spalten fehlen.
+  const admin = supabaseAdmin();
+  let fRes: any = await admin.from("mail_folders").select("account_id,path,folder_type,unread,total,display_name,sort_order,hidden,type_override").eq("user_id", user.id);
+  if (fRes.error) fRes = await admin.from("mail_folders").select("account_id,path,folder_type,unread,total").eq("user_id", user.id);
+  const folders = fRes.data;
   return (
     <AppShell active="/mail">
       <Cockpit

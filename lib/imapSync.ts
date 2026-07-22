@@ -62,6 +62,8 @@ export async function syncInbox(acc: MailAccount): Promise<SyncResult> {
   const admin = supabaseAdmin();
   const client = makeClient(acc);
   const result: SyncResult = { processed: 0, saved: 0, skipped: 0, newUids: [], skippedUids: [] };
+  // Nutzerregeln einmal laden und auf jede neue Mail anwenden (Vorrang vor KI).
+  const rules = await loadRules(acc.user_id).catch(() => []);
 
   await client.connect();
   try {
@@ -87,7 +89,7 @@ export async function syncInbox(acc: MailAccount): Promise<SyncResult> {
           result.newUids.push(uid);
           result.processed++;
           try {
-            await upsertMessage(acc, msg, "inbox", "INBOX");
+            await upsertMessage(acc, msg, "inbox", "INBOX", rules);
             result.saved++;
             if (!blocked && uid > advanceUid) advanceUid = uid;
           } catch (e) {
@@ -119,7 +121,7 @@ export async function syncInbox(acc: MailAccount): Promise<SyncResult> {
           if (sexists > 0) {
             const start = Math.max(1, sexists - SENT_SEED + 1);
             for await (const msg of client.fetch(`${start}:*`, { uid: true, envelope: true, flags: true, internalDate: true, bodyStructure: true, headers: HEADER_FIELDS })) {
-              try { await upsertMessage(acc, msg, "sent", sent.path); result.saved++; }
+              try { await upsertMessage(acc, msg, "sent", sent.path, rules); result.saved++; }
               catch (e) { result.skipped++; console.error("upsertMessage (sent):", (e as Error).message); }
               result.processed++;
             }
@@ -182,7 +184,7 @@ function hasAttachments(bodyStructure: any): boolean {
   return walk(bodyStructure);
 }
 
-async function upsertMessage(acc: MailAccount, msg: any, ftype: FolderType, mailbox: string): Promise<void> {
+async function upsertMessage(acc: MailAccount, msg: any, ftype: FolderType, mailbox: string, rules: any[] = []): Promise<void> {
   const admin = supabaseAdmin();
   const env = msg.envelope || {};
   const addrList = (arr: any[]) => (arr || []).map((a: any) => a.address).filter(Boolean).join(", ");
@@ -273,6 +275,19 @@ async function upsertMessage(acc: MailAccount, msg: any, ftype: FolderType, mail
     hidden: c.hidden,
     is_deleted: false
   };
+
+  // Nutzerregeln anwenden (Absender/Domain immer Label/Kategorie, nie antwortpflichtig …).
+  if (ftype !== "sent" && rules.length) {
+    const rr = applyRules(rules, { from_address: fromAddr, mail_account_id: acc.id });
+    if (rr.matched) {
+      if (rr.label) row.labels = Array.from(new Set([...(row.labels || []), rr.label]));
+      if (rr.category) row.semantic_category = rr.category;
+      if (rr.hidden) row.hidden = true;
+      if (rr.needs_reply === false) { row.needs_reply = false; row.action_status = "no_action"; }
+      if (rr.needs_reply === true) { row.needs_reply = true; row.action_status = "reply_required"; }
+      row.classification_source = "rule";
+    }
+  }
 
   await admin.from("messages").upsert(row, { onConflict: "user_id,graph_id" });
 }

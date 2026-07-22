@@ -127,6 +127,7 @@ export default function Cockpit({
   const [diag, setDiag] = useState<boolean>(false);
   const [classify, setClassify] = useState<{ total: number; done: number } | null>(null);
   const [classifyErr, setClassifyErr] = useState<string | null>(null);
+  const [rules, setRules] = useState<any[]>([]);
   const accById: Record<string, Account> = Object.fromEntries(accounts.map((a) => [a.id, a]));
   const filter = { account: sel.account, folder: sel.ftype, cat: "all", unread: false, needs: false, q };
   const [drawer, setDrawer] = useState<any>(null); // { msg, mode, loading, draft, body, tone, customInstruction, confirmBinding, sending }
@@ -273,7 +274,31 @@ export default function Cockpit({
 
   function foldersFor(accId: string): Folder[] {
     const order = ["inbox", "sent", "drafts", "archive", "spam", "trash", "other"];
-    return folders.filter((f) => f.account_id === accId).sort((a, b) => order.indexOf(a.folder_type) - order.indexOf(b.folder_type));
+    const list = folders.filter((f) => f.account_id === accId);
+    // Nutzer-Anzeigeeinstellungen (optional): ausgeblendete Ordner entfernen.
+    const visible = list.filter((f: any) => !f.hidden);
+    // Deduplizieren: gleicher Anzeigename → nur einmal (behebt doppeltes „Weitere").
+    const seen = new Set<string>();
+    const deduped = visible.filter((f: any) => {
+      const key = ((f.type_override || f.folder_type) + "|" + folderLabel(f)).toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key); return true;
+    });
+    return deduped.sort((a: any, b: any) => {
+      const so = (a.sort_order ?? 999) - (b.sort_order ?? 999);
+      if (so !== 0) return so;
+      return order.indexOf((a.type_override || a.folder_type)) - order.indexOf((b.type_override || b.folder_type));
+    });
+  }
+  // Anzeigename: eigener Name > echter Ordnername (bei „other") > Standardlabel.
+  function folderLabel(f: any): string {
+    if (f.display_name) return f.display_name;
+    const type = f.type_override || f.folder_type;
+    if (type === "other" && f.path) {
+      const seg = String(f.path).split(/[/.]/).filter(Boolean);
+      return seg[seg.length - 1] || FOLDER_LABELS.other;
+    }
+    return FOLDER_LABELS[type] || type;
   }
   async function selectFolder(account: string, ftype: string, path?: string) {
     setSel({ account, ftype, path, view: undefined });
@@ -448,6 +473,26 @@ export default function Cockpit({
     await fetch("/api/mail/categorize", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messageId: m.id, needs_reply: needs }) });
   }
 
+  // Nutzerregeln laden (für aktive Zustände der Dauerregel-Buttons).
+  useEffect(() => { fetch("/api/rules").then((r) => r.json()).then((j) => setRules(j.rules || [])).catch(() => {}); }, []);
+
+  // Dauerregel setzen/entfernen (Toggle). Gibt den neuen Zustand zurück.
+  async function toggleRule(scope: "sender" | "domain", value: string, patch: any) {
+    const v = value.toLowerCase();
+    const existing = rules.find((r) => r.match_type === scope && r.match_value === v
+      && (patch.set_label !== undefined ? r.set_label === patch.set_label : true)
+      && (patch.set_needs_reply !== undefined ? r.set_needs_reply === patch.set_needs_reply : true));
+    if (existing) {
+      await fetch("/api/rules", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: existing.id }) });
+      setRules((rs) => rs.filter((x) => x.id !== existing.id));
+      return false;
+    }
+    const r = await fetch("/api/rules", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ match_type: scope, match_value: v, ...patch }) });
+    const j = await r.json();
+    if (r.ok && j.rule) { setRules((rs) => [j.rule, ...rs.filter((x) => !(x.match_type === scope && x.match_value === v && x.set_label === j.rule.set_label && x.set_needs_reply === j.rule.set_needs_reply))]); return true; }
+    throw new Error(j.message || j.error || "Regel konnte nicht gespeichert werden");
+  }
+
   // Manuell als beantwortet markieren (falls die App es nicht selbst erkennt).
   async function markAnswered(m: Msg, answered: boolean) {
     const patch: any = answered
@@ -475,9 +520,8 @@ export default function Cockpit({
     if (opts.message_type !== undefined) { patch.message_type = opts.message_type; patch.user_message_type = opts.message_type; }
     setMsgs((prev) => prev.map((x) => x.id === m.id ? { ...x, ...patch } : x));
     setReading((s: any) => s && s.msg.id === m.id ? { ...s, msg: { ...s.msg, ...patch } } : s);
-    try {
-      await fetch("/api/mail/categorize", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messageId: m.id, ...opts }) });
-    } catch {}
+    const r = await fetch("/api/mail/categorize", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messageId: m.id, ...opts }) });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.message || j.error || "Speichern fehlgeschlagen"); }
   }
 
   const statusView = () => {
@@ -528,13 +572,16 @@ export default function Cockpit({
                   </button>
                   {open && (
                     <div className="macct-folders">
-                      {(fl.length ? fl : DEFAULT_FOLDERS.map((t) => ({ account_id: a.id, path: "", folder_type: t, unread: 0, total: 0 }))).map((f) => (
-                        <button key={f.folder_type + f.path} className={"mfolder" + (sel.account === a.id && sel.ftype === f.folder_type && !sel.view ? " active" : "")} onClick={() => selectFolder(a.id, f.folder_type, f.path)}>
-                          <span className="mf-ic">{FOLDER_ICONS[f.folder_type] || "📁"}</span>
-                          <span className="mf-lbl">{FOLDER_LABELS[f.folder_type] || f.folder_type}</span>
-                          {(f.folder_type === "inbox" ? accUnread : f.unread) > 0 && <span className="mf-count">{f.folder_type === "inbox" ? accUnread : f.unread}</span>}
-                        </button>
-                      ))}
+                      {(fl.length ? fl : DEFAULT_FOLDERS.map((t) => ({ account_id: a.id, path: "", folder_type: t, unread: 0, total: 0 }))).map((f: any) => {
+                        const ftype = f.type_override || f.folder_type;
+                        return (
+                          <button key={f.folder_type + f.path} className={"mfolder" + (sel.account === a.id && sel.ftype === ftype && sel.path === f.path && !sel.view ? " active" : "")} onClick={() => selectFolder(a.id, ftype, f.path)}>
+                            <span className="mf-ic">{FOLDER_ICONS[ftype] || "📁"}</span>
+                            <span className="mf-lbl">{folderLabel(f)}</span>
+                            {(ftype === "inbox" ? accUnread : f.unread) > 0 && <span className="mf-count">{ftype === "inbox" ? accUnread : f.unread}</span>}
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -604,7 +651,7 @@ export default function Cockpit({
             {reading ? (
               <Reader reading={reading} account={accById[reading.msg.mail_account_id]} onClose={() => { setReading(null); setMobilePane("list"); }}
                 onReply={(opts: any) => { openDraft(reading.msg, opts); }} suggests={suggests[reading.msg.id]} suggestsLoading={!!suggestLoading[reading.msg.id]} ensure={ensureSuggestions}
-                onCategorize={categorize} onCorrect={categorize} onLoadImages={() => openReader(reading.msg, true)} onAction={mailAction} onSetReply={setReplyFlag} onAnswered={markAnswered} onAddLabel={addLabel} onDiag={() => setDiag(true)} />
+                onCategorize={categorize} onCorrect={categorize} onLoadImages={() => openReader(reading.msg, true)} onAction={mailAction} onSetReply={setReplyFlag} onAnswered={markAnswered} onAddLabel={addLabel} rules={rules} onRule={toggleRule} onDiag={() => setDiag(true)} />
             ) : (
               <div className="mread-empty"><div className="ic">✉</div><div>Wähle eine Nachricht zum Lesen.</div></div>
             )}
@@ -838,7 +885,17 @@ function MailFrame({ html, hasImages, withImages, onLoadImages, mode }: any) {
   );
 }
 
-function Reader({ reading, account, onClose, onReply, suggests, suggestsLoading, ensure, onCategorize, onCorrect, onLoadImages, onAction, onSetReply, onAnswered, onAddLabel, onDiag }: any) {
+function Reader({ reading, account, onClose, onReply, suggests, suggestsLoading, ensure, onCategorize, onCorrect, onLoadImages, onAction, onSetReply, onAnswered, onAddLabel, rules, onRule, onDiag }: any) {
+  const [saving, setSaving] = useState<string | null>(null);
+  const [saveErr, setSaveErr] = useState<string | null>(null);
+  async function doSave(key: string, fn: () => Promise<any>) {
+    setSaveErr(null); setSaving(key);
+    try { await fn(); setSaving("ok"); setTimeout(() => setSaving((s) => s === "ok" ? null : s), 1200); }
+    catch (e: any) { setSaving(null); setSaveErr(e?.message || "Speichern fehlgeschlagen"); }
+  }
+  const ruleActive = (scope: string, value: string, patch: any) => !!(rules || []).find((r: any) => r.match_type === scope && r.match_value === (value || "").toLowerCase()
+    && (patch.set_label !== undefined ? r.set_label === patch.set_label : true)
+    && (patch.set_needs_reply !== undefined ? r.set_needs_reply === patch.set_needs_reply : true));
   const m = reading.msg;
   const isSent = m.folder_type === "sent";
   const [takingJob, setTakingJob] = useState(false);
@@ -896,35 +953,48 @@ function Reader({ reading, account, onClose, onReply, suggests, suggestsLoading,
           )}
         </div>
 
-        {!isSent && onCorrect && (
+        {!isSent && onCorrect && (() => {
+          const curType = m.user_message_type || m.message_type;
+          const curRel = m.user_relevance || m.relevance;
+          const sender = (m.from_address || "").toLowerCase();
+          const domain = sender.includes("@") ? sender.split("@")[1] : "";
+          const topLabel = labelsOfMsg(m)[0] || "Newsletter";
+          return (
           <details className="rd-correct">
             <summary>Einstufung korrigieren</summary>
             <div className="rc-body">
               <div className="rc-row"><span className="rc-k">Relevanz</span>
                 <div className="chips">
                   {[["sehr_wichtig", "Sehr wichtig"], ["wichtig", "Wichtig"], ["normal", "Normal"], ["niedrig", "Niedrig"], ["irrelevant", "Irrelevant"]].map(([v, l]) => (
-                    <button key={v} className={"chip" + ((m.user_relevance || m.relevance) === v ? " sel" : "")} onClick={() => onCorrect(m, { relevance: v })}>{l}</button>
+                    <button key={v} className={"chip" + (curRel === v ? " sel" : "")} onClick={() => doSave("rel-" + v, () => onCorrect(m, { relevance: v }))}>{l}</button>
                   ))}
                 </div>
               </div>
               <div className="rc-row"><span className="rc-k">Art</span>
                 <div className="chips">
-                  <button className="chip" onClick={() => onCorrect(m, { message_type: "personal_direct" })}>Persönlich</button>
-                  <button className="chip" onClick={() => onCorrect(m, { message_type: "system_notification" })}>Automatisch</button>
-                  <button className="chip" onClick={() => onCorrect(m, { message_type: "newsletter" })}>Newsletter</button>
-                  <button className="chip" onClick={() => onSetReply(m, !(m.user_needs_reply != null ? m.user_needs_reply : m.needs_reply))}>{(m.user_needs_reply != null ? m.user_needs_reply : m.needs_reply) ? "Keine Antwort nötig" : "Antwort nötig"}</button>
+                  <button className={"chip" + (curType === "personal_direct" || curType === "personal_thread" ? " sel" : "")} onClick={() => doSave("t-p", () => onCorrect(m, { message_type: "personal_direct" }))}>Persönlich</button>
+                  <button className={"chip" + (["system_notification", "welcome", "auto_confirmation", "security_info"].includes(curType) ? " sel" : "")} onClick={() => doSave("t-a", () => onCorrect(m, { message_type: "system_notification" }))}>Automatisch</button>
+                  <button className={"chip" + (curType === "newsletter" || curType === "marketing" ? " sel" : "")} onClick={() => doSave("t-n", () => onCorrect(m, { message_type: "newsletter" }))}>Newsletter</button>
+                  <button className={"chip" + ((m.user_needs_reply != null ? m.user_needs_reply : m.needs_reply) ? " sel" : "")} onClick={() => doSave("nr", async () => onSetReply(m, !(m.user_needs_reply != null ? m.user_needs_reply : m.needs_reply)))}>{(m.user_needs_reply != null ? m.user_needs_reply : m.needs_reply) ? "Antwort nötig ✓" : "Antwort nötig"}</button>
                 </div>
               </div>
               <div className="rc-row"><span className="rc-k">Dauerregel für {m.from_address}</span>
                 <div className="chips">
-                  <button className="chip" onClick={() => onCorrect(m, { ruleScope: "sender", ruleNeverReply: true })}>Nie antwortpflichtig</button>
-                  <button className="chip" onClick={() => { const l = labelsOfMsg(m)[0] || "Newsletter"; onCorrect(m, { ruleScope: "sender", ruleLabel: l }); }}>Absender immer „{labelsOfMsg(m)[0] || "Newsletter"}"</button>
-                  <button className="chip" onClick={() => onCorrect(m, { ruleScope: "domain", ruleLabel: "Bewerbungen" })}>Domain → Bewerbungen</button>
+                  <button className={"chip" + (ruleActive("sender", sender, { set_needs_reply: false }) ? " sel" : "")} onClick={() => doSave("r-nr", () => onRule("sender", sender, { set_needs_reply: false }))}>Nie antwortpflichtig</button>
+                  <button className={"chip" + (ruleActive("sender", sender, { set_label: topLabel }) ? " sel" : "")} onClick={() => doSave("r-l", () => onRule("sender", sender, { set_label: topLabel }))}>Absender immer „{topLabel}"</button>
+                  <button className={"chip" + (ruleActive("sender", sender, { set_label: "Sicherheit" }) ? " sel" : "")} onClick={() => doSave("r-s", () => onRule("sender", sender, { set_label: "Sicherheit" }))}>Absender immer Sicherheit</button>
+                  {domain && <button className={"chip" + (ruleActive("domain", domain, { set_label: "Bewerbungen" }) ? " sel" : "")} onClick={() => doSave("r-d", () => onRule("domain", domain, { set_label: "Bewerbungen" }))}>Domain → Bewerbungen</button>}
                 </div>
               </div>
+              {(saving || saveErr) && (
+                <div className={"rc-status" + (saveErr ? " err" : "")}>
+                  {saveErr ? saveErr : saving === "ok" ? "Gespeichert ✓" : <><span className="spin" /> Speichern…</>}
+                </div>
+              )}
             </div>
           </details>
-        )}
+          );
+        })()}
 
         {reading.thread && reading.thread.length > 0 && (
           <div className="rd-thread">
