@@ -192,10 +192,14 @@ async function upsertMessage(acc: MailAccount, msg: any, ftype: FolderType, mail
   const flags: Set<string> = msg.flags instanceof Set ? msg.flags : new Set(msg.flags || []);
   const isRead = flags.has("\\Seen");
   const isFlagged = flags.has("\\Flagged");
-  const messageId = env.messageId || `imap-${acc.id}-${ftype}-${msg.uid}`;
+  const rfcMessageId = env.messageId || null;
+  // Dedup-Schlüssel IMMER kontospezifisch: dieselbe Mail an mehrere eigene
+  // Konten (gleiche Message-ID) darf NICHT zu einem Datensatz zusammenfallen,
+  // sonst wechselt die Kontozuordnung je nach Sync-Reihenfolge.
+  const graphId = `${acc.id}:${rfcMessageId || `uid-${ftype}-${msg.uid}`}`;
   const references = Array.isArray(env.references) ? env.references.join(" ") : env.references || null;
-  // Thread-ID: erster Bezug (Ursprungsnachricht) oder eigene Message-ID.
-  const threadId = env.inReplyTo || (references ? references.split(/\s+/)[0] : null) || messageId;
+  // Thread-ID: erster Bezug (Ursprungsnachricht) oder eigene Message-ID (unpräfixiert).
+  const threadId = env.inReplyTo || (references ? references.split(/\s+/)[0] : null) || rfcMessageId || graphId;
 
   const base = {
     folder: ftype, from_address: fromAddr, from_name: fromName,
@@ -226,13 +230,13 @@ async function upsertMessage(acc: MailAccount, msg: any, ftype: FolderType, mail
     account_id: null,
     mail_account_id: acc.id,
     account_display_name: (acc as any).display_name || acc.email,
-    graph_id: messageId,
-    message_id: env.messageId || null,
+    graph_id: graphId,
+    message_id: rfcMessageId,
     in_reply_to: env.inReplyTo || null,
     message_refs: references,
     thread_id: threadId,
     conversation_id: threadId,
-    internet_message_id: env.messageId || null,
+    internet_message_id: rfcMessageId,
     folder: ftype,
     folder_type: ftype,
     original_folder_name: mailbox,

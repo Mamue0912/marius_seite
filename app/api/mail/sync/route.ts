@@ -19,10 +19,17 @@ export async function POST(req: NextRequest) {
   if (!accounts.length) return NextResponse.json({ connected: false });
 
   const admin = supabaseAdmin();
-  const reseed = new URL(req.url).searchParams.get("reseed") === "1";
-  if (reseed) {
+  const params = new URL(req.url).searchParams;
+  const reseed = params.get("reseed") === "1";
+  const clean = params.get("clean") === "1";
+  if (clean) {
+    // Bereinigt: alle gespeicherten Mails löschen und komplett neu einlesen –
+    // korrigiert falsch zugeordnete Altdatensätze (Konto-Verwechslung).
+    await admin.from("messages").delete().eq("user_id", user.id);
     await admin.from("mail_accounts").update({ inbox_last_uid: 0, inbox_uidvalidity: null }).eq("user_id", user.id);
-    // frisch geladene Konten mit zurückgesetztem Zeiger verwenden
+    for (const a of accounts as any[]) { a.inbox_last_uid = 0; a.inbox_uidvalidity = null; }
+  } else if (reseed) {
+    await admin.from("mail_accounts").update({ inbox_last_uid: 0, inbox_uidvalidity: null }).eq("user_id", user.id);
     for (const a of accounts as any[]) { a.inbox_last_uid = 0; a.inbox_uidvalidity = null; }
   }
   let processed = 0;

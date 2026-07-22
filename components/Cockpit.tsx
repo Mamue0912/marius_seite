@@ -312,7 +312,7 @@ export default function Cockpit({
   const lastSyncRef = useRef(0);
   // Bremse gegen zu häufige IMAP-Verbindungen (WEB.DE limitiert das).
   function autoSync() { if (Date.now() - lastSyncRef.current > 60000) manualSync(); }
-  async function manualSync(reseed = false) {
+  async function manualSync(reseed = false, clean = false) {
     if (syncingRef.current) return; // kein paralleler Sync
     syncingRef.current = true;
     lastSyncRef.current = Date.now();
@@ -320,7 +320,8 @@ export default function Cockpit({
     let errors: string[] = [];
     let report: any = null;
     try {
-      const r = await fetch("/api/mail/sync" + (reseed ? "?reseed=1" : ""), { method: "POST" });
+      const qs = clean ? "?clean=1" : reseed ? "?reseed=1" : "";
+      const r = await fetch("/api/mail/sync" + qs, { method: "POST" });
       if (r.ok) { const j = await r.json(); errors = j.errors || []; report = j.report || null; }
       else errors = [`Sync-Route HTTP ${r.status}`];
     } catch { errors = ["Netzwerkfehler beim Synchronisieren"]; }
@@ -328,7 +329,11 @@ export default function Cockpit({
     await reloadMessages();
     setStatus({ syncing: false, errors, report, syncedAt: new Date().toISOString() });
     syncingRef.current = false;
-    if (reseed) runClassify();
+    if (reseed || clean) runClassify();
+  }
+  function cleanResync() {
+    if (!confirm("Alle gespeicherten Mails werden gelöscht und komplett neu eingelesen. Das korrigiert falsche Kontozuordnungen. Manuelle Labels/Einstufungen auf einzelnen Mails gehen dabei verloren. Fortfahren?")) return;
+    manualSync(false, true);
   }
 
   // ---- Entwurf erzeugen (aus Vorschlag oder Freitext) ----
@@ -606,14 +611,14 @@ export default function Cockpit({
         visibleCount: msgs.filter(visible).length,
         unreadInboxDb: unreadInbox(),
         sel, report: status?.report, syncedAt: status?.syncedAt, syncing: !!status?.syncing, classifyError: status?.classifyError, errors: status?.errors
-      }} onReseed={() => { setMailDiag(false); manualSync(true); }} />}
+      }} onReseed={() => { setMailDiag(false); manualSync(true); }} onClean={() => { setMailDiag(false); cleanResync(); }} />}
       {compose && <ComposeModal compose={compose} setCompose={setCompose} accounts={accounts} sendEnabled={sendEnabled} />}
     </>
   );
 }
 
 // Owner-Diagnose der Mail-Synchronisierung (keine Passwörter/Tokens/Inhalte).
-function MailDiagModal({ onClose, client, onReseed }: any) {
+function MailDiagModal({ onClose, client, onReseed, onClean }: any) {
   const [s, setS] = useState<any>({ loading: true });
   useEffect(() => { fetch("/api/mail/diag").then((r) => r.json()).then((d) => setS({ loading: false, ...d })).catch(() => setS({ loading: false, error: true })); }, []);
   return (
@@ -679,8 +684,9 @@ function MailDiagModal({ onClose, client, onReseed }: any) {
           )}
           <div className="note" style={{ fontSize: 12, marginTop: 12 }}>Keine Passwörter, Tokens oder Mailinhalte werden angezeigt.</div>
         </div>
-        <div className="df">
-          {onReseed && <button className="btn btn-primary" onClick={onReseed} title="Setzt den Sync-Zeiger zurück und holt die letzten ~40 Mails neu">Posteingang neu einlesen</button>}
+        <div className="df" style={{ flexWrap: "wrap" }}>
+          {onReseed && <button className="btn" onClick={onReseed} title="Setzt den Sync-Zeiger zurück und holt die letzten ~40 Mails neu">Posteingang neu einlesen</button>}
+          {onClean && <button className="btn btn-primary" onClick={onClean} title="Alle Mails löschen und sauber neu einlesen – korrigiert falsche Kontozuordnung">Bereinigt neu einlesen</button>}
           <button className="btn" onClick={onClose}>Schließen</button>
         </div>
       </div>
