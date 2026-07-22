@@ -10,7 +10,7 @@ function greeting() {
   return "Gute Nacht";
 }
 
-export default function Overview({ accounts, summary, newest, needsReplyList, deadlineList }: any) {
+export default function Overview({ accounts, summary, newest, needsReplyList, deadlineList, appStats }: any) {
   const dateStr = new Date().toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" });
   const parts: string[] = [];
   if (summary.needsReply) parts.push(`${summary.needsReply} E-Mail${summary.needsReply === 1 ? "" : "s"} mit Antwortbedarf`);
@@ -39,6 +39,36 @@ export default function Overview({ accounts, summary, newest, needsReplyList, de
             {accounts.map((a: any) => (
               <span className="acct-pill" key={a.id}>{PROVIDERS[a.provider]?.label || a.provider} · {a.unread}</span>
             ))}
+          </div>
+        </a>
+
+        <a className="tile tile-primary" href="/applications">
+          <div className="tile-h"><span className="tile-ic">💼</span><span className="tile-t">Bewerbungen</span><span className="tile-go">→</span></div>
+          <div className="tile-stats">
+            <div className="stat"><span className="stat-n">{appStats?.active || 0}</span><span className="stat-l">aktiv</span></div>
+            <div className="stat"><span className="stat-n">{appStats?.prep || 0}</span><span className="stat-l">in Vorbereitung</span></div>
+            <div className="stat"><span className="stat-n">{appStats?.waiting || 0}</span><span className="stat-l">warte auf Antwort</span></div>
+          </div>
+          {appStats?.next && (
+            <div className="tile-inrow" onClick={(e) => { e.preventDefault(); window.location.href = `/applications?open=${appStats.next.id}`; }}>
+              <span className="il"><b>Nächste Handlung:</b> {appStats.next.text}</span><span className="iv">→</span>
+            </div>
+          )}
+          {(appStats?.deadlines || []).map((d: any) => (
+            <div className="tile-inrow" key={d.id} onClick={(e) => { e.preventDefault(); window.location.href = `/applications?open=${d.id}`; }}>
+              <span className="il">Frist: {d.label}</span><span className="iv">{new Date(d.deadline).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" })}</span>
+            </div>
+          ))}
+          {appStats?.last && (
+            <div className="tile-inrow" onClick={(e) => { e.preventDefault(); window.location.href = `/applications?open=${appStats.last.id}`; }}>
+              <span className="il">Zuletzt: {appStats.last.label}</span><span className="iv">→</span>
+            </div>
+          )}
+          {!appStats?.total && <div className="tile-empty">Noch keine Bewerbungen. Erste Stelle einfügen.</div>}
+          <div className="tile-chiprow">
+            <span className="tile-chip accent" onClick={(e) => { e.preventDefault(); window.location.href = "/applications?view=neu"; }}>＋ Neue Stelle</span>
+            <span className="tile-chip" onClick={(e) => { e.preventDefault(); window.location.href = "/applications?view=aktiv"; }}>Aktive Bewerbungen</span>
+            <span className="tile-chip" onClick={(e) => { e.preventDefault(); window.location.href = "/applications?view=unterlagen"; }}>Unterlagen</span>
           </div>
         </a>
 

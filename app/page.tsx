@@ -35,6 +35,34 @@ export default async function Home() {
   const now = Date.now();
   const deadlines = rows.filter((m) => m.deadline_at && new Date(m.deadline_at).getTime() >= now - 864e5);
 
+  // Bewerbungs-Kachel: kompakte Kennzahlen direkt aus den Bewerbungsprojekten.
+  const { data: apps } = await admin
+    .from("applications")
+    .select("id,company,position,status,deadline,last_activity_at")
+    .eq("user_id", user.id);
+  const appRows = apps || [];
+  const appActive = appRows.filter((a) => !["absage", "zusage"].includes(a.status));
+  const appPrep = appRows.filter((a) => ["analyse_offen", "unterlagen", "bereit"].includes(a.status));
+  const appWaiting = appRows.filter((a) => ["beworben", "rueckmeldung", "gespraech"].includes(a.status));
+  const appDeadlines = appRows.filter((a) => a.deadline && new Date(a.deadline).getTime() >= now - 864e5)
+    .sort((a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime());
+  const appLast = [...appRows].sort((a, b) => new Date(b.last_activity_at).getTime() - new Date(a.last_activity_at).getTime())[0] || null;
+  const appNext = (() => {
+    const bereit = appRows.find((a) => a.status === "bereit");
+    if (bereit) return { text: `„${bereit.position || bereit.company || "Bewerbung"}" ist bereit zum Senden.`, id: bereit.id };
+    const analyse = appRows.find((a) => a.status === "analyse_offen");
+    if (analyse) return { text: `Unterlagen für „${analyse.position || analyse.company}" vorbereiten.`, id: analyse.id };
+    if (appDeadlines[0]) return { text: `Frist „${appDeadlines[0].position || appDeadlines[0].company}" am ${new Date(appDeadlines[0].deadline).toLocaleDateString("de-DE")}.`, id: appDeadlines[0].id };
+    return null;
+  })();
+  const appStats = {
+    total: appRows.length,
+    active: appActive.length, prep: appPrep.length, waiting: appWaiting.length,
+    deadlines: appDeadlines.slice(0, 3).map((a) => ({ id: a.id, label: a.position || a.company || "Bewerbung", deadline: a.deadline })),
+    last: appLast ? { id: appLast.id, label: appLast.position || appLast.company || "Bewerbung", status: appLast.status } : null,
+    next: appNext
+  };
+
   return (
     <AppShell active="/">
       <Overview
@@ -48,6 +76,7 @@ export default async function Home() {
         newest={newest}
         needsReplyList={needsReply.slice(0, 5)}
         deadlineList={deadlines.slice(0, 5)}
+        appStats={appStats}
       />
     </AppShell>
   );

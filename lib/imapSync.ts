@@ -6,7 +6,7 @@ import { folderType, FolderType } from "./folders";
 import { loadRules, applyRules } from "./rules";
 import { classifyEmail } from "./anthropic";
 import { detectType } from "./messageType";
-import { autoLabels } from "./labels";
+import { classifyMessage } from "./classify2";
 
 const HEADER_FIELDS = ["list-unsubscribe", "list-id", "precedence", "auto-submitted", "feedback-id", "x-feedback-id", "reply-to", "return-path"];
 
@@ -183,14 +183,21 @@ async function upsertMessage(acc: MailAccount, msg: any, ftype: FolderType, mail
   };
   const c = classify(base as any);
 
-  // Header-basierte Typ-/Antwortbewertung (Massenmail/Umfrage erkennen).
+  // Header-basierte Signale (Massenmail/Unsubscribe) + mehrdimensionale
+  // Klassifizierung (Labels, Typ, Handlungsbedarf, Relevanz, Zusammenfassung).
   const headers = parseHeaders(msg.headers);
   const t = detectType({ headers, from_address: fromAddr, subject: env.subject, folder: ftype });
+  const cls = classifyMessage({
+    from_address: fromAddr, from_name: fromName, reply_to: addrList(env.replyTo),
+    subject: env.subject, preview: null,
+    is_bulk: t.is_bulk, has_list_unsub: t.has_list_unsub, folder_type: ftype,
+    in_thread: !!env.inReplyTo
+  });
   // Bucket-Kategorie aus dem Typ ableiten.
   let bucket = "info";
   if (ftype === "sent") bucket = "warten";
-  else if (t.message_type === "newsletter_marketing" || t.message_type === "survey_feedback" || t.message_type === "automated_bulk") bucket = "newsletter";
-  else if (t.needs_reply) bucket = t.priority === "hoch" || t.priority === "dringend" ? "sofort" : "heute";
+  else if (["newsletter", "marketing", "survey_feedback"].includes(cls.message_type)) bucket = "newsletter";
+  else if (cls.needs_reply) bucket = cls.priority === "hoch" || cls.priority === "dringend" ? "sofort" : "heute";
   else bucket = "info";
 
   const row: any = {
@@ -220,16 +227,20 @@ async function upsertMessage(acc: MailAccount, msg: any, ftype: FolderType, mail
     is_flagged: isFlagged,
     has_attachments: hasAttachments(msg.bodyStructure),
     importance: null,
-    needs_reply: t.needs_reply,
-    message_type: t.message_type,
+    needs_reply: cls.needs_reply,
+    message_type: cls.message_type,
     is_bulk: t.is_bulk,
     has_list_unsub: t.has_list_unsub,
-    action_status: t.action_status,
-    priority: t.priority,
+    action_status: cls.action_status,
+    priority: cls.priority,
+    relevance: cls.relevance,
+    summary: cls.summary,
+    classified_at: new Date().toISOString(),
+    classification_source: "auto",
     deadline_at: c.deadline_at,
     detected_task: c.detected_task,
     category: bucket,
-    labels: autoLabels({ from_address: fromAddr, from_name: fromName, subject: env.subject, message_type: t.message_type, needs_reply: t.needs_reply }),
+    labels: cls.labels,
     status: c.status,
     web_link: `imap-uid:${msg.uid}`,
     last_modified_at: null,

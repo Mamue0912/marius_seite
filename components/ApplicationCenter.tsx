@@ -56,11 +56,12 @@ function errText(r: { data: any; timedOut: boolean; aborted: boolean; status: nu
 type Account = { id: string; email: string; provider: string };
 
 // ============================ Hauptkomponente ============================
-export default function ApplicationCenter({ accounts, sendEnabled }: { accounts: Account[]; sendEnabled: boolean }) {
-  const [section, setSection] = useState<"uebersicht" | "neu" | "aktiv" | "unterlagen" | "dokumente">("uebersicht");
+export default function ApplicationCenter({ accounts, sendEnabled, initialSection, initialOpenId }: { accounts: Account[]; sendEnabled: boolean; initialSection?: string; initialOpenId?: string | null }) {
+  const validSection = ["uebersicht", "neu", "aktiv", "unterlagen", "dokumente"].includes(initialSection || "") ? (initialSection as any) : "uebersicht";
+  const [section, setSection] = useState<"uebersicht" | "neu" | "aktiv" | "unterlagen" | "dokumente">(validSection);
   const [apps, setApps] = useState<any[]>([]);
   const [docs, setDocs] = useState<any[]>([]);
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(initialOpenId || null);
   const [listFilter, setListFilter] = useState<string>("all");
   const [loading, setLoading] = useState(true);
   const [diag, setDiag] = useState(false);
@@ -114,8 +115,13 @@ export default function ApplicationCenter({ accounts, sendEnabled }: { accounts:
       </aside>
 
       <main className="ac-main">
+        {!loading && !openId && section !== "uebersicht" && (
+          <button className="ac-back" title="Zur Bewerbungsübersicht" aria-label="Zur Bewerbungsübersicht" onClick={() => nav("uebersicht")}>
+            <span className="ac-back-ic">‹</span><span className="ac-back-l">Übersicht</span>
+          </button>
+        )}
         {loading ? <div className="ac-empty"><span className="spin" /></div>
-          : openId ? <Workspace id={openId} accounts={accounts} sendEnabled={sendEnabled} docs={docs} onBack={() => setOpenId(null)} onChanged={loadApps} onDeleted={async () => { setOpenId(null); await loadApps(); }} onDiag={() => setDiag(true)} />
+          : openId ? <Workspace id={openId} accounts={accounts} sendEnabled={sendEnabled} docs={docs} onBack={() => nav("uebersicht")} onChanged={loadApps} onDeleted={async () => { nav("uebersicht"); await loadApps(); }} onDiag={() => setDiag(true)} />
           : section === "uebersicht" ? <Overview apps={apps} onOpen={openApp} onNav={nav} onNew={() => nav("neu")} />
           : section === "neu" ? <NewJob onCreated={async (id: string) => { await loadApps(); setOpenId(id); }} accounts={accounts} />
           : section === "aktiv" ? <AppList apps={apps} filter={listFilter} onFilter={setListFilter} onOpen={openApp} onNew={() => setSection("neu")} onReload={loadApps} />
@@ -550,7 +556,7 @@ function Workspace({ id, accounts, sendEnabled, docs, onBack, onChanged, onDelet
   return (
     <div className="ac-ws">
       <div className="ac-ws-top">
-        <button className="ac-btn sm" onClick={onBack}>‹ Bewerbungen</button>
+        <button className="ac-back sm" title="Zur Bewerbungsübersicht" aria-label="Zur Bewerbungsübersicht" onClick={onBack}><span className="ac-back-ic">‹</span><span className="ac-back-l">Übersicht</span></button>
         <div className="ac-ws-title">{app.position || "Bewerbung"}{app.company ? <span className="ac-ws-co"> · {app.company}</span> : null}</div>
         <select className="ac-select sm" value={app.status} onChange={(e) => patch({ status: e.target.value })}>
           {STATUS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}

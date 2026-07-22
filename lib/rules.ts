@@ -7,6 +7,8 @@ export interface MailRule {
   match_value: string;
   set_category: string | null;
   set_hidden: boolean;
+  set_label?: string | null;
+  set_needs_reply?: boolean | null;
 }
 
 export async function loadRules(userId: string): Promise<MailRule[]> {
@@ -18,7 +20,7 @@ export async function loadRules(userId: string): Promise<MailRule[]> {
 export function applyRules(
   rules: MailRule[],
   msg: { from_address?: string | null; mail_account_id?: string | null }
-): { category: string | null; hidden: boolean; matched: boolean } {
+): { category: string | null; hidden: boolean; matched: boolean; label: string | null; needs_reply: boolean | null } {
   const from = (msg.from_address || "").toLowerCase();
   const domain = from.includes("@") ? from.split("@")[1] : "";
   for (const r of rules) {
@@ -27,7 +29,10 @@ export function applyRules(
       (r.match_type === "sender" && from === v) ||
       (r.match_type === "domain" && domain === v) ||
       (r.match_type === "account" && msg.mail_account_id === r.match_value);
-    if (hit) return { category: r.set_category, hidden: !!r.set_hidden, matched: true };
+    if (hit) return {
+      category: r.set_category, hidden: !!r.set_hidden, matched: true,
+      label: r.set_label ?? null, needs_reply: r.set_needs_reply ?? null
+    };
   }
-  return { category: null, hidden: false, matched: false };
+  return { category: null, hidden: false, matched: false, label: null, needs_reply: null };
 }

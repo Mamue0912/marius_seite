@@ -2,8 +2,31 @@
 import { useEffect, useRef, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabaseBrowser";
 import { PROVIDERS } from "@/lib/mailProviders";
+import { RELEVANCE_LABEL } from "@/lib/classify2";
 
 type Msg = any;
+
+// Inhaltliche Labels einer Nachricht (ohne Meta-Labels), Nutzer-Override zuerst.
+function labelsOfMsg(m: any): string[] {
+  const ls = (m.user_labels && m.user_labels.length ? m.user_labels : (m.labels || [])) as string[];
+  return ls.filter((l) => !["Automatisch", "Persönlich", "Sonstiges"].includes(l));
+}
+
+// Kompakter Status-Chip aus gespeicherter Klassifizierung (Nutzer-Override zuerst).
+function statusChip(m: any): { text: string; tone: string } | null {
+  const isSent = m.folder_type === "sent";
+  if (isSent) return null;
+  const rel = m.user_relevance || m.relevance;
+  const action = m.user_action_status || m.action_status;
+  const needs = m.user_needs_reply != null ? m.user_needs_reply : m.needs_reply;
+  if (needs) return { text: "Antwort nötig", tone: "reply" };
+  if (action === "act_now") return { text: "Sofort prüfen", tone: "urgent" };
+  if (rel === "sehr_wichtig") return { text: "Sehr wichtig", tone: "urgent" };
+  if (rel === "wichtig") return { text: "Wichtig", tone: "high" };
+  if (action === "review_recommended" || action === "action_no_reply") return { text: "Prüfen", tone: "mid" };
+  if (action === "no_action" || rel === "irrelevant" || rel === "niedrig") return { text: "Nur Info", tone: "muted" };
+  return null;
+}
 
 const BUCKETS: { k: string; t: string; c: string }[] = [
   { k: "sofort", t: "Sofort beantworten", c: "#FF453A" },
@@ -65,7 +88,10 @@ const SMART_VIEWS = [
   { key: "Zahlungen", label: "Zahlungen", ic: "€" },
   { key: "Abonnements", label: "Abos", ic: "↻" },
   { key: "Reisen", label: "Reisen", ic: "✈" },
-  { key: "Newsletter", label: "Newsletter", ic: "✉" }
+  { key: "Sicherheit", label: "Sicherheit", ic: "🛡" },
+  { key: "Newsletter", label: "Newsletter", ic: "✉" },
+  { key: "Automatisch", label: "Automatisch", ic: "⚙" },
+  { key: "Niedrig", label: "Niedrige Priorität", ic: "▽" }
 ];
 
 export default function Cockpit({
@@ -95,6 +121,7 @@ export default function Cockpit({
   const [suggests, setSuggests] = useState<Record<string, any[]>>({});
   const [suggestLoading, setSuggestLoading] = useState<Record<string, boolean>>({});
   const [diag, setDiag] = useState<boolean>(false);
+  const [classify, setClassify] = useState<{ total: number; done: number } | null>(null);
   const accById: Record<string, Account> = Object.fromEntries(accounts.map((a) => [a.id, a]));
   const filter = { account: sel.account, folder: sel.ftype, cat: "all", unread: false, needs: false, q };
   const [drawer, setDrawer] = useState<any>(null); // { msg, mode, loading, draft, body, tone, customInstruction, confirmBinding, sending }
@@ -134,6 +161,37 @@ export default function Cockpit({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connected]);
 
+  // ---- Einmalige Nachklassifizierung bereits gespeicherter Mails ----
+  // Läuft nur, wenn es noch nicht eingeordnete Nachrichten gibt; verarbeitet
+  // in Stapeln mit sichtbarem Fortschritt und lädt danach die Liste neu.
+  useEffect(() => {
+    if (!connected) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const s = await (await fetch("/api/mail/classify")).json();
+        if (cancelled || !s || !s.remaining) return;
+        setClassify({ total: s.total, done: s.classified });
+        let remaining = s.remaining;
+        while (remaining > 0 && !cancelled) {
+          const r = await (await fetch("/api/mail/classify", { method: "POST" })).json();
+          remaining = r.remaining;
+          setClassify({ total: r.total, done: r.classified });
+          if (!r.processed) break; // Schutz vor Endlosschleife
+        }
+        // Ergebnisse frisch laden, damit die intelligenten Ansichten greifen.
+        try {
+          const supabase = supabaseBrowser();
+          const { data } = await supabase.from("messages").select("*").eq("is_deleted", false).order("received_at", { ascending: false });
+          if (!cancelled && data) setMsgs(data);
+        } catch {}
+      } catch {}
+      if (!cancelled) setTimeout(() => setClassify(null), 1500);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected]);
+
   // ---- Vorschläge lazy laden (nur für zu beantwortende, noch nicht gesendete Mails) ----
   async function ensureSuggestions(m: Msg) {
     if (suggests[m.id]) return;
@@ -150,7 +208,12 @@ export default function Cockpit({
     setSuggestLoading((s) => ({ ...s, [m.id]: false }));
   }
 
+  // Gespeicherte Klassifizierung – Nutzer-Overrides haben immer Vorrang.
   const labelsOf = (m: Msg): string[] => (m.user_labels && m.user_labels.length ? m.user_labels : (m.labels || []));
+  const relevanceOf = (m: any): string => m.user_relevance || m.relevance || "normal";
+  const typeOf = (m: any): string => m.user_message_type || m.message_type || "unknown";
+  const actionOf = (m: any): string => m.user_action_status || m.action_status || "information_only";
+  const needsReplyOf = (m: any): boolean => (m.user_needs_reply != null ? m.user_needs_reply : !!m.needs_reply);
 
   function visible(m: Msg) {
     if (m.is_deleted) return false;
@@ -159,9 +222,16 @@ export default function Cockpit({
       if (!hay.includes(q.toLowerCase())) return false;
     }
     if (sel.view) {
-      // Intelligente Ansicht: kontenübergreifend, ordnerunabhängig.
-      if (sel.view === "wichtig") return m.semantic_category === "Wichtig" || m.priority === "hoch" || m.priority === "dringend";
-      if (sel.view === "reply") return !!m.needs_reply && m.folder_type !== "sent";
+      // Intelligente Ansicht: kontenübergreifend, ordnerunabhängig, aus gespeicherten Daten.
+      if ((m as any).folder_type === "trash" || (m as any).folder_type === "spam") return false;
+      const rel = relevanceOf(m);
+      if (sel.view === "wichtig") return rel === "sehr_wichtig" || rel === "wichtig" || (m as any).semantic_category === "Wichtig";
+      if (sel.view === "reply") return needsReplyOf(m) && m.folder_type !== "sent";
+      if (sel.view === "Persönlich") return typeOf(m) === "personal_direct" || typeOf(m) === "personal_thread";
+      if (sel.view === "Newsletter") return ["newsletter", "marketing", "survey_feedback"].includes(typeOf(m)) || labelsOf(m).includes("Newsletter");
+      if (sel.view === "Sicherheit") return labelsOf(m).includes("Sicherheit") || typeOf(m) === "security_alert";
+      if (sel.view === "Automatisch") return labelsOf(m).includes("Automatisch") || ["system_notification", "welcome", "auto_confirmation"].includes(typeOf(m));
+      if (sel.view === "Niedrig") return rel === "niedrig" || rel === "irrelevant";
       return labelsOf(m).includes(sel.view);
     }
     // Konto + Ordner.
@@ -331,9 +401,15 @@ export default function Cockpit({
     await fetch("/api/mail/categorize", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messageId: m.id, user_labels: next }) });
   }
 
-  async function categorize(m: Msg, opts: { category?: string; hidden?: boolean; ruleScope?: "sender" | "domain" }) {
-    // Optimistisch aktualisieren.
-    setMsgs((prev) => prev.map((x) => x.id === m.id ? { ...x, semantic_category: opts.category ?? x.semantic_category, hidden: opts.hidden ?? x.hidden, classification_source: "user" } : x));
+  async function categorize(m: Msg, opts: { category?: string; hidden?: boolean; ruleScope?: "sender" | "domain"; relevance?: string; message_type?: string; ruleLabel?: string; ruleNeverReply?: boolean }) {
+    // Optimistisch aktualisieren (Nutzer-Override, bleibt nach Neuladen erhalten).
+    const patch: any = { classification_source: "user_override" };
+    if (opts.category !== undefined) patch.semantic_category = opts.category;
+    if (opts.hidden !== undefined) patch.hidden = opts.hidden;
+    if (opts.relevance !== undefined) { patch.relevance = opts.relevance; patch.user_relevance = opts.relevance; }
+    if (opts.message_type !== undefined) { patch.message_type = opts.message_type; patch.user_message_type = opts.message_type; }
+    setMsgs((prev) => prev.map((x) => x.id === m.id ? { ...x, ...patch } : x));
+    setReading((s: any) => s && s.msg.id === m.id ? { ...s, msg: { ...s.msg, ...patch } } : s);
     try {
       await fetch("/api/mail/categorize", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messageId: m.id, ...opts }) });
     } catch {}
@@ -414,6 +490,12 @@ export default function Cockpit({
               <input className="f-search" placeholder="Suchen…" value={q} onChange={(e) => setQ(e.target.value)} />
               <button className="btn small ghost" onClick={manualSync} title="Aktualisieren">↻</button>
             </div>
+            {classify && (
+              <div className="classify-banner">
+                <span className="spin" />
+                <span>Nachrichten werden eingeordnet: {classify.done} von {classify.total}</span>
+              </div>
+            )}
             <div className="mlist-scroll">
               {folderItems !== null ? (
                 folderLoading ? [0, 1, 2, 3].map((i) => <div className="sk-card" key={i} />)
@@ -437,7 +519,7 @@ export default function Cockpit({
             {reading ? (
               <Reader reading={reading} account={accById[reading.msg.mail_account_id]} onClose={() => { setReading(null); setMobilePane("list"); }}
                 onReply={(opts: any) => { openDraft(reading.msg, opts); }} suggests={suggests[reading.msg.id]} suggestsLoading={!!suggestLoading[reading.msg.id]} ensure={ensureSuggestions}
-                onCategorize={categorize} onLoadImages={() => openReader(reading.msg, true)} onAction={mailAction} onSetReply={setReplyFlag} onAddLabel={addLabel} onDiag={() => setDiag(true)} />
+                onCategorize={categorize} onCorrect={categorize} onLoadImages={() => openReader(reading.msg, true)} onAction={mailAction} onSetReply={setReplyFlag} onAddLabel={addLabel} onDiag={() => setDiag(true)} />
             ) : (
               <div className="mread-empty"><div className="ic">✉</div><div>Wähle eine Nachricht zum Lesen.</div></div>
             )}
@@ -465,7 +547,8 @@ export default function Cockpit({
 function MailRow({ m, account, onOpen, selected, labelsOf }: any) {
   const isSent = m.folder_type === "sent";
   const provider = account ? (PROVIDERS[account.provider]?.label || account.provider) : (m.account_display_name || "");
-  const labels: string[] = (labelsOf ? labelsOf(m) : (m.labels || [])).filter((l: string) => l !== "Automatisch" && l !== "Persönlich").slice(0, 3);
+  const labels: string[] = (labelsOf ? labelsOf(m) : (m.labels || [])).filter((l: string) => l !== "Automatisch" && l !== "Persönlich" && l !== "Sonstiges").slice(0, 2);
+  const chip = statusChip(m);
   return (
     <div className={"mrow" + (selected ? " sel" : "") + (!m.is_read && !isSent ? " unread" : "")} onClick={onOpen}>
       <span className="mrow-dot" style={{ opacity: !m.is_read && !isSent ? 1 : 0 }} />
@@ -478,7 +561,7 @@ function MailRow({ m, account, onOpen, selected, labelsOf }: any) {
         {m.preview && <div className="mrow-prev">{m.preview}</div>}
         <div className="mrow-tags">
           <span className="mrow-acct">{provider}</span>
-          {m.needs_reply && !isSent && <span className="mrow-badge">Antwort</span>}
+          {chip && <span className={"mrow-status " + chip.tone}>{chip.text}</span>}
           {labels.map((l) => <span key={l} className="mrow-label" style={{ ["--lc" as any]: LABEL_COLORS[l] || "#8a8a8f" }}>{l}</span>)}
         </div>
       </div>
@@ -584,7 +667,7 @@ function MailFrame({ html, hasImages, withImages, onLoadImages, mode }: any) {
   );
 }
 
-function Reader({ reading, account, onClose, onReply, suggests, suggestsLoading, ensure, onCategorize, onLoadImages, onAction, onSetReply, onAddLabel, onDiag }: any) {
+function Reader({ reading, account, onClose, onReply, suggests, suggestsLoading, ensure, onCategorize, onCorrect, onLoadImages, onAction, onSetReply, onAddLabel, onDiag }: any) {
   const m = reading.msg;
   const isSent = m.folder_type === "sent";
   const [takingJob, setTakingJob] = useState(false);
@@ -592,8 +675,10 @@ function Reader({ reading, account, onClose, onReply, suggests, suggestsLoading,
   const [view, setView] = useState<"angepasst" | "original" | "text">("angepasst");
   useEffect(() => { setView("angepasst"); }, [m.id]); // eslint-disable-line
   // KI-Antwort nur bei echten persönlichen Antwortfällen – nicht bei Umfrage/Newsletter/Rechnung.
-  const isPersonal = (m.message_type === "personal_direct" || m.user_needs_reply === true);
-  const canReply = isPersonal && m.needs_reply && m.draft_status !== "gesendet" && !isSent;
+  const mtype = m.user_message_type || m.message_type;
+  const mneeds = m.user_needs_reply != null ? m.user_needs_reply : m.needs_reply;
+  const isPersonal = (mtype === "personal_direct" || mtype === "personal_thread" || mtype === "job_offer" || m.user_needs_reply === true);
+  const canReply = isPersonal && mneeds && m.draft_status !== "gesendet" && !isSent;
   useEffect(() => { if (canReply) ensure(m); }, [m.id]); // eslint-disable-line
   return (
     <>
@@ -622,7 +707,7 @@ function Reader({ reading, account, onClose, onReply, suggests, suggestsLoading,
         {!isSent && (
           <div className="rd-want">
             <span className="rd-want-ic">🤖</span>
-            <div><b>Diese E-Mail möchte von dir:</b> {wantSummary(m)}</div>
+            <div><b>Einordnung:</b> {m.summary || wantSummary(m)}</div>
           </div>
         )}
 
@@ -635,10 +720,40 @@ function Reader({ reading, account, onClose, onReply, suggests, suggestsLoading,
           {onAddLabel && (
             <select className="lbl-add" value="" onChange={(e) => { if (e.target.value) onAddLabel(m, e.target.value); }} title="Label hinzufügen">
               <option value="">+ Label</option>
-              {["Karate", "Bewerbungen", "Zahlungen", "Abonnements", "Reisen", "Schule", "Sicherheit", "Termine", "Persönlich", "Wichtig", "Newsletter"].map((l) => <option key={l} value={l}>{l}</option>)}
+              {["Karate", "Bewerbungen", "Zahlungen", "Abonnements", "Reisen", "Bestellungen", "Schule", "Sicherheit", "Termine", "Persönlich", "Newsletter", "Automatisch"].map((l) => <option key={l} value={l}>{l}</option>)}
             </select>
           )}
         </div>
+
+        {!isSent && onCorrect && (
+          <details className="rd-correct">
+            <summary>Einstufung korrigieren</summary>
+            <div className="rc-body">
+              <div className="rc-row"><span className="rc-k">Relevanz</span>
+                <div className="chips">
+                  {[["sehr_wichtig", "Sehr wichtig"], ["wichtig", "Wichtig"], ["normal", "Normal"], ["niedrig", "Niedrig"], ["irrelevant", "Irrelevant"]].map(([v, l]) => (
+                    <button key={v} className={"chip" + ((m.user_relevance || m.relevance) === v ? " sel" : "")} onClick={() => onCorrect(m, { relevance: v })}>{l}</button>
+                  ))}
+                </div>
+              </div>
+              <div className="rc-row"><span className="rc-k">Art</span>
+                <div className="chips">
+                  <button className="chip" onClick={() => onCorrect(m, { message_type: "personal_direct" })}>Persönlich</button>
+                  <button className="chip" onClick={() => onCorrect(m, { message_type: "system_notification" })}>Automatisch</button>
+                  <button className="chip" onClick={() => onCorrect(m, { message_type: "newsletter" })}>Newsletter</button>
+                  <button className="chip" onClick={() => onSetReply(m, !(m.user_needs_reply != null ? m.user_needs_reply : m.needs_reply))}>{(m.user_needs_reply != null ? m.user_needs_reply : m.needs_reply) ? "Keine Antwort nötig" : "Antwort nötig"}</button>
+                </div>
+              </div>
+              <div className="rc-row"><span className="rc-k">Dauerregel für {m.from_address}</span>
+                <div className="chips">
+                  <button className="chip" onClick={() => onCorrect(m, { ruleScope: "sender", ruleNeverReply: true })}>Nie antwortpflichtig</button>
+                  <button className="chip" onClick={() => { const l = labelsOfMsg(m)[0] || "Newsletter"; onCorrect(m, { ruleScope: "sender", ruleLabel: l }); }}>Absender immer „{labelsOfMsg(m)[0] || "Newsletter"}"</button>
+                  <button className="chip" onClick={() => onCorrect(m, { ruleScope: "domain", ruleLabel: "Bewerbungen" })}>Domain → Bewerbungen</button>
+                </div>
+              </div>
+            </div>
+          </details>
+        )}
 
         {reading.thread && reading.thread.length > 0 && (
           <div className="rd-thread">
@@ -682,9 +797,10 @@ function Reader({ reading, account, onClose, onReply, suggests, suggestsLoading,
         ) : !isSent && (
           <div className="rd-actions">
             <div className="note" style={{ marginTop: 0 }}>
-              {m.message_type === "survey_feedback" ? "Automatisierte Feedback-/Umfragemail – keine persönliche Antwort nötig."
-                : m.message_type === "newsletter_marketing" || m.is_bulk ? "Massen-/Newslettermail – keine persönliche Antwort nötig."
-                : m.message_type === "transactional" ? "Transaktions-/Belegmail – nur zur Information."
+              {m.summary ? m.summary
+                : mtype === "survey_feedback" ? "Automatisierte Feedback-/Umfragemail – keine persönliche Antwort nötig."
+                : mtype === "newsletter" || mtype === "marketing" || m.is_bulk ? "Massen-/Newslettermail – keine persönliche Antwort nötig."
+                : mtype === "invoice_receipt" ? "Transaktions-/Belegmail – nur zur Information."
                 : "Keine persönliche Antwort erwartet."}
             </div>
             <div className="chips" style={{ marginTop: 10 }}>
