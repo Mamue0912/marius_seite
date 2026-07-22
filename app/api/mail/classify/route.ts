@@ -39,8 +39,8 @@ export async function POST(req: NextRequest) {
   const rules = await loadRules(user.id);
   // Zwei-Stufen-Select: fällt auf garantierte Basisspalten zurück, falls eine
   // erweiterte Spalte noch fehlt – so scheitert die Einordnung nie komplett.
-  const SAFE = "id,from_address,from_name,subject,preview,folder_type,mail_account_id";
-  const FULL = SAFE + ",reply_to_addresses,is_bulk,has_list_unsub,in_reply_to,user_labels";
+  const SAFE = "id,from_address,from_name,subject,preview,mail_account_id";
+  const FULL = SAFE + ",folder_type,reply_to_addresses,is_bulk,has_list_unsub,in_reply_to,user_labels";
   let sel: any = await admin.from("messages").select(FULL).eq("user_id", user.id).eq("is_deleted", false).is("classified_at", null).order("received_at", { ascending: false }).limit(BATCH);
   if (sel.error) {
     sel = await admin.from("messages").select(SAFE).eq("user_id", user.id).eq("is_deleted", false).is("classified_at", null).order("received_at", { ascending: false }).limit(BATCH);
