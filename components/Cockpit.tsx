@@ -609,7 +609,18 @@ function MailDiagModal({ onClose, client }: any) {
       <div className="modal">
         <div className="dh"><h3>Sync-Diagnose</h3><button className="x" onClick={onClose}>✕</button></div>
         <div className="db">
-          <div className="label" style={{ marginTop: 0 }}>Diese Ansicht (Client)</div>
+          {!s.loading && s.schema && (s.schema.missingColumns?.length > 0 || !s.schema.bucketExists) && (
+            <div className="note binding-warn" style={{ marginTop: 0 }}>
+              <b>Einrichtung unvollständig:</b>
+              {s.schema.missingColumns?.length > 0 && <div>Fehlende Spalten in „messages": {s.schema.missingColumns.join(", ")}</div>}
+              {!s.schema.bucketExists && <div>Storage-Bucket „documents" fehlt (für Bewerbungsunterlagen/PDF-Upload).</div>}
+              <div style={{ marginTop: 4 }}>→ bitte das passende SQL in Supabase ausführen.</div>
+            </div>
+          )}
+          {!s.loading && s.schema && !s.schema.missingColumns?.length && s.schema.bucketExists && (
+            <div className="note" style={{ marginTop: 0, color: "var(--ok)" }}>Datenbank & Storage vollständig ✓</div>
+          )}
+          <div className="label">Diese Ansicht (Client)</div>
           <div className="meta-row">
             <span className="k">Geladene Datensätze</span><span className="v">{client.loadedTotal}</span>
             <span className="k">Sichtbar mit Filter</span><span className="v">{client.visibleCount}</span>

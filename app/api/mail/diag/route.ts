@@ -19,6 +19,16 @@ export async function GET() {
 
   const { data: folders } = await admin.from("mail_folders").select("account_id,folder_type,unread").eq("user_id", user.id).eq("folder_type", "inbox");
 
+  // Schema-Selbstprüfung: welche erwarteten Spalten fehlen? (spaltenweise proben)
+  const expectedCols = ["classified_at", "relevance", "summary", "labels", "user_labels", "message_type", "action_status", "needs_reply", "priority", "classification_source", "is_bulk", "user_relevance", "user_message_type"];
+  const missingColumns: string[] = [];
+  for (const c of expectedCols) {
+    const { error } = await admin.from("messages").select(c).eq("user_id", user.id).limit(1);
+    if (error && /column|does not exist|schema cache/i.test(error.message)) missingColumns.push(c);
+  }
+  let bucketExists = false;
+  try { const { data } = await admin.storage.getBucket("documents"); bucketExists = !!data; } catch { bucketExists = false; }
+
   const perAccount = accounts.map((a: any) => {
     const imapUnread = (folders || []).filter((f) => f.account_id === a.id).reduce((s, f) => s + (f.unread || 0), 0);
     return {
@@ -34,6 +44,7 @@ export async function GET() {
   return NextResponse.json({
     accounts: perAccount,
     db: { inboxTotal: dbInboxTotal, inboxUnread: dbInboxUnread, unclassified: dbUnclassified },
+    schema: { missingColumns, bucketExists },
     at: new Date().toISOString()
   });
 }

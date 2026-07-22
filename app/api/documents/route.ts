@@ -43,7 +43,10 @@ export async function POST(req: NextRequest) {
 
   let path: string;
   try { path = await uploadDocument(user.id, name, buffer, mime); }
-  catch (e) { return NextResponse.json({ error: "upload_failed", message: "Speichern fehlgeschlagen. Ist der Storage-Bucket 'documents' angelegt?" }, { status: 502 }); }
+  catch (e) {
+    const detail = (e as Error).message || "";
+    return NextResponse.json({ error: "upload_failed", message: "Speichern fehlgeschlagen. Ist der Storage-Bucket 'documents' als privat angelegt? Details: " + detail }, { status: 502 });
+  }
 
   // Textextraktion (Bilder werden später per Vision gelesen).
   let extracted: string | null = null;
