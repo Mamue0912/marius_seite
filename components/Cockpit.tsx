@@ -168,10 +168,10 @@ export default function Cockpit({
   // ---- Automatische Aktualisierung: Fenster-Fokus + regelmäßig ----
   useEffect(() => {
     if (!connected) return;
-    const onFocus = () => { if (document.visibilityState === "visible") manualSync(); };
+    const onFocus = () => { if (document.visibilityState === "visible") autoSync(); };
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onFocus);
-    const iv = setInterval(() => { if (document.visibilityState === "visible") manualSync(); }, 120000);
+    const iv = setInterval(() => { if (document.visibilityState === "visible") autoSync(); }, 150000);
     return () => { window.removeEventListener("focus", onFocus); document.removeEventListener("visibilitychange", onFocus); clearInterval(iv); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connected]);
@@ -309,9 +309,13 @@ export default function Cockpit({
   }
 
   const syncingRef = useRef(false);
+  const lastSyncRef = useRef(0);
+  // Bremse gegen zu häufige IMAP-Verbindungen (WEB.DE limitiert das).
+  function autoSync() { if (Date.now() - lastSyncRef.current > 60000) manualSync(); }
   async function manualSync(reseed = false) {
     if (syncingRef.current) return; // kein paralleler Sync
     syncingRef.current = true;
+    lastSyncRef.current = Date.now();
     setStatus((s: any) => ({ ...s, syncing: true }));
     let errors: string[] = [];
     let report: any = null;
@@ -601,7 +605,7 @@ export default function Cockpit({
         loadedTotal: msgs.length,
         visibleCount: msgs.filter(visible).length,
         unreadInboxDb: unreadInbox(),
-        sel, report: status?.report, syncedAt: status?.syncedAt, syncing: !!status?.syncing, classifyError: status?.classifyError
+        sel, report: status?.report, syncedAt: status?.syncedAt, syncing: !!status?.syncing, classifyError: status?.classifyError, errors: status?.errors
       }} onReseed={() => { setMailDiag(false); manualSync(true); }} />}
       {compose && <ComposeModal compose={compose} setCompose={setCompose} accounts={accounts} sendEnabled={sendEnabled} />}
     </>
@@ -638,6 +642,12 @@ function MailDiagModal({ onClose, client, onReseed }: any) {
             <span className="k">Letzter Sync</span><span className="v">{client.syncing ? "läuft…" : client.syncedAt ? new Date(client.syncedAt).toLocaleTimeString("de-DE") : "—"}</span>
           </div>
           {client.classifyError && <div className="note binding-warn" style={{ marginTop: 8 }}>Einordnung meldet: {client.classifyError}</div>}
+          {client.errors && client.errors.length > 0 && (
+            <div className="note binding-warn" style={{ marginTop: 8 }}>
+              <b>Sync-Fehler:</b>
+              {client.errors.map((er: string, i: number) => <div key={i}>{er}</div>)}
+            </div>
+          )}
           {client.report && client.report.length > 0 && (
             <>
               <div className="label">Letzter Sync-Lauf</div>
