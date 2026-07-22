@@ -407,7 +407,23 @@ a.tile:hover { border-color: var(--line-strong); transform: translateY(-2px); ba
 .rd-html table { max-width: 100%; border-collapse: collapse; }
 .rd-html td, .rd-html th { border: 1px solid var(--line); padding: 6px 8px; }
 .rd-actions { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line-2); }
-.rd-frame { width: 100%; border: 0; border-radius: var(--r-sm); background: #fff; min-height: 200px; display: block; }
+
+/* Ansichtsauswahl der geöffneten Mail (Angepasst / Original / Nur Text) */
+.rd-viewsel { display: inline-flex; gap: 2px; padding: 3px; margin-bottom: 12px; background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 999px; }
+.rd-viewsel button { border: 0; background: transparent; color: var(--muted); font-size: 12px; font-weight: 560; padding: 5px 12px; border-radius: 999px; cursor: pointer; transition: background .15s, color .15s; }
+.rd-viewsel button:hover { color: var(--ink-2); }
+.rd-viewsel button.on { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+.rd-imgbtn { margin-bottom: 10px; }
+
+/* Isoliertes Mail-Rendering */
+.rd-frame { width: 100%; border: 0; min-height: 200px; display: block; }
+/* Angepasst: harmonisch dunkel, dezenter Rahmen */
+.rd-frame.angepasst { background: #161618; border: 1px solid var(--line-2); border-radius: var(--r-md); }
+/* Original: gebrauchsfertige helle "Mail-Leinwand" mit weichem Rahmen/Schatten */
+.rd-canvas { background: #fff; border: 1px solid rgba(0,0,0,.12); border-radius: var(--r-md); box-shadow: 0 8px 30px rgba(0,0,0,.35), 0 1px 0 rgba(255,255,255,.4) inset; overflow: hidden; padding: 2px; }
+.rd-frame.original { background: #fff; border-radius: calc(var(--r-md) - 3px); }
+/* Nur Text: aufgeräumte Lesefassung */
+.rd-plain { background: var(--surface-2); border: 1px solid var(--line-2); border-radius: var(--r-md); padding: 18px 20px; font-size: 14.5px; line-height: 1.62; color: var(--ink); white-space: pre-wrap; word-break: break-word; }
 .m-open { margin-top: 10px; border: 0; background: transparent; color: var(--accent-ink); font-size: 12.5px; font-weight: 560; cursor: pointer; padding: 0; }
 .mail.selected { border-color: var(--accent-line); background: var(--surface-2); box-shadow: 0 0 0 3px var(--accent-soft); }
 

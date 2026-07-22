@@ -458,16 +458,88 @@ function wantSummary(m: any): string {
   }
 }
 
-function MailFrame({ html, hasImages, withImages, onLoadImages }: any) {
+// --- Kontrollierte Dark-Mode-Transformation (Phase 1) ---------------------
+// KEIN pauschales filter:invert. Wir lesen die berechneten Farben jedes
+// Elements und passen NUR nahezu graue helle Flächen (→ dunkel) und
+// nahezu graue dunkle Texte (→ hell) an. Markenfarben, Logos, Produktbilder
+// und farbige Buttons/Texte bleiben unangetastet.
+const _srgb = (v: number) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+function _lum(r: number, g: number, b: number) { return 0.2126 * _srgb(r) + 0.7152 * _srgb(g) + 0.0722 * _srgb(b); }
+function _parseColor(c: string): { r: number; g: number; b: number; a: number } | null {
+  if (!c) return null;
+  const m = c.match(/rgba?\(([^)]+)\)/i);
+  if (!m) return null;
+  const p = m[1].split(",").map((s) => parseFloat(s.trim()));
+  if (p.length < 3 || p.some((n) => Number.isNaN(n))) return null;
+  return { r: p[0], g: p[1], b: p[2], a: p[3] === undefined ? 1 : p[3] };
+}
+const _grayish = (r: number, g: number, b: number) => Math.max(r, g, b) - Math.min(r, g, b) <= 20;
+
+function applyDarkTransform(doc: Document) {
+  const win = doc.defaultView;
+  if (!win) return;
+  doc.body.style.backgroundColor = "#161618";
+  const els = doc.querySelectorAll<HTMLElement>("body *");
+  els.forEach((el) => {
+    const tag = el.tagName.toLowerCase();
+    if (tag === "img" || tag === "svg" || tag === "picture" || tag === "video" || tag === "canvas") return;
+    const cs = win.getComputedStyle(el);
+    // Hintergrund: helle, weitgehend neutrale Flächen abdunkeln.
+    // Hintergrundbilder (oft Logos/Banner) bleiben unangetastet.
+    if (!cs.backgroundImage || cs.backgroundImage === "none") {
+      const bg = _parseColor(cs.backgroundColor);
+      if (bg && bg.a > 0.05) {
+        const l = _lum(bg.r, bg.g, bg.b);
+        if (l > 0.55 && (_grayish(bg.r, bg.g, bg.b) || l > 0.8)) {
+          el.style.setProperty("background-color", l > 0.9 ? "#1b1b1d" : "#25252a", "important");
+        }
+      }
+    }
+    // Text: dunkle, weitgehend neutrale Schrift aufhellen. Farbige (Marken-)
+    // Schrift bleibt farbig.
+    const col = _parseColor(cs.color);
+    if (col && _grayish(col.r, col.g, col.b)) {
+      const l = _lum(col.r, col.g, col.b);
+      if (l < 0.3) el.style.setProperty("color", "#e6e6ea", "important");
+      else if (l < 0.5) el.style.setProperty("color", "#b7b7c0", "important");
+    }
+    // Rahmen: dunkle Trennlinien dezent aufhellen.
+    (["Top", "Right", "Bottom", "Left"] as const).forEach((side) => {
+      const style = (cs as any)[`border${side}Style`];
+      if (!style || style === "none") return;
+      const bc = _parseColor((cs as any)[`border${side}Color`]);
+      if (bc && bc.a > 0.05 && _lum(bc.r, bc.g, bc.b) < 0.4) {
+        el.style.setProperty(`border-${side.toLowerCase()}-color`, "rgba(255,255,255,.14)", "important");
+      }
+    });
+  });
+  // Links gut lesbar, sofern sie zu dunkel wären.
+  doc.querySelectorAll<HTMLElement>("a").forEach((a) => {
+    const col = _parseColor(win.getComputedStyle(a).color);
+    if (col && _lum(col.r, col.g, col.b) < 0.45) a.style.setProperty("color", "#6fb1ff", "important");
+  });
+}
+
+function MailFrame({ html, hasImages, withImages, onLoadImages, mode }: any) {
   const ref = useRef<HTMLIFrameElement>(null);
-  const doc = `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;padding:0}body{padding:14px;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",Inter,sans-serif;font-size:14px;line-height:1.5;color:#1c1c1e;background:#fff;word-break:break-word;-webkit-text-size-adjust:100%}img{max-width:100%;height:auto}table{max-width:100%}a{color:#0a58ca}</style></head><body>${html}</body></html>`;
+  const dark = mode === "angepasst";
+  const bodyCss = dark
+    ? `body{padding:16px;color:#e6e6ea;background:#161618;line-height:1.55}a{color:#6fb1ff}`
+    : `body{padding:18px;color:#1c1c1e;background:#fff;line-height:1.5}a{color:#0a58ca}`;
+  const doc = `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;padding:0}body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",Inter,sans-serif;font-size:14px;word-break:break-word;-webkit-text-size-adjust:100%}${bodyCss}img{max-width:100%;height:auto}table{max-width:100%}</style></head><body>${html}</body></html>`;
   function onLoad() {
-    try { const d = ref.current?.contentDocument; if (d) ref.current!.style.height = Math.min((d.body?.scrollHeight || 400) + 28, 6000) + "px"; } catch {}
+    const d = ref.current?.contentDocument;
+    if (!d) return;
+    if (dark) { try { applyDarkTransform(d); } catch {} }
+    try { ref.current!.style.height = Math.min((d.body?.scrollHeight || 400) + 30, 6000) + "px"; } catch {}
   }
+  const frame = (
+    <iframe key={mode} ref={ref} className={"rd-frame " + (mode || "original")} sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" srcDoc={doc} onLoad={onLoad} title="E-Mail-Inhalt" />
+  );
   return (
     <>
-      {hasImages && !withImages && <button className="btn small" style={{ marginBottom: 10 }} onClick={onLoadImages}>Bilder laden</button>}
-      <iframe ref={ref} className="rd-frame" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" srcDoc={doc} onLoad={onLoad} title="E-Mail-Inhalt" />
+      {hasImages && !withImages && <button className="btn small rd-imgbtn" onClick={onLoadImages}>Externe Bilder laden</button>}
+      {mode === "original" ? <div className="rd-canvas">{frame}</div> : frame}
     </>
   );
 }
@@ -475,6 +547,9 @@ function MailFrame({ html, hasImages, withImages, onLoadImages }: any) {
 function Reader({ reading, account, onClose, onReply, suggests, ensure, onCategorize, onLoadImages, onAction, onSetReply, onAddLabel }: any) {
   const m = reading.msg;
   const isSent = m.folder_type === "sent";
+  // Ansichtsmodus der geöffneten Mail: standardmäßig "Angepasst" (Dark-Mode-harmonisch).
+  const [view, setView] = useState<"angepasst" | "original" | "text">("angepasst");
+  useEffect(() => { setView("angepasst"); }, [m.id]); // eslint-disable-line
   // KI-Antwort nur bei echten persönlichen Antwortfällen – nicht bei Umfrage/Newsletter/Rechnung.
   const isPersonal = (m.message_type === "personal_direct" || m.user_needs_reply === true);
   const canReply = isPersonal && m.needs_reply && m.draft_status !== "gesendet" && !isSent;
@@ -535,8 +610,19 @@ function Reader({ reading, account, onClose, onReply, suggests, ensure, onCatego
 
         <div className="rd-body">
           {reading.loading ? <div className="empty"><span className="spin" /><div style={{ marginTop: 12 }}>Nachricht wird geladen…</div></div>
-            : reading.html ? <MailFrame html={reading.html} hasImages={reading.hasImages} withImages={reading.withImages} onLoadImages={reading.onLoadImages} />
-            : reading.text ? <pre className="rd-text">{reading.text}</pre>
+            : reading.html ? (
+              <>
+                <div className="rd-viewsel" role="tablist">
+                  <button className={view === "angepasst" ? "on" : ""} onClick={() => setView("angepasst")} title="Kontrolliert an den Dark-Mode angepasst – Markenfarben & Logos bleiben erhalten">Angepasst</button>
+                  <button className={view === "original" ? "on" : ""} onClick={() => setView("original")} title="Originaldarstellung in heller Mail-Leinwand">Original</button>
+                  <button className={view === "text" ? "on" : ""} onClick={() => setView("text")} title="Nur der lesbare Text ohne Layout und Werbegrafiken">Nur Text</button>
+                </div>
+                {view === "text"
+                  ? <div className="rd-plain">{(reading.text && reading.text.trim()) || "Kein Textinhalt vorhanden."}</div>
+                  : <MailFrame html={reading.html} hasImages={reading.hasImages} withImages={reading.withImages} onLoadImages={onLoadImages} mode={view} />}
+              </>
+            )
+            : reading.text ? <div className="rd-plain">{reading.text}</div>
             : <div className="empty">Kein Inhalt geladen. {reading.error ? "(Fehler beim Abruf)" : ""}</div>}
         </div>
 
