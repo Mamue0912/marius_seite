@@ -35,7 +35,7 @@ export async function fetchMessageText(acc: MailAccount, uid: number, mailbox = 
 }
 
 // Lädt Text UND HTML einer Nachricht (für die Leseansicht).
-export async function fetchMessageFull(acc: MailAccount, uid: number, mailbox = "INBOX"): Promise<{ text: string; html: string | null }> {
+export async function fetchMessageFull(acc: MailAccount, uid: number, mailbox = "INBOX", markRead = false): Promise<{ text: string; html: string | null }> {
   const c = client(acc);
   await c.connect();
   try {
@@ -44,6 +44,8 @@ export async function fetchMessageFull(acc: MailAccount, uid: number, mailbox = 
       const msg: any = await c.fetchOne(String(uid), { source: true }, { uid: true });
       if (!msg?.source) return { text: "", html: null };
       const parsed = await simpleParser(msg.source);
+      // Beim Öffnen als gelesen markieren (auch in Archiv/Junk-Ordnern).
+      if (markRead) { try { await c.messageFlagsAdd(String(uid), ["\\Seen"], { uid: true }); } catch {} }
       return { text: (parsed.text || "").toString(), html: parsed.html ? String(parsed.html) : null };
     } finally {
       lock.release();

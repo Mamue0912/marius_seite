@@ -336,14 +336,24 @@ export default function Cockpit({
     setSel({ account: "all", ftype: "inbox", view }); setFolderItems(null); setReading(null); setMobilePane("list");
   }
   async function openFolderItem(it: any) {
-    const synthetic = { id: `imap:${it.account_id}:${it.uid}`, ...it, folder_type: sel.ftype, mail_account_id: it.account_id, readonly: true };
+    const synthetic = { id: `imap:${it.account_id}:${it.uid}`, ...it, folder_type: sel.ftype, folder_path: it.path, mail_account_id: it.account_id, readonly: true };
     setReading({ msg: synthetic, loading: true });
     setMobilePane("read");
+    // Als gelesen markieren (der Server setzt \Seen beim Öffnen) – auch in der Liste.
+    setFolderItems((prev) => prev ? prev.map((x) => x.uid === it.uid && x.path === it.path ? { ...x, is_read: true } : x) : prev);
     try {
       const r = await fetch(`/api/mail/message?uid=${it.uid}&account=${it.account_id}&path=${encodeURIComponent(it.path)}`);
       const j = await r.json();
       setReading((s: any) => s && s.msg.id === synthetic.id ? { ...s, loading: false, ...j } : s);
     } catch { setReading((s: any) => s ? { ...s, loading: false, error: true } : s); }
+  }
+
+  // Aktion auf ein on-demand-Ordner-Element (Archiv/Junk): verschieben etc.
+  async function folderItemAction(m: any, action: string) {
+    setFolderItems((prev) => prev ? prev.filter((x) => !(x.uid === m.uid && x.path === m.folder_path)) : prev);
+    setReading(null); setMobilePane("list");
+    const r = await fetch("/api/mail/folder-action", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ account: m.mail_account_id, path: m.folder_path, uid: m.uid, action }) });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); alert(j.message || "Aktion fehlgeschlagen."); }
   }
 
   async function reloadMessages() {
@@ -515,6 +525,11 @@ export default function Cockpit({
   }
 
   async function mailAction(m: Msg, action: string) {
+    // On-demand-Ordner (Archiv/Junk): über die Ordner-Aktion (IMAP-Move).
+    if ((m as any).readonly) {
+      const map: Record<string, string> = { delete: "trash", archive: "archive", spam: "spam", inbox: "inbox" };
+      return folderItemAction(m, map[action] || action);
+    }
     // Optimistisch aus der Liste entfernen (bei move/delete) bzw. Status setzen.
     const removes = ["delete", "archive", "spam"].includes(action);
     const before = msgs;
@@ -1137,6 +1152,14 @@ function Reader({ reading, account, onClose, onReply, suggests, suggestsLoading,
         )}
       </div>
       <div className="df">
+        {m.readonly ? (
+          // On-demand-Ordner (Archiv/Junk/…): passende Verschiebe-Aktionen.
+          <>
+            {m.folder_type !== "inbox" && <button className="btn btn-primary" onClick={() => onAction(m, "inbox")} title="Zurück in den Posteingang verschieben">{m.folder_type === "spam" ? "Kein Spam · In Posteingang" : "In Posteingang"}</button>}
+            {m.folder_type !== "spam" && <button className="btn" onClick={() => onAction(m, "spam")}>Als Spam</button>}
+            <button className="btn btn-danger" onClick={() => onAction(m, "delete")}>Löschen</button>
+          </>
+        ) : (<>
         {canReply && <button className="btn btn-primary" onClick={() => onReply({ custom: true })}>Antworten</button>}
         {!isSent && onAnswered && (
           m.reply_sent_at
@@ -1159,6 +1182,7 @@ function Reader({ reading, account, onClose, onReply, suggests, suggestsLoading,
             {takingJob ? "Übernehme…" : "Als Stelle übernehmen"}
           </button>
         )}
+        </>)}
         <button className="btn" onClick={onClose}>Schließen</button>
       </div>
     </>

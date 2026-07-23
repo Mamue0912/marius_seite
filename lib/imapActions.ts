@@ -29,6 +29,9 @@ export async function imapAction(acc: MailAccount, sourceMailbox: string, uid: n
       if (action === "read") { await c.messageFlagsAdd(String(uid), ["\\Seen"], { uid: true }); return { movedTo: null }; }
       if (action === "unread") { await c.messageFlagsRemove(String(uid), ["\\Seen"], { uid: true }); return { movedTo: null }; }
 
+      // Zurück in den Posteingang (Entarchivieren / „Kein Spam").
+      if (action === "inbox") { await c.messageMove(String(uid), "INBOX", { uid: true }); return { movedTo: "inbox" }; }
+
       const targetType: FolderType | null = action === "delete" ? "trash" : action === "archive" ? "archive" : action === "spam" ? "spam" : null;
       if (!targetType) throw new Error("unknown action");
       const target = await findPath(c, targetType);

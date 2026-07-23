@@ -81,7 +81,7 @@ export async function GET(req: NextRequest) {
     const acc = await loadMailAccount(directAccount);
     if (!acc || (acc as any).user_id !== user.id) return NextResponse.json({ error: "no_account" }, { status: 403 });
     try {
-      const full = await fetchMessageFull(acc as MailAccount, parseInt(directUid, 10), directPath);
+      const full = await fetchMessageFull(acc as MailAccount, parseInt(directUid, 10), directPath, true);
       return NextResponse.json({ text: full.text, html: full.html ? safeHtml(full.html, withImages) : null, hasImages: full.html ? /<img[\s>]/i.test(full.html) : false, withImages, thread: [] });
     } catch (e) {
       return NextResponse.json({ error: (e as Error).message }, { status: 502 });
