@@ -7,8 +7,8 @@ import { useEffect, useRef, ReactNode } from "react";
 // kurzer Ruhe per Opacity-Transition SANFT ausblendet – zuverlässig in allen
 // Browsern (echte div-Opacity, nicht die unzuverlässige Scrollbar-Animation).
 export default function OverlayScroll({
-  children, className, viewClassName
-}: { children: ReactNode; className?: string; viewClassName?: string }) {
+  children, className, viewClassName, onScroll: onScrollCb
+}: { children: ReactNode; className?: string; viewClassName?: string; onScroll?: (el: HTMLDivElement) => void }) {
   const view = useRef<HTMLDivElement>(null);
   const thumb = useRef<HTMLDivElement>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -36,7 +36,7 @@ export default function OverlayScroll({
     if (hideTimer.current) clearTimeout(hideTimer.current);
     if (!drag.current) hideTimer.current = setTimeout(() => t.classList.remove("show"), 1100);
   }
-  function onScroll() { sync(); show(); }
+  function onScroll() { sync(); show(); if (onScrollCb && view.current) onScrollCb(view.current); }
 
   useEffect(() => {
     const v = view.current; if (!v) return;

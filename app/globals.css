@@ -612,10 +612,14 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--mat); }
 .mlist-top { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line-2); }
 .mlist-top .f-search { flex: 1; padding: 8px 12px; }
 .mback { display: none; border: 0; background: var(--surface-2); color: var(--ink-2); width: 34px; height: 34px; border-radius: var(--r-xs); cursor: pointer; flex: 0 0 auto; }
-.mlist-scroll { overflow-y: auto; flex: 1; padding: 6px; }
+.mlist-scroll { flex: 1; min-height: 0; }
+.mlist-scroll > .oscroll-view { padding: 6px; }
 
-.mrow { display: flex; gap: 8px; padding: 10px 11px; border-radius: var(--r-sm); cursor: pointer; transition: background-color var(--t-fast); border: 1px solid transparent; }
+.mrow { position: relative; display: flex; gap: 8px; padding: 11px 11px; border-radius: var(--r-sm); cursor: pointer; transition: background-color var(--t-fast); border: 1px solid transparent; }
+/* Sichtbare, dezente Trennlinie zwischen den Mails */
+.mrow:not(:last-child)::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: -1px; height: 1px; background: var(--line-2); }
 .mrow:hover { background: var(--surface-2); }
+.mrow:hover::after, .mrow.sel::after { opacity: 0; }
 .mrow.sel { background: var(--accent-soft); border-color: var(--accent-line); }
 .mrow.unread .mrow-from, .mrow.unread .mrow-subj { font-weight: 680; color: var(--ink); }
 .mrow-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-2); flex: 0 0 auto; margin-top: 6px; }

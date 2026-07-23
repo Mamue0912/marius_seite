@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState, memo } from "react";
 import { supabaseBrowser } from "@/lib/supabaseBrowser";
+import OverlayScroll from "@/components/OverlayScroll";
 import { PROVIDERS } from "@/lib/mailProviders";
 import { RELEVANCE_LABEL } from "@/lib/classify2";
 
@@ -711,8 +712,7 @@ export default function Cockpit({
                 <button className="mini-link" onClick={() => { setSel({ account: "all", ftype: "inbox" }); setFolderItems(null); }}>Filter zurücksetzen</button>
               </div>
             )}
-            <div className="mlist-scroll" onScroll={(e) => {
-              const el = e.currentTarget;
+            <OverlayScroll className="mlist-scroll" onScroll={(el) => {
               if (el.scrollTop + el.clientHeight > el.scrollHeight - 400) setListLimit((n) => n + 40);
             }}>
               {folderItems !== null ? (
@@ -735,7 +735,7 @@ export default function Cockpit({
                   )}
                 </>;
               })()}
-            </div>
+            </OverlayScroll>
           </div>
 
           {/* Spalte 3: dauerhafte Leseansicht */}
