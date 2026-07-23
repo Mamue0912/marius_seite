@@ -404,6 +404,9 @@ function MyFacts() {
   const [addCat, setAddCat] = useState("faehigkeit");
   const [addVal, setAddVal] = useState("");
   const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [adding, setAdding] = useState(false);
+  const didInit = useRef(false);
   const load = useCallback(async () => { const r = await aj("/api/documents/facts", { timeoutMs: 20000 }); if (r.ok) setFacts(r.data.facts || []); }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -416,39 +419,82 @@ function MyFacts() {
     if (!addVal.trim()) return; setBusy(true);
     const r = await aj("/api/documents/facts", { method: "POST", json: { category: addCat, value: addVal } });
     setBusy(false);
-    if (r.ok && r.data.fact) { setFacts((fs) => [...(fs || []), r.data.fact]); setAddVal(""); }
+    if (r.ok && r.data.fact) { setFacts((fs) => [...(fs || []), r.data.fact]); setAddVal(""); setOpen((o) => ({ ...o, [addCat]: true })); }
   }
 
   const cats = Object.keys(FACT_CAT_LABEL);
   const byCat: Record<string, any[]> = {};
   for (const f of facts || []) (byCat[f.category] ||= []).push(f);
+  const shownCats = cats.filter((c) => byCat[c]?.length);
+  const total = facts?.length || 0;
+  const confirmed = (facts || []).filter((f) => f.status === "bestaetigt").length;
+  const openCount = total - confirmed;
+
+  // Beim ersten Laden: Gruppen mit offenen (unbestätigten) Angaben aufklappen,
+  // damit man sofort sieht, was noch Aufmerksamkeit braucht; Rest bleibt kompakt.
+  useEffect(() => {
+    if (didInit.current || facts === null) return;
+    didInit.current = true;
+    const init: Record<string, boolean> = {};
+    for (const c of shownCats) init[c] = byCat[c].some((f) => f.status !== "bestaetigt");
+    setOpen(init);
+  }, [facts, shownCats, byCat]);
 
   return (
     <div className="ac-card ac-myfacts">
       <div className="ac-panel-h" style={{ position: "static" }}>Was das Cockpit über dich weiß</div>
-      <div className="ac-hint" style={{ marginTop: 0, marginBottom: 10 }}>Alle erkannten und selbst ergänzten Angaben. Du kannst sie bearbeiten, bestätigen, ergänzen oder löschen. <b>Nur bestätigte</b> Fakten werden in Bewerbungen verwendet.</div>
+      <div className="ac-hint" style={{ marginTop: 0, marginBottom: 12 }}>Alle erkannten und selbst ergänzten Angaben, nach Bereich gegliedert. Tippe auf einen Bereich zum Auf- und Zuklappen. <b>Nur bestätigte</b> Fakten werden in Bewerbungen verwendet.</div>
       {facts === null ? <div className="ac-empty"><span className="spin" /></div> : (
         <>
-          {!facts.length && <div className="ac-mod-empty">Noch keine Fakten. Lade Unterlagen hoch und nutze „Fakten erkennen" – oder ergänze unten selbst.</div>}
-          {cats.filter((c) => byCat[c]?.length).map((c) => (
-            <div key={c} className="ac-fact-group">
-              <div className="ac-fact-grouphead">{FACT_CAT_LABEL[c]}</div>
-              {byCat[c].map((f) => (
-                <div key={f.id} className={"ac-fact " + (f.status === "bestaetigt" ? "ok" : f.status === "abgelehnt" ? "" : "offen")}>
-                  <input className="ac-fact-input" defaultValue={f.value} onBlur={(e) => { if (e.target.value.trim() && e.target.value !== f.value) patch(f.id, { value: e.target.value }); }} />
-                  {f.status !== "bestaetigt"
-                    ? <button className="ac-fact-badge todo" onClick={() => patch(f.id, { status: "bestaetigt" })} title="Bestätigen">✓ bestätigen</button>
-                    : <span className="ac-fact-badge done">bestätigt</span>}
-                  <button className="ac-fact-del" onClick={() => del(f.id)} title="Löschen">✕</button>
-                </div>
-              ))}
+          {total > 0 && (
+            <div className="ac-facts-summary">
+              <span className="ac-facts-stat"><b>{total}</b> Angaben</span>
+              <span className="ac-facts-stat ok"><b>{confirmed}</b> bestätigt</span>
+              {openCount > 0 && <span className="ac-facts-stat todo"><b>{openCount}</b> offen</span>}
+              <button className="ac-facts-toggleall" onClick={() => { const allOpen = shownCats.every((c) => open[c]); const next: Record<string, boolean> = {}; for (const c of shownCats) next[c] = !allOpen; setOpen(next); }}>
+                {shownCats.every((c) => open[c]) ? "Alle zuklappen" : "Alle aufklappen"}
+              </button>
             </div>
-          ))}
-          <div className="ac-fact-add" style={{ marginTop: 12 }}>
-            <select className="ac-select sm" value={addCat} onChange={(e) => setAddCat(e.target.value)}>{cats.map((c) => <option key={c} value={c}>{FACT_CAT_LABEL[c]}</option>)}</select>
-            <input className="ac-input sm" placeholder="Eigene Angabe ergänzen…" value={addVal} onChange={(e) => setAddVal(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") add(); }} />
-            <button className="ac-btn sm primary" disabled={busy || !addVal.trim()} onClick={add}>Hinzufügen</button>
-          </div>
+          )}
+          {!facts.length && <div className="ac-mod-empty">Noch keine Fakten. Lade Unterlagen hoch und nutze „Fakten erkennen" – oder ergänze unten selbst.</div>}
+          {shownCats.map((c) => {
+            const items = byCat[c];
+            const off = items.filter((f) => f.status !== "bestaetigt").length;
+            const isOpen = !!open[c];
+            return (
+              <div key={c} className={"ac-fact-group" + (isOpen ? " open" : "")}>
+                <button className="ac-fact-grouphead" onClick={() => setOpen((o) => ({ ...o, [c]: !o[c] }))}>
+                  <span className={"ac-fact-chev" + (isOpen ? " open" : "")}>›</span>
+                  <span className="ac-fact-grouptitle">{FACT_CAT_LABEL[c]}</span>
+                  <span className="ac-fact-groupcount">{items.length}</span>
+                  {off > 0 && <span className="ac-fact-groupoffen">{off} offen</span>}
+                </button>
+                {isOpen && (
+                  <div className="ac-fact-groupbody">
+                    {items.map((f) => (
+                      <div key={f.id} className={"ac-fact " + (f.status === "bestaetigt" ? "ok" : f.status === "abgelehnt" ? "" : "offen")}>
+                        <input className="ac-fact-input" defaultValue={f.value} onBlur={(e) => { if (e.target.value.trim() && e.target.value !== f.value) patch(f.id, { value: e.target.value }); }} />
+                        {f.status !== "bestaetigt"
+                          ? <button className="ac-fact-badge todo" onClick={() => patch(f.id, { status: "bestaetigt" })} title="Bestätigen">✓ bestätigen</button>
+                          : <span className="ac-fact-badge done">bestätigt</span>}
+                        <button className="ac-fact-del" onClick={() => del(f.id)} title="Löschen">✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {adding ? (
+            <div className="ac-fact-add" style={{ marginTop: 14 }}>
+              <select className="ac-select sm" value={addCat} onChange={(e) => setAddCat(e.target.value)}>{cats.map((c) => <option key={c} value={c}>{FACT_CAT_LABEL[c]}</option>)}</select>
+              <input className="ac-input sm" placeholder="Eigene Angabe ergänzen…" value={addVal} autoFocus onChange={(e) => setAddVal(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") add(); }} />
+              <button className="ac-btn sm primary" disabled={busy || !addVal.trim()} onClick={add}>Hinzufügen</button>
+              <button className="ac-btn sm" onClick={() => { setAdding(false); setAddVal(""); }}>Abbrechen</button>
+            </div>
+          ) : (
+            <button className="ac-facts-addbtn" onClick={() => setAdding(true)}>+ Eigene Angabe ergänzen</button>
+          )}
         </>
       )}
     </div>

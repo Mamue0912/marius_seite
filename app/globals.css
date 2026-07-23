@@ -14,9 +14,9 @@
      Glas-Oberflächen Tiefe zeigen (wie Apples dunkle Materials über dunklem
      Grund). Bewusst sehr dezent – der Grund bleibt klar schwarz. */
   --bg-grad:
-    radial-gradient(1200px 820px at 12% -12%, rgba(150,146,255,0.055) 0%, transparent 55%),
-    radial-gradient(1000px 720px at 100% 4%, rgba(120,170,255,0.038) 0%, transparent 50%),
-    radial-gradient(1100px 1000px at 50% 118%, rgba(255,255,255,0.026) 0%, transparent 55%),
+    radial-gradient(1200px 820px at 12% -12%, rgba(150,146,255,0.11) 0%, transparent 56%),
+    radial-gradient(1000px 720px at 100% 4%, rgba(120,170,255,0.07) 0%, transparent 52%),
+    radial-gradient(1100px 1000px at 50% 120%, rgba(255,255,255,0.045) 0%, transparent 56%),
     #050506;
 
   /* ---- Oberflächen (solide Basis, wo Glas nicht passt) ---- */
@@ -26,10 +26,10 @@
   --sunken: #0e0e11;
 
   /* ---- Glas-Materialien (Apple-artig transluzent, deutlich sichtbar) ---- */
-  --mat-thin: rgba(32,32,40,0.42);
-  --mat: rgba(30,30,37,0.55);
-  --mat-thick: rgba(22,22,28,0.70);
-  --mat-hi: rgba(255,255,255,0.10);   /* oberer Lichtsaum (Glas-Kante) */
+  --mat-thin: rgba(44,44,53,0.40);
+  --mat: rgba(46,46,55,0.52);
+  --mat-thick: rgba(30,30,38,0.70);
+  --mat-hi: rgba(255,255,255,0.13);   /* oberer Lichtsaum (Glas-Kante) */
 
   /* ---- Konturen (hauchfeine helle Glaskanten) ---- */
   --line: rgba(255,255,255,0.09);
@@ -109,7 +109,7 @@ h1, h2, h3 { font-family: var(--sans); }
 ::-webkit-scrollbar-thumb {
   background: transparent; border-radius: var(--r-pill);
   border: 3px solid transparent; background-clip: padding-box;
-  transition: background-color .35s var(--ease);
+  transition: background-color .55s var(--ease);
 }
 ::-webkit-scrollbar-corner { background: transparent; }
 /* Beim aktiven Scrollen (JS setzt .scrolling) und beim Hovern eines
@@ -1168,11 +1168,27 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--mat); }
 .folder-edit .fe-name { flex: 1; min-width: 0; }
 .folder-edit .fe-type { width: 130px; }
 
-/* Meine Fakten (zentrale, bearbeitbare Übersicht) */
+/* Meine Fakten (zentrale, bearbeitbare Übersicht mit ausklappbaren Bereichen) */
 .ac-myfacts { margin-bottom: 16px; }
-.ac-fact-group { margin-bottom: 12px; }
-.ac-fact-grouphead { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); font-weight: 660; margin: 8px 0 5px; }
-.ac-myfacts .ac-fact { display: flex; align-items: center; gap: 8px; padding: 5px 8px; }
+.ac-facts-summary { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 10px 12px; margin-bottom: 12px; border-radius: var(--r-sm); background: var(--sunken); border: 1px solid var(--line-2); font-size: 12.5px; color: var(--muted); }
+.ac-facts-stat b { color: var(--ink); font-weight: 680; font-variant-numeric: tabular-nums; margin-right: 3px; }
+.ac-facts-stat.ok b { color: var(--ok); }
+.ac-facts-stat.todo b { color: var(--high); }
+.ac-facts-toggleall { margin-left: auto; border: 0; background: transparent; color: var(--accent-ink); font-size: 12px; font-weight: 560; cursor: pointer; padding: 2px 4px; }
+.ac-facts-toggleall:hover { text-decoration: underline; }
+.ac-fact-group { margin-bottom: 6px; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--mat-thin); overflow: hidden; transition: border-color var(--t-fast); }
+.ac-fact-group.open { border-color: var(--line); }
+.ac-fact-grouphead { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; border: 0; background: transparent; color: var(--ink); font-size: 13px; font-weight: 600; padding: 10px 12px; cursor: pointer; transition: background var(--t-fast); }
+.ac-fact-grouphead:hover { background: var(--mat-hi); }
+.ac-fact-chev { display: inline-block; color: var(--muted); font-size: 15px; line-height: 1; transition: transform var(--t-fast); }
+.ac-fact-chev.open { transform: rotate(90deg); }
+.ac-fact-grouptitle { flex: 1; }
+.ac-fact-groupcount { font-size: 11px; font-weight: 640; color: var(--muted); background: var(--surface-2); border-radius: var(--r-pill); padding: 1px 8px; font-variant-numeric: tabular-nums; }
+.ac-fact-groupoffen { font-size: 10.5px; font-weight: 640; color: var(--high); background: var(--high-soft); border-radius: var(--r-pill); padding: 1px 8px; }
+.ac-fact-groupbody { padding: 2px 8px 8px; animation: acFade var(--t-fast) var(--ease); }
+.ac-facts-addbtn { display: block; width: 100%; margin-top: 12px; padding: 10px; border: 1px dashed var(--line-strong); border-radius: var(--r-sm); background: transparent; color: var(--ink-2); font-size: 13px; font-weight: 540; cursor: pointer; transition: border-color var(--t-fast), background var(--t-fast), color var(--t-fast); }
+.ac-facts-addbtn:hover { border-color: var(--accent-line); color: var(--ink); background: var(--surface-2); }
+.ac-myfacts .ac-fact { display: flex; align-items: center; gap: 8px; padding: 5px 4px; }
 .ac-fact-input { flex: 1; min-width: 0; padding: 7px 10px; border-radius: var(--r-xs); border: 1px solid var(--line-strong); background: var(--sunken); color: var(--ink); font: inherit; font-size: 13px; }
 .ac-fact-input:focus { outline: none; border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-soft); }
 .ac-fact-badge { border: 0; border-radius: var(--r-pill); font-size: 11px; font-weight: 620; padding: 3px 10px; cursor: default; white-space: nowrap; }
