@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import Markdown from "@/components/Markdown";
 import OverlayScroll from "@/components/OverlayScroll";
-import { getAppsCache, getDocsCache, fetchApps, fetchDocs, getAppDetail, fetchAppDetail, prefetchAppDetail } from "@/lib/appsStore";
+import { getAppsCache, getDocsCache, fetchApps, fetchDocs, getAppDetail, fetchAppDetail, prefetchAppDetail, getFactsCache, setFactsCache, fetchFacts, getGenDocsCache, setGenDocsCache } from "@/lib/appsStore";
 
 // ============================ Konstanten ============================
 const STATUS: { key: string; label: string; tone: string }[] = [
@@ -350,15 +350,17 @@ function AppList({ apps, filter = "all", onFilter, onOpen, onNew, onReload }: an
 
 // ============================ Erstellte Dokumente (alle) ============================
 function GeneratedDocsAll({ apps, onOpen }: any) {
-  const [docs, setDocs] = useState<any[] | null>(null);
+  // Aus dem Cache initialisieren → nicht bei jedem Öffnen komplett neu laden.
+  const [docs, setDocs] = useState<any[] | null>(() => getGenDocsCache());
   const load = useCallback(async () => {
     const all: any[] = [];
-    for (const a of apps) {
-      const r = await aj(`/api/applications/${a.id}`, { timeoutMs: 20000 });
-      if (r.ok) (r.data.generatedDocs || []).forEach((d: any) => all.push({ ...d, app: a }));
+    // Detailabrufe laufen über den Cache (fetchAppDetail) und parallel.
+    const results = await Promise.all(apps.map((a: any) => fetchAppDetail(a.id).then((data: any) => ({ a, data }))));
+    for (const { a, data } of results) {
+      if (data) (data.generatedDocs || []).forEach((d: any) => all.push({ ...d, app: a }));
     }
     all.sort((x, y) => new Date(y.updated_at).getTime() - new Date(x.updated_at).getTime());
-    setDocs(all);
+    setDocs(all); setGenDocsCache(all);
   }, [apps]);
   useEffect(() => { load(); }, [load]);
 
@@ -399,15 +401,18 @@ const FACT_CAT_LABEL: Record<string, string> = {
 
 // Zentrale, bearbeitbare Übersicht aller Fakten, die die App über den Nutzer kennt.
 function MyFacts() {
-  const [facts, setFacts] = useState<any[] | null>(null);
+  // Aus dem Cache initialisieren → keine leere/neu ladende Ansicht bei jedem Öffnen.
+  const [facts, setFacts] = useState<any[] | null>(() => getFactsCache());
   const [addCat, setAddCat] = useState("faehigkeit");
   const [addVal, setAddVal] = useState("");
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [adding, setAdding] = useState(false);
   const didInit = useRef(false);
-  const load = useCallback(async () => { const r = await aj("/api/documents/facts", { timeoutMs: 20000 }); if (r.ok) setFacts(r.data.facts || []); }, []);
+  const load = useCallback(async () => { setFacts(await fetchFacts()); }, []);
   useEffect(() => { load(); }, [load]);
+  // Änderungen (Bearbeiten/Bestätigen/Löschen/Hinzufügen) im Cache spiegeln.
+  useEffect(() => { if (facts) setFactsCache(facts); }, [facts]);
 
   async function patch(id: string, patch: any) {
     setFacts((fs) => (fs || []).map((f) => f.id === id ? { ...f, ...patch } : f));

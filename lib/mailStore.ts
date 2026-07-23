@@ -24,3 +24,33 @@ export function fetchMessages(): Promise<any[]> {
 }
 
 export function prefetchMail() { if (cache === null) fetchMessages(); }
+
+// ---- Ordner-Inhalte (Junk/Archiv/…): live vom Server, aber zwischengespeichert ----
+const folderCache = new Map<string, any[]>();
+const folderInflight = new Map<string, Promise<any[]>>();
+const fkey = (account: string, path: string) => account + "|" + path;
+
+export function getFolderCache(account: string, path: string) { return folderCache.get(fkey(account, path)) || null; }
+export function fetchFolder(account: string, path: string): Promise<any[]> {
+  const k = fkey(account, path);
+  const running = folderInflight.get(k);
+  if (running) return running;
+  const p = (async () => {
+    try {
+      const r = await fetch(`/api/mail/folder?account=${account}&path=${encodeURIComponent(path)}`);
+      const j = await r.json();
+      const items = r.ok ? (j.items || []) : [];
+      folderCache.set(k, items);
+      return items;
+    } catch { return folderCache.get(k) || []; }
+    finally { folderInflight.delete(k); }
+  })();
+  folderInflight.set(k, p);
+  return p;
+}
+export function prefetchFolder(account: string, path: string) { const k = fkey(account, path); if (!folderCache.has(k)) fetchFolder(account, path); }
+
+// ---- Geöffnete Mail-Inhalte zwischenspeichern (sofortiges Wiederöffnen) ----
+const contentCache = new Map<string, any>();
+export function getMsgContent(key: string) { return contentCache.get(key) || null; }
+export function setMsgContent(key: string, val: any) { contentCache.set(key, val); }

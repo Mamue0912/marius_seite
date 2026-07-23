@@ -69,3 +69,27 @@ export function fetchAppDetail(id: string): Promise<any> {
 
 // Beim Hovern über eine Bewerbung deren Detaildaten (inkl. Chat) vorladen.
 export function prefetchAppDetail(id: string) { if (id && !detailCache.has(id)) fetchAppDetail(id); }
+
+// ---- Profil-Fakten (bleiben über Wechsel erhalten) ----
+let factsCache: any[] | null = null;
+let factsInflight: Promise<any[]> | null = null;
+export function getFactsCache() { return factsCache; }
+export function setFactsCache(d: any[]) { factsCache = d; }
+export function fetchFacts(): Promise<any[]> {
+  if (factsInflight) return factsInflight;
+  factsInflight = (async () => {
+    try {
+      const r = await fetch("/api/documents/facts", { cache: "no-store" });
+      const d = await r.json();
+      factsCache = d.facts || [];
+      return factsCache!;
+    } catch { return factsCache || []; }
+    finally { factsInflight = null; }
+  })();
+  return factsInflight;
+}
+
+// ---- Erstellte Dokumente (Aggregat über alle Bewerbungen) ----
+let genDocsCache: any[] | null = null;
+export function getGenDocsCache() { return genDocsCache; }
+export function setGenDocsCache(d: any[]) { genDocsCache = d; }

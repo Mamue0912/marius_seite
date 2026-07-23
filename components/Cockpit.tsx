@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState, memo } from "react";
 import { supabaseBrowser } from "@/lib/supabaseBrowser";
 import OverlayScroll from "@/components/OverlayScroll";
-import { getMailCache, fetchMessages, setMailCache } from "@/lib/mailStore";
+import { getMailCache, fetchMessages, setMailCache, getFolderCache, fetchFolder, prefetchFolder, getMsgContent, setMsgContent } from "@/lib/mailStore";
 import { PROVIDERS } from "@/lib/mailProviders";
 import { RELEVANCE_LABEL } from "@/lib/classify2";
 
@@ -328,13 +328,12 @@ export default function Cockpit({
     setSel({ account, ftype, path, view: undefined });
     setReading(null); setMobilePane("list");
     if (ftype === "inbox" || ftype === "sent" || !path) { setFolderItems(null); return; }
-    setFolderLoading(true); setFolderItems([]);
-    try {
-      const r = await fetch(`/api/mail/folder?account=${account}&path=${encodeURIComponent(path)}`);
-      const j = await r.json();
-      setFolderItems(r.ok ? (j.items || []) : []);
-    } catch { setFolderItems([]); }
-    setFolderLoading(false);
+    // Sofort aus dem Cache zeigen (falls per Hover vorgeladen), dann aktualisieren.
+    const cached = getFolderCache(account, path);
+    if (cached) { setFolderItems(cached); setFolderLoading(false); }
+    else { setFolderLoading(true); setFolderItems([]); }
+    const items = await fetchFolder(account, path);
+    setFolderItems(items); setFolderLoading(false);
   }
   function selectView(view: string) {
     setSel({ account: "all", ftype: "inbox", view }); setFolderItems(null); setReading(null); setMobilePane("list");
@@ -342,13 +341,18 @@ export default function Cockpit({
   async function openFolderItem(it: any, images?: boolean) {
     if (images === undefined) images = autoImages(it);
     const synthetic = { id: `imap:${it.account_id}:${it.uid}`, ...it, folder_type: sel.ftype, folder_path: it.path, mail_account_id: it.account_id, readonly: true };
-    setReading({ msg: synthetic, loading: true });
     setMobilePane("read");
     // Als gelesen markieren (der Server setzt \Seen beim Öffnen) – auch in der Liste.
     setFolderItems((prev) => prev ? prev.map((x) => x.uid === it.uid && x.path === it.path ? { ...x, is_read: true } : x) : prev);
+    // Schon geöffnet? Sofort aus dem Cache.
+    const ckey = `uid:${it.account_id}:${it.uid}:${images ? 1 : 0}`;
+    const cachedContent = getMsgContent(ckey);
+    if (cachedContent) { setReading({ msg: synthetic, loading: false, ...cachedContent }); return; }
+    setReading({ msg: synthetic, loading: true });
     try {
       const r = await fetch(`/api/mail/message?uid=${it.uid}&account=${it.account_id}&path=${encodeURIComponent(it.path)}${images ? "&images=1" : ""}`);
       const j = await r.json();
+      setMsgContent(ckey, j);
       setReading((s: any) => s && s.msg.id === synthetic.id ? { ...s, loading: false, ...j } : s);
     } catch { setReading((s: any) => s ? { ...s, loading: false, error: true } : s); }
   }
@@ -517,12 +521,16 @@ export default function Cockpit({
     if (!images) images = autoImages(m);
     if (images) rememberImageSender(m); // "bekannt" für den Modus „bekannte Absender"
     setMobilePane("read");
-    setReading((s: any) => ({ msg: m, loading: true, ...(s && s.msg?.id === m.id ? s : {}), loadingImages: images }));
-    setReading({ msg: m, loading: true });
     if (!m.is_read) setMsgs((prev) => prev.map((x) => x.id === m.id ? { ...x, is_read: true } : x));
+    // Bereits geöffnete Mail sofort aus dem Cache anzeigen (kein erneutes IMAP-Laden).
+    const ckey = `id:${m.id}:${images ? 1 : 0}`;
+    const cachedContent = getMsgContent(ckey);
+    if (cachedContent) { setReading({ msg: m, loading: false, ...cachedContent }); return; }
+    setReading({ msg: m, loading: true });
     try {
       const r = await fetch(`/api/mail/message?id=${m.id}${images ? "&images=1" : ""}`);
       const j = await r.json();
+      setMsgContent(ckey, j);
       setReading((s: any) => s && s.msg.id === m.id ? { ...s, loading: false, ...j } : s);
     } catch {
       setReading((s: any) => s ? { ...s, loading: false, error: true } : s);
@@ -672,7 +680,7 @@ export default function Cockpit({
                       {(fl.length ? fl : DEFAULT_FOLDERS.map((t) => ({ account_id: a.id, path: "", folder_type: t, unread: 0, total: 0 }))).map((f: any) => {
                         const ftype = f.type_override || f.folder_type;
                         return (
-                          <button key={f.folder_type + f.path} className={"mfolder" + (sel.account === a.id && sel.ftype === ftype && sel.path === f.path && !sel.view ? " active" : "")} onClick={() => selectFolder(a.id, ftype, f.path)}>
+                          <button key={f.folder_type + f.path} className={"mfolder" + (sel.account === a.id && sel.ftype === ftype && sel.path === f.path && !sel.view ? " active" : "")} onMouseEnter={() => { if (ftype !== "inbox" && ftype !== "sent" && f.path) prefetchFolder(a.id, f.path); }} onClick={() => selectFolder(a.id, ftype, f.path)}>
                             <span className="mf-ic">{FOLDER_ICONS[ftype] || "📁"}</span>
                             <span className="mf-lbl">{folderLabel(f)}</span>
                             {(ftype === "inbox" ? accUnread : f.unread) > 0 && <span className="mf-count">{ftype === "inbox" ? accUnread : f.unread}</span>}
