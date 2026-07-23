@@ -43,3 +43,29 @@ export function prefetchApplications() {
   if (appsCache === null) fetchApps();
   if (docsCache === null) fetchDocs();
 }
+
+// ---- Detailansicht einer einzelnen Bewerbung (für den Bewerbungschat) ----
+const detailCache = new Map<string, any>();
+const detailInflight = new Map<string, Promise<any>>();
+
+export function getAppDetail(id: string) { return detailCache.get(id) || null; }
+export function setAppDetail(id: string, d: any) { detailCache.set(id, d); }
+
+export function fetchAppDetail(id: string): Promise<any> {
+  const running = detailInflight.get(id);
+  if (running) return running;
+  const p = (async () => {
+    try {
+      const r = await fetch(`/api/applications/${id}`, { cache: "no-store" });
+      const d = await r.json();
+      if (r.ok) detailCache.set(id, d);
+      return r.ok ? d : null;
+    } catch { return detailCache.get(id) || null; }
+    finally { detailInflight.delete(id); }
+  })();
+  detailInflight.set(id, p);
+  return p;
+}
+
+// Beim Hovern über eine Bewerbung deren Detaildaten (inkl. Chat) vorladen.
+export function prefetchAppDetail(id: string) { if (id && !detailCache.has(id)) fetchAppDetail(id); }

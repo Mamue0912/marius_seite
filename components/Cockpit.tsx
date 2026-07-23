@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState, memo } from "react";
 import { supabaseBrowser } from "@/lib/supabaseBrowser";
 import OverlayScroll from "@/components/OverlayScroll";
+import { getMailCache, fetchMessages, setMailCache } from "@/lib/mailStore";
 import { PROVIDERS } from "@/lib/mailProviders";
 import { RELEVANCE_LABEL } from "@/lib/classify2";
 
@@ -127,7 +128,7 @@ export default function Cockpit({
   sendEnabled: boolean;
   initialOpenId?: string | null;
 }) {
-  const [msgs, setMsgs] = useState<Msg[]>([]);
+  const [msgs, setMsgs] = useState<Msg[]>(() => (getMailCache() as Msg[]) || []);
   const [showHidden, setShowHidden] = useState(true);
   const [status, setStatus] = useState<any>(null);
   const [mailDiag, setMailDiag] = useState<boolean>(false);
@@ -162,8 +163,10 @@ export default function Cockpit({
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       uidRef.current = user.id;
-      const { data } = await supabase.from("messages").select("*").eq("is_deleted", false).order("received_at", { ascending: false }).limit(600);
-      setMsgs(data || []);
+      // Sofort aus dem Cache (falls per Hover vorgeladen), dann im Hintergrund
+      // aktualisieren – kein Warten mit leerer Liste beim Öffnen.
+      const data = await fetchMessages();
+      setMsgs(data as Msg[]);
       channel = supabase
         .channel("messages-live")
         .on("postgres_changes", { event: "*", schema: "public", table: "messages", filter: `user_id=eq.${user.id}` }, (payload: any) => {
@@ -362,7 +365,7 @@ export default function Cockpit({
     try {
       const supabase = supabaseBrowser();
       const { data } = await supabase.from("messages").select("*").eq("is_deleted", false).order("received_at", { ascending: false }).limit(600);
-      if (data) setMsgs(data);
+      if (data) { setMsgs(data); setMailCache(data); }
     } catch {}
   }
 

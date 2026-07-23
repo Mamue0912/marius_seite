@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import Markdown from "@/components/Markdown";
 import OverlayScroll from "@/components/OverlayScroll";
-import { getAppsCache, getDocsCache, fetchApps, fetchDocs } from "@/lib/appsStore";
+import { getAppsCache, getDocsCache, fetchApps, fetchDocs, getAppDetail, fetchAppDetail, prefetchAppDetail } from "@/lib/appsStore";
 
 // ============================ Konstanten ============================
 const STATUS: { key: string; label: string; tone: string }[] = [
@@ -183,7 +183,7 @@ function Overview({ apps, onOpen, onNav, onNew }: any) {
             <div className="ac-mini-list">
               {deadlines.slice(0, 5).map(({ a, d }: any) => {
                 const days = Math.ceil((d - now) / 864e5);
-                return <button key={a.id} className="ac-mini" onClick={() => onOpen(a.id)}>
+                return <button key={a.id} className="ac-mini" onMouseEnter={() => prefetchAppDetail(a.id)} onClick={() => onOpen(a.id)}>
                   <span className="ac-mini-t">{a.position || a.company || "Bewerbung"}</span>
                   <span className={"ac-mini-b " + (days <= 3 ? "urgent" : days <= 10 ? "high" : "mid")}>{days <= 0 ? "heute" : "in " + days + " T"}</span>
                 </button>;
@@ -330,7 +330,7 @@ function AppList({ apps, filter = "all", onFilter, onOpen, onNew, onReload }: an
       {!items.length ? <div className="ac-card ac-empty2">Keine Bewerbungen in dieser Ansicht. {filter !== "all" && <button className="ac-diaglink" onClick={() => onFilter && onFilter("all")}>Alle anzeigen</button>}</div> : (
         <div className="ac-list">
           {items.map((a: any) => (
-            <div key={a.id} className="ac-row" onClick={() => onOpen(a.id)}>
+            <div key={a.id} className="ac-row" onMouseEnter={() => prefetchAppDetail(a.id)} onClick={() => onOpen(a.id)}>
               <div className="ac-row-main">
                 <div className="ac-row-title">{a.position || "Unbenannte Stelle"}{a.job_type ? <span className="ac-tag">{JOB_TYPE_LABEL[a.job_type] || a.job_type}</span> : null}</div>
                 <div className="ac-row-sub">{a.company || "—"}{a.deadline ? ` · Frist ${new Date(a.deadline).toLocaleDateString("de-DE")}` : ""}</div>
@@ -686,7 +686,9 @@ function DocDetail({ doc, reload, onDiag }: any) {
 
 // ============================ Arbeitsbereich (offene Bewerbung) ============================
 function Workspace({ id, apps, onOpen, accounts, sendEnabled, docs, onBack, onChanged, onDeleted, onDiag }: any) {
-  const [d, setD] = useState<any>(null);
+  // Aus dem Cache initialisieren → Chat/Details sofort sichtbar, wenn beim
+  // Hovern über die Bewerbung bereits vorgeladen wurde.
+  const [d, setD] = useState<any>(() => getAppDetail(id));
   // Panels: liste (Bewerbungen) · chat · stelle (Analyse) · docs (Unterlagen).
   // Desktop zeigt Liste + Chat + Info-Schiene gleichzeitig; Mobile schaltet um.
   const [pane, setPane] = useState<"liste" | "chat" | "stelle" | "docs">("chat");
@@ -694,10 +696,11 @@ function Workspace({ id, apps, onOpen, accounts, sendEnabled, docs, onBack, onCh
   const [menu, setMenu] = useState(false);
 
   const load = useCallback(async () => {
-    const r = await aj(`/api/applications/${id}`, { timeoutMs: 25000 });
-    if (r.ok) setD(r.data); else setError(errText(r, "Bewerbung konnte nicht geladen werden."));
+    const data = await fetchAppDetail(id);
+    if (data) setD(data); else setError("Bewerbung konnte nicht geladen werden.");
   }, [id]);
-  useEffect(() => { setD(null); load(); }, [load]);
+  // Beim Wechsel der Bewerbung sofort Cache zeigen (kein Leerblitzen), dann laden.
+  useEffect(() => { setD(getAppDetail(id)); load(); }, [id, load]);
 
   if (error) return <div className="ac-view"><button className="ac-btn" onClick={onBack}>‹ Zurück</button><div className="ac-note bad" style={{ marginTop: 12 }}>{error}</div></div>;
   if (!d) return <div className="ac-empty"><span className="spin" /></div>;
@@ -771,7 +774,7 @@ function WorkspaceList({ apps, currentId, onOpen, onNew }: any) {
       </div>
       <div className="ac-wlist-items">
         {(apps || []).map((a: any) => (
-          <button key={a.id} className={"ac-witem" + (a.id === currentId ? " on" : "")} onClick={() => onOpen(a.id)}>
+          <button key={a.id} className={"ac-witem" + (a.id === currentId ? " on" : "")} onMouseEnter={() => prefetchAppDetail(a.id)} onClick={() => onOpen(a.id)}>
             <span className="ac-witem-main">
               <span className="ac-witem-pos">{a.position || "Bewerbung"}</span>
               <span className="ac-witem-co">{a.company || "—"}</span>

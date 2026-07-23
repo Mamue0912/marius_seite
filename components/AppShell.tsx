@@ -4,11 +4,13 @@ import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabaseBrowser";
 import { calPrefetchDefault } from "@/lib/calendarStore";
 import { prefetchApplications } from "@/lib/appsStore";
+import { prefetchMail } from "@/lib/mailStore";
 
 // Daten der Zielseite schon beim Hovern/Antippen im Hintergrund vorladen.
 function prefetchData(href: string) {
   if (href === "/calendar") calPrefetchDefault();
   else if (href === "/applications") prefetchApplications();
+  else if (href === "/mail") prefetchMail();
 }
 
 const NAV = [
