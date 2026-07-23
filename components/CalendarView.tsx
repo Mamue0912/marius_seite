@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 interface Ev {
   id: string; title: string; start: string; end: string | null;
@@ -90,18 +90,58 @@ export default function CalendarView({ initialEmail }: { initialEmail?: string |
     return { min: gridStart, max: gridEnd };
   }, [view, cursor, weekAnchor]);
 
+  // Zwischenspeicher: einmal geladene Termine bleiben erhalten (dedupliziert
+  // per id), geladene Zeitfenster werden gemerkt. Ansichts-/Monatswechsel
+  // innerhalb bereits geladener Bereiche kommen dadurch OHNE Neuladen aus.
+  const storeRef = useRef<Ev[]>([]);
+  const loadedRef = useRef<Array<[number, number]>>([]);
+  function isCovered(min: number, max: number) { return loadedRef.current.some(([a, b]) => a <= min && b >= max); }
+  function addInterval(min: number, max: number) {
+    const list = [...loadedRef.current, [min, max] as [number, number]].sort((x, y) => x[0] - y[0]);
+    const merged: Array<[number, number]> = [];
+    for (const iv of list) { const last = merged[merged.length - 1]; if (last && iv[0] <= last[1]) last[1] = Math.max(last[1], iv[1]); else merged.push([iv[0], iv[1]]); }
+    loadedRef.current = merged;
+  }
+  // Bewusst breiteres Fenster laden als sichtbar (±1 Monat bzw. ganzes Jahr),
+  // damit Blättern/Umschalten meist sofort aus dem Cache kommt.
+  function windowFor(): { min: Date; max: Date } {
+    if (view === "year") return { min: new Date(cursor.getFullYear(), 0, 1), max: new Date(cursor.getFullYear() + 1, 0, 1) };
+    const min = new Date(range.min); min.setMonth(min.getMonth() - 1); min.setDate(1); min.setHours(0, 0, 0, 0);
+    const max = new Date(range.max); max.setMonth(max.getMonth() + 1); max.setDate(1); max.setHours(0, 0, 0, 0);
+    return { min, max };
+  }
+
   const load = useCallback(async () => {
-    setLoading(true); setError(null); setNeedsReauth(false);
+    const visMin = range.min.getTime(), visMax = range.max.getTime();
+    // Bereits geladen → sofort aus dem Cache, kein Netzwerk, kein Spinner.
+    if (isCovered(visMin, visMax)) { setLoading(false); return; }
+    const win = windowFor();
+    // Stale-while-revalidate: vorhandene Termine sichtbar lassen; Spinner nur,
+    // wenn noch gar nichts geladen ist.
+    if (!storeRef.current.length) setLoading(true);
+    setError(null); setNeedsReauth(false);
     try {
-      const p = new URLSearchParams({ timeMin: range.min.toISOString(), timeMax: range.max.toISOString() });
+      const p = new URLSearchParams({ timeMin: win.min.toISOString(), timeMax: win.max.toISOString() });
       const res = await fetch(`/api/calendar/events?${p.toString()}`, { cache: "no-store" });
       const data = await res.json();
-      if (data.needsReauth) { setNeedsReauth(true); setEvents([]); }
-      else if (data.error) { setError(data.error); setEvents([]); }
-      else setEvents(data.events || []);
+      if (data.needsReauth) { setNeedsReauth(true); }
+      else if (data.error) { setError(data.error); }
+      else {
+        const winMin = win.min.getTime(), winMax = win.max.getTime();
+        const incoming: Ev[] = data.events || [];
+        // Termine im neu geladenen Fenster ersetzen (erfasst Löschungen/Änderungen).
+        const kept = storeRef.current.filter((e) => { const t = new Date(e.start).getTime(); return isNaN(t) || t < winMin || t >= winMax; });
+        const byId = new Map<string, Ev>();
+        for (const e of kept) byId.set(e.id, e);
+        for (const e of incoming) byId.set(e.id, e);
+        storeRef.current = Array.from(byId.values());
+        addInterval(winMin, winMax);
+        setEvents(storeRef.current);
+      }
     } catch (e) { setError((e as Error).message); }
     finally { setLoading(false); }
-  }, [range]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range, view, cursor]);
 
   useEffect(() => { load(); }, [load]);
 

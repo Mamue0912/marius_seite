@@ -497,6 +497,9 @@ textarea { resize: vertical; line-height: 1.55; }
 
 /* =============================== Kalender =============================== */
 .cal { display: flex; flex-direction: column; gap: 12px; }
+/* Sanfter Ansichtswechsel (Tag/Woche/Monat/Jahr) statt hartem Umschalten */
+.cal-grid-wrap, .cal-week, .cal-year, .cal-agenda { animation: calIn .2s var(--ease) both; }
+@keyframes calIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .cal-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .cal-nav { display: flex; align-items: center; gap: 8px; }
 .cal-title { font-size: 16px; font-weight: 600; min-width: 150px; letter-spacing: -.01em; }
