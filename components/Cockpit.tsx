@@ -704,12 +704,6 @@ export default function Cockpit({
                 <button className="mini-link" onClick={() => setBackfill(null)}>OK</button>
               </div>
             )}
-            {status?.syncing && (
-              <div className="sync-banner">
-                <span className="spin" />
-                <span>Neue Nachrichten werden abgerufen…</span>
-              </div>
-            )}
             {(sel.view || sel.ftype !== "inbox" || sel.account !== "all") && unreadInbox() > 0 && (
               <div className="filter-banner">
                 <span>Neue Mails im Posteingang ({unreadInbox()}) sind hier ausgeblendet.</span>

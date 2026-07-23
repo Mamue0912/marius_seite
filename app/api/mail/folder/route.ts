@@ -4,6 +4,8 @@ import { requireUser } from "@/lib/supabaseServer";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { loadMailAccount, MailAccount, accountPassword } from "@/lib/mailAccounts";
 import { friendlyMailError } from "@/lib/mailErrors";
+import { folderType } from "@/lib/folders";
+import { classifyMessage, semanticCategoryOf } from "@/lib/classify2";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,17 +36,26 @@ export async function GET(req: NextRequest) {
     try {
       const exists = Number((client.mailbox as any)?.exists || 0);
       if (exists > 0) {
+        const ftype = folderType(path, null);
         const start = Math.max(1, exists - 40 + 1);
         for await (const m of client.fetch(`${start}:*`, { uid: true, envelope: true, flags: true, internalDate: true })) {
           const env: any = m.envelope || {};
           const flags: Set<string> = m.flags instanceof Set ? m.flags : new Set(m.flags || []);
+          // Deterministisch (ohne KI) einordnen, damit auch Junk/Archiv eine
+          // Kategorie zeigen. Basis: Absender + Betreff (kein Body nötig).
+          const cls = classifyMessage({
+            from_address: env.from?.[0]?.address || null, from_name: env.from?.[0]?.name || null,
+            subject: env.subject || null, folder_type: ftype
+          });
           items.push({
             uid: m.uid, path, account_id: a.id,
             from_name: env.from?.[0]?.name || null, from_address: env.from?.[0]?.address || null,
             to_recipients: (env.to || []).map((x: any) => x.address).filter(Boolean).join(", "),
             subject: env.subject || null,
             received_at: m.internalDate ? new Date(m.internalDate).toISOString() : env.date ? new Date(env.date).toISOString() : null,
-            is_read: flags.has("\\Seen")
+            is_read: flags.has("\\Seen"),
+            semantic_category: semanticCategoryOf(cls),
+            labels: cls.labels, relevance: cls.relevance, needs_reply: cls.needs_reply, summary: cls.summary
           });
         }
       }

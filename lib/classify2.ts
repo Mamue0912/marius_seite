@@ -163,6 +163,27 @@ export function classifyMessage(input: ClassifyInput): ClassifyResult {
   };
 }
 
+// Bildet das deterministische Ergebnis auf eine Anzeige-Kategorie
+// (SEMANTIC_CATEGORIES) ab – z. B. für live geladene Ordner (Junk/Archiv),
+// die nicht in der DB liegen und daher keine KI-Kategorie haben.
+export function semanticCategoryOf(res: ClassifyResult): string {
+  const l = new Set(res.labels);
+  const t = res.message_type;
+  if (l.has("Karate")) return "Sport und Karate";
+  if (l.has("Bewerbungen") || t === "job_offer") return "Bewerbungen und Karriere";
+  if (l.has("Schule")) return "Schule";
+  if (l.has("Sicherheit") || t === "security_alert" || t === "security_info") return "Konten und Sicherheit";
+  if (l.has("Zahlungen") || t === "invoice_receipt") return "Rechnungen und Finanzen";
+  if (l.has("Reisen") || t === "booking_change") return "Reisen";
+  if (l.has("Bestellungen") || t === "auto_confirmation") return "Bestellungen und Lieferungen";
+  if (l.has("Abonnements")) return "Verträge und Versicherungen";
+  if (l.has("Termine")) return "Termine und Veranstaltungen";
+  if (t === "newsletter" || t === "marketing" || t === "survey_feedback" || t === "spam") return "Newsletter und Werbung";
+  if (t === "system_notification" || t === "welcome") return "Automatische Benachrichtigungen";
+  if (l.has("Persönlich") || t === "personal_direct" || t === "personal_thread") return "Persönlich";
+  return "Sonstiges";
+}
+
 function summarize(type: string, action: string, needs: boolean, subject: string): string {
   const s = subject ? `„${subject.slice(0, 60)}": ` : "";
   switch (type) {
