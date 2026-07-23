@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState, useCallback } from "react";
 import Markdown from "@/components/Markdown";
+import OverlayScroll from "@/components/OverlayScroll";
 
 // ============================ Konstanten ============================
 const STATUS: { key: string; label: string; tone: string }[] = [
@@ -122,7 +123,7 @@ export default function ApplicationCenter({ accounts, sendEnabled, initialSectio
           </button>
         )}
         {loading ? <div className="ac-empty"><span className="spin" /></div>
-          : openId ? <Workspace id={openId} accounts={accounts} sendEnabled={sendEnabled} docs={docs} onBack={() => nav("uebersicht")} onChanged={loadApps} onDeleted={async () => { nav("uebersicht"); await loadApps(); }} onDiag={() => setDiag(true)} />
+          : openId ? <Workspace id={openId} apps={apps} onOpen={openApp} accounts={accounts} sendEnabled={sendEnabled} docs={docs} onBack={() => nav("uebersicht")} onChanged={loadApps} onDeleted={async () => { nav("uebersicht"); await loadApps(); }} onDiag={() => setDiag(true)} />
           : section === "uebersicht" ? <Overview apps={apps} onOpen={openApp} onNav={nav} onNew={() => nav("neu")} />
           : section === "neu" ? <NewJob onCreated={async (id: string) => { await loadApps(); setOpenId(id); }} accounts={accounts} />
           : section === "aktiv" ? <AppList apps={apps} filter={listFilter} onFilter={setListFilter} onOpen={openApp} onNew={() => setSection("neu")} onReload={loadApps} />
@@ -686,9 +687,11 @@ function DocDetail({ doc, reload, onDiag }: any) {
 }
 
 // ============================ Arbeitsbereich (offene Bewerbung) ============================
-function Workspace({ id, accounts, sendEnabled, docs, onBack, onChanged, onDeleted, onDiag }: any) {
+function Workspace({ id, apps, onOpen, accounts, sendEnabled, docs, onBack, onChanged, onDeleted, onDiag }: any) {
   const [d, setD] = useState<any>(null);
-  const [pane, setPane] = useState<"stelle" | "chat" | "docs">("chat"); // mobil
+  // Panels: liste (Bewerbungen) · chat · stelle (Analyse) · docs (Unterlagen).
+  // Desktop zeigt Liste + Chat + Info-Schiene gleichzeitig; Mobile schaltet um.
+  const [pane, setPane] = useState<"liste" | "chat" | "stelle" | "docs">("chat");
   const [error, setError] = useState<string | null>(null);
   const [menu, setMenu] = useState(false);
 
@@ -715,17 +718,18 @@ function Workspace({ id, accounts, sendEnabled, docs, onBack, onChanged, onDelet
     await onDeleted();
   }
 
+  const TABS: { key: typeof pane; label: string; ic: string }[] = [
+    { key: "liste", label: "Übersicht", ic: "▤" },
+    { key: "chat", label: "Chat", ic: "💬" },
+    { key: "stelle", label: "Stelle", ic: "▦" },
+    { key: "docs", label: "Unterlagen", ic: "📄" }
+  ];
+
   return (
-    <div className="ac-ws">
+    <div className="ac-ws" data-pane={pane}>
       <div className="ac-ws-top">
         <button className="ac-back sm" title="Zur Bewerbungsübersicht" aria-label="Zur Bewerbungsübersicht" onClick={onBack}><span className="ac-back-ic">‹</span><span className="ac-back-l">Übersicht</span></button>
         <div className="ac-ws-title">{app.position || "Bewerbung"}{app.company ? <span className="ac-ws-co"> · {app.company}</span> : null}</div>
-        <select className="ac-select sm" value={app.status} onChange={(e) => patch({ status: e.target.value })}>
-          {STATUS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-        </select>
-        <div className="ac-ws-panes">
-          {(["stelle", "chat", "docs"] as const).map((p) => <button key={p} className={"ac-panebtn" + (pane === p ? " on" : "")} onClick={() => setPane(p)}>{p === "stelle" ? "Stelle" : p === "chat" ? "Chat" : "Dokumente"}</button>)}
-        </div>
         <div className="ac-ws-menu">
           <button className="ac-iconbtn" title="Aktionen" onClick={() => setMenu((v) => !v)}>⋯</button>
           {menu && <>
@@ -738,9 +742,97 @@ function Workspace({ id, accounts, sendEnabled, docs, onBack, onChanged, onDelet
         </div>
       </div>
       <div className="ac-ws-body">
-        <section className={"ac-ws-col ac-col-stelle" + (pane === "stelle" ? " show" : "")}><JobPanel app={app} docs={docs} onPatch={patch} onReload={load} /></section>
-        <section className={"ac-ws-col ac-col-chat" + (pane === "chat" ? " show" : "")}><ChatPanel app={app} messages={d.messages} onReload={load} onDiag={onDiag} /></section>
-        <section className={"ac-ws-col ac-col-docs" + (pane === "docs" ? " show" : "")}><DocsPanel app={app} data={d} accounts={accounts} sendEnabled={sendEnabled} onReload={load} onDiag={onDiag} /></section>
+        <aside className={"ac-ws-col ac-col-list" + (pane === "liste" ? " show" : "")}>
+          <WorkspaceList apps={apps} currentId={id} onOpen={(x: string) => { onOpen(x); setPane("chat"); }} onNew={onBack} />
+        </aside>
+        <section className={"ac-ws-col ac-col-chat" + (pane === "chat" ? " show" : "")}>
+          <ChatPanel app={app} messages={d.messages} onReload={load} onDiag={onDiag} />
+        </section>
+        <aside className={"ac-ws-col ac-col-info" + (pane === "stelle" || pane === "docs" ? " show" : "")}>
+          <InfoRail app={app} data={d} docs={docs} accounts={accounts} sendEnabled={sendEnabled} onPatch={patch} onReload={load} onDiag={onDiag} mobilePane={pane} />
+        </aside>
+      </div>
+      <nav className="ac-tabbar">
+        {TABS.map((t) => (
+          <button key={t.key} className={"ac-tab-item" + (pane === t.key ? " on" : "")} onClick={() => setPane(t.key)}>
+            <span className="ac-tab-ic">{t.ic}</span><span className="ac-tab-l">{t.label}</span>
+          </button>
+        ))}
+      </nav>
+    </div>
+  );
+}
+
+// Kompakte Bewerbungsliste in der linken Spalte des Arbeitsbereichs.
+function WorkspaceList({ apps, currentId, onOpen, onNew }: any) {
+  return (
+    <div className="ac-wlist">
+      <div className="ac-wlist-head">
+        <span>Bewerbungen</span>
+        <button className="ac-iconbtn sm" title="Zur Übersicht / neu" onClick={onNew}>＋</button>
+      </div>
+      <div className="ac-wlist-items">
+        {(apps || []).map((a: any) => (
+          <button key={a.id} className={"ac-witem" + (a.id === currentId ? " on" : "")} onClick={() => onOpen(a.id)}>
+            <span className="ac-witem-main">
+              <span className="ac-witem-pos">{a.position || "Bewerbung"}</span>
+              <span className="ac-witem-co">{a.company || "—"}</span>
+            </span>
+            <span className={"ac-wdot " + statusTone(a.status)} title={statusLabel(a.status)} />
+          </button>
+        ))}
+        {!(apps || []).length && <div className="ac-mod-empty sm">Keine Bewerbungen.</div>}
+      </div>
+    </div>
+  );
+}
+
+// Rechte Info-Schiene: kompakte Zusammenfassung + Schnellaktionen, darunter
+// ausklappbar die volle Stellenanalyse und der Unterlagen-/Dokumentbereich.
+// Auf Mobile zeigt sie je nach Tab nur „Stelle" ODER „Unterlagen".
+function InfoRail({ app, data, docs, accounts, sendEnabled, onPatch, onReload, onDiag, mobilePane }: any) {
+  const a = app.analysis;
+  const reqs: string[] = (a?.requirements_must || []).slice(0, 4);
+  const gdocs = data.generatedDocs || [];
+  const assigned = data.assignedDocuments || [];
+  const [openStelle, setOpenStelle] = useState(false);
+  const [openDocs, setOpenDocs] = useState(true);
+  // Beim Tab-Wechsel auf Mobile den passenden Abschnitt sicher öffnen.
+  useEffect(() => { if (mobilePane === "stelle") setOpenStelle(true); if (mobilePane === "docs") setOpenDocs(true); }, [mobilePane]);
+
+  return (
+    <div className="ac-inforail">
+      {/* Kompakte Kopf-Info – auf Mobile nur im Stelle-Tab */}
+      <div className="ac-info-card" data-only="stelle">
+        <div className="ac-info-pos">{app.position || "—"}</div>
+        <div className="ac-info-co">{app.company || "—"} · {JOB_TYPE_LABEL[app.job_type] || "Stelle"}</div>
+        <div className="ac-info-status">
+          <select className="ac-select sm" value={app.status} onChange={(e) => onPatch({ status: e.target.value })}>
+            {STATUS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+          </select>
+        </div>
+        <div className="ac-info-metas">
+          {app.deadline && <span className="ac-chipv high">Frist {new Date(app.deadline).toLocaleDateString("de-DE")}</span>}
+          {app.job_url && <a className="ac-chipv link" href={app.job_url} target="_blank" rel="noreferrer">Anzeige ↗</a>}
+          <span className="ac-chipv">{gdocs.length} Dok.</span>
+          <span className="ac-chipv">{assigned.length} Anhang</span>
+        </div>
+        {!!reqs.length && (
+          <div className="ac-info-reqs">
+            <div className="ac-info-lbl">Wichtigste Anforderungen</div>
+            <ul>{reqs.map((r, i) => <li key={i}>{r}</li>)}</ul>
+          </div>
+        )}
+      </div>
+
+      <div className={"ac-acc" + (openStelle ? " open" : "")} data-only="stelle">
+        <button className="ac-acc-sum" onClick={() => setOpenStelle((v) => !v)}>Stellenanalyse<span className="ac-acc-chev">›</span></button>
+        {openStelle && <div className="ac-acc-body"><JobPanel app={app} docs={docs} onPatch={onPatch} onReload={onReload} embedded /></div>}
+      </div>
+
+      <div className={"ac-acc" + (openDocs ? " open" : "")} data-only="docs">
+        <button className="ac-acc-sum" onClick={() => setOpenDocs((v) => !v)}>Unterlagen &amp; Dokumente<span className="ac-acc-chev">›</span></button>
+        {openDocs && <div className="ac-acc-body"><DocsPanel app={app} data={data} accounts={accounts} sendEnabled={sendEnabled} onReload={onReload} onDiag={onDiag} embedded /></div>}
       </div>
     </div>
   );
@@ -748,12 +840,12 @@ function Workspace({ id, accounts, sendEnabled, docs, onBack, onChanged, onDelet
 
 function Chip({ children, tone }: any) { return <span className={"ac-chipv " + (tone || "")}>{children}</span>; }
 
-function JobPanel({ app, docs, onPatch, onReload }: any) {
+function JobPanel({ app, docs, onPatch, onReload, embedded }: any) {
   const a = app.analysis;
   const assignedIds: string[] = []; // aus data.assignedDocuments – hier via docs prop nicht nötig
   return (
-    <div className="ac-panel">
-      <div className="ac-panel-h">Stelle</div>
+    <div className={embedded ? "ac-panel-embed" : "ac-panel"}>
+      {!embedded && <div className="ac-panel-h">Stelle</div>}
       <div className="ac-jobcard">
         <div className="ac-jobtype">{JOB_TYPE_LABEL[app.job_type] || "Stelle"}</div>
         <div className="ac-jobpos">{app.position || "—"}</div>
@@ -814,9 +906,12 @@ function ChatPanel({ app, messages, onReload, onDiag }: any) {
   const suggestions = ["Fass mir die Stelle zusammen.", "Welche Punkte aus meinem Lebenslauf passen besonders gut?", "Was fehlt mir für diese Stelle?", "Schreib mir ein Anschreiben.", "Erstelle eine kurze Bewerbungsmail.", "Bereite mich auf das Vorstellungsgespräch vor.", "Welche Rückfragen sollte ich stellen?"];
 
   return (
-    <div className="ac-panel ac-chat">
-      <div className="ac-panel-h">Bewerbungs-Chat</div>
-      <div className="ac-chat-scroll">
+    <div className="ac-chat">
+      <div className="ac-chat-head">
+        <span className="ac-chat-title">Bewerbungs-Chat</span>
+        <span className="ac-chat-sub">kennt Stelle &amp; bestätigte Unterlagen</span>
+      </div>
+      <OverlayScroll className="ac-chat-scroll">
         {!msgs.length && (
           <div className="ac-chat-intro">
             <p>Dieser Chat kennt die Stelle und deine <b>bestätigten</b> Unterlagen. Frag zum Beispiel:</p>
@@ -826,8 +921,8 @@ function ChatPanel({ app, messages, onReload, onDiag }: any) {
         {msgs.map((m) => <div key={m.id} className={"ac-msg " + m.role}><div className="ac-msg-b">{m.role === "assistant" ? <Markdown text={m.content} /> : m.content}</div></div>)}
         {busy && <div className="ac-msg assistant"><div className="ac-msg-b"><span className="spin" /> denkt nach…{ctrlRef.current && <button className="ac-diaglink" onClick={() => ctrlRef.current?.abort()}>Abbrechen</button>}</div></div>}
         <div ref={endRef} />
-      </div>
-      {error && <div className="ac-note bad">{error} <button className="ac-diaglink" onClick={onDiag}>Diagnose</button></div>}
+      </OverlayScroll>
+      {error && <div className="ac-note bad ac-chat-err">{error} <button className="ac-diaglink" onClick={onDiag}>Diagnose</button></div>}
       <div className="ac-chat-input">
         <textarea className="ac-chat-ta" placeholder="Nachricht an den Bewerbungs-Chat…" value={input} disabled={busy}
           onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(input); } }} />
@@ -837,7 +932,7 @@ function ChatPanel({ app, messages, onReload, onDiag }: any) {
   );
 }
 
-function DocsPanel({ app, data, accounts, sendEnabled, onReload, onDiag }: any) {
+function DocsPanel({ app, data, accounts, sendEnabled, onReload, onDiag, embedded }: any) {
   const [tone, setTone] = useState(TONES[0]);
   const [kind, setKind] = useState("anschreiben");
   const [busy, setBusy] = useState(false);
@@ -872,8 +967,8 @@ function DocsPanel({ app, data, accounts, sendEnabled, onReload, onDiag }: any) 
   async function assign(documentId: string, action: string) { await aj(`/api/applications/${app.id}/assign`, { json: { documentId, action } }); await onReload(); }
 
   return (
-    <div className="ac-panel">
-      <div className="ac-panel-h">Dokumente & Entwurf</div>
+    <div className={embedded ? "ac-panel-embed" : "ac-panel"}>
+      {!embedded && <div className="ac-panel-h">Dokumente & Entwurf</div>}
 
       <div className="ac-gen">
         <div className="ac-gen-row">

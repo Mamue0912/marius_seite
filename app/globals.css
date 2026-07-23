@@ -850,18 +850,52 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--mat); }
 
 /* ---- Arbeitsbereich (3 Spalten) ---- */
 .ac-ws { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-.ac-ws-top { display: flex; align-items: center; gap: 12px; padding: 12px 18px; border-bottom: 1px solid var(--line-2); background: var(--mat-thin); backdrop-filter: var(--blur-sm); flex-wrap: wrap; }
-.ac-ws-title { font-size: 16px; font-weight: 640; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ac-ws-top { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line-2); background: var(--mat-thin); backdrop-filter: var(--blur-sm); -webkit-backdrop-filter: var(--blur-sm); }
+.ac-ws-title { flex: 1; font-size: 15px; font-weight: 640; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: -.01em; }
 .ac-ws-co { color: var(--muted); font-weight: 500; }
-.ac-ws-top .ac-select { width: auto; }
-.ac-ws-panes { display: none; margin-left: auto; gap: 3px; padding: 3px; background: var(--sunken); border-radius: var(--r-pill); }
-.ac-panebtn { border: 0; background: transparent; color: var(--muted); font-size: 12px; font-weight: 560; padding: 5px 12px; border-radius: var(--r-pill); cursor: pointer; }
-.ac-panebtn.on { background: var(--surface-2); color: var(--ink); }
-.ac-ws-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(300px, 1fr) minmax(360px, 1.25fr) minmax(320px, 1fr); overflow: hidden; }
-.ac-ws-col { min-height: 0; overflow-y: auto; border-right: 1px solid var(--line-2); }
+.ac-ws-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 256px minmax(0, 1fr) 344px; overflow: hidden; }
+.ac-ws-col { min-height: 0; overflow: hidden; border-right: 1px solid var(--line-2); display: flex; flex-direction: column; }
 .ac-ws-col:last-child { border-right: 0; }
+.ac-col-list, .ac-col-info { overflow-y: auto; }
+.ac-col-chat { overflow: hidden; }
 .ac-panel { padding: 16px 18px 40px; }
-.ac-panel-h { font-size: 11.5px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); font-weight: 660; margin-bottom: 14px; position: sticky; top: 0; }
+.ac-panel-embed { padding: 2px 0 6px; }
+.ac-panel-h { font-size: 11.5px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); font-weight: 660; margin-bottom: 14px; }
+
+/* Linke Spalte: kompakte Bewerbungsliste */
+.ac-wlist { display: flex; flex-direction: column; }
+.ac-wlist-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 14px 8px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); font-weight: 680; }
+.ac-wlist-items { display: flex; flex-direction: column; gap: 2px; padding: 0 8px 16px; }
+.ac-witem { display: flex; align-items: center; gap: 10px; text-align: left; border: 0; background: transparent; border-radius: var(--r-sm); padding: 9px 10px; cursor: pointer; color: var(--ink); transition: background var(--t-fast); }
+.ac-witem:hover { background: var(--mat-hi); }
+.ac-witem.on { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent-line); }
+.ac-witem-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.ac-witem-pos { font-size: 13px; font-weight: 580; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ac-witem-co { font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ac-wdot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; background: var(--muted); }
+.ac-wdot.low { background: var(--low); } .ac-wdot.high { background: var(--high); } .ac-wdot.mid { background: var(--mid); }
+.ac-wdot.urgent { background: var(--urgent); } .ac-wdot.accent { background: var(--accent); }
+
+/* Rechte Info-Schiene */
+.ac-inforail { padding: 14px 14px 40px; display: flex; flex-direction: column; gap: 12px; }
+.ac-info-card { padding: 14px; border-radius: var(--r); background: var(--mat); border: 1px solid var(--line); box-shadow: inset 0 1px 0 var(--mat-hi); }
+.ac-info-pos { font-size: 15px; font-weight: 680; letter-spacing: -.2px; }
+.ac-info-co { font-size: 12.5px; color: var(--ink-2); margin-top: 2px; }
+.ac-info-status { margin-top: 10px; }
+.ac-info-status .ac-select { width: 100%; }
+.ac-info-metas { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.ac-info-reqs { margin-top: 12px; }
+.ac-info-lbl { font-size: 10.5px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); font-weight: 640; margin-bottom: 5px; }
+.ac-info-reqs ul { margin: 0; padding-left: 16px; font-size: 12.5px; line-height: 1.55; color: var(--ink-2); }
+.ac-acc { border: 1px solid var(--line-2); border-radius: var(--r); overflow: hidden; background: var(--mat-thin); }
+.ac-acc-sum { width: 100%; text-align: left; border: 0; background: transparent; cursor: pointer; padding: 11px 14px; font-size: 12.5px; font-weight: 620; color: var(--ink); display: flex; align-items: center; }
+.ac-acc-sum:hover { background: var(--mat-hi); }
+.ac-acc-chev { margin-left: auto; color: var(--muted); font-size: 15px; line-height: 1; transition: transform var(--t-fast); }
+.ac-acc.open .ac-acc-chev { transform: rotate(90deg); }
+.ac-acc-body { padding: 6px 14px 14px; border-top: 1px solid var(--line-2); }
+
+/* Mobile Tab-Leiste des Arbeitsbereichs */
+.ac-tabbar { display: none; }
 
 /* Stelle-Spalte */
 .ac-jobcard { padding: 16px; border-radius: var(--r); background: linear-gradient(150deg, var(--mat-thick), var(--mat)); border: 1px solid var(--line); box-shadow: inset 0 1px 0 var(--mat-hi); }
@@ -888,10 +922,24 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--mat); }
 .ac-matchcol-t { font-size: 12px; font-weight: 660; margin-bottom: 6px; }
 .ac-matchcol ul { margin: 0; padding-left: 16px; font-size: 12.5px; line-height: 1.55; color: var(--ink-2); }
 
-/* Chat-Spalte */
-.ac-chat { display: flex; flex-direction: column; height: 100%; padding-bottom: 0; }
-.ac-chat-scroll { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding-bottom: 12px; }
+/* Chat-Spalte: eigenes Fenster – Kopf fix, nur Nachrichten scrollen, Eingabe fix */
+.ac-chat { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.ac-chat-head { flex: 0 0 auto; display: flex; align-items: baseline; gap: 8px; padding: 12px 18px; border-bottom: 1px solid var(--line-2); }
+.ac-chat-title { font-size: 13px; font-weight: 660; }
+.ac-chat-sub { font-size: 11.5px; color: var(--muted); }
+.ac-chat-scroll { flex: 1; min-height: 0; }
+.ac-chat-scroll > .oscroll-view { display: flex; flex-direction: column; gap: 12px; padding: 16px 18px; }
+.ac-chat-err { flex: 0 0 auto; margin: 8px 18px 0; }
 .ac-chat-intro { color: var(--ink-2); font-size: 13.5px; line-height: 1.6; }
+
+/* Overlay-Scrollbar (eigener, sanft ein-/ausblendender Thumb) */
+.oscroll { position: relative; min-height: 0; }
+.oscroll-view { height: 100%; overflow-y: auto; overflow-x: hidden; scrollbar-width: none; -ms-overflow-style: none; }
+.oscroll-view::-webkit-scrollbar { width: 0; height: 0; }
+.oscroll-thumb { position: absolute; top: 0; right: 3px; width: 6px; height: 0; border-radius: 999px; background: var(--scroll-h); opacity: 0; transition: opacity .5s var(--ease); will-change: opacity, transform; touch-action: none; }
+.oscroll-thumb.show { opacity: 1; }
+.oscroll:hover .oscroll-thumb { opacity: .8; }
+.oscroll-thumb:hover, .oscroll-thumb:active { background: var(--ink-2); cursor: grab; }
 .ac-suggests { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
 .ac-suggest { text-align: left; padding: 9px 12px; border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--mat); color: var(--ink); font-size: 13px; cursor: pointer; transition: transform var(--t-fast), border-color var(--t-fast); }
 .ac-suggest:hover { transform: translateX(2px); border-color: var(--accent-line); }
@@ -914,7 +962,7 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--mat); }
 .md-a { color: var(--accent); text-decoration: underline; word-break: break-word; }
 .md-code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.9em; background: var(--sunken); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; }
 .md strong { font-weight: 700; }
-.ac-chat-input { display: flex; gap: 8px; padding: 12px 0; border-top: 1px solid var(--line-2); position: sticky; bottom: 0; background: linear-gradient(180deg, transparent, var(--bg-1) 30%); }
+.ac-chat-input { flex: 0 0 auto; display: flex; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--line-2); background: var(--mat-thin); backdrop-filter: var(--blur-sm); -webkit-backdrop-filter: var(--blur-sm); }
 .ac-chat-ta { flex: 1; min-height: 44px; max-height: 140px; resize: none; padding: 11px 13px; border-radius: var(--r); border: 1px solid var(--line-strong); background: var(--sunken); color: var(--ink); font-family: inherit; font-size: 13.5px; }
 .ac-chat-ta:focus { outline: none; border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-soft); }
 
@@ -967,51 +1015,63 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--mat); }
 @keyframes acPop { from { opacity: 0; transform: scale(.97) translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes acPulse { 50% { box-shadow: 0 0 0 4px var(--accent-soft); } }
 
-/* ---- iPad & darunter: eine Spalte je Auswahl über die Pane-Umschaltung ---- */
-@media (max-width: 1100px) {
+/* ---- iPad Querformat: schmalere Info-Schiene, sonst 3 Spalten ---- */
+@media (max-width: 1180px) and (min-width: 1001px) {
+  .ac-ws-body { grid-template-columns: 220px minmax(0, 1fr) 300px; }
+}
+
+/* ---- iPad Hochformat & Handy: eine Ansicht je Tab, feste Tab-Leiste unten ---- */
+@media (max-width: 1000px) {
   .ac-grid { grid-template-columns: repeat(2, 1fr); }
   .ac-mod-primary { grid-column: span 2; }
   .ac-mod-tall { grid-row: span 1; grid-column: span 2; }
-  .ac-ws-panes { display: flex; }
-  .ac-ws-body { display: block; }
-  .ac-ws-col { display: none; border-right: 0; }
-  .ac-ws-col.show { display: block; }
-}
 
-/* ---- iPhone: Bereiche nacheinander als echte mobile Ansichten ---- */
-@media (max-width: 780px) {
-  .ac { flex-direction: column; height: auto; min-height: 0; overflow: visible; }
-  .content:has(.ac) { overflow-y: auto; padding-bottom: 72px; }
-  .ac-side { flex: none; flex-direction: row; align-items: center; gap: 6px; overflow-x: auto; padding: 10px; position: sticky; top: 0; z-index: 15; border-right: 0; border-bottom: 1px solid var(--line-2); }
-  .ac-side-head { display: none; }
-  .ac-nav { flex-direction: row; }
-  .ac-nav-item span:not(.ac-nav-ic) { display: none; }
-  .ac-nav-item { padding: 9px 12px; }
-  .ac-side-foot { margin: 0; padding: 0; }
-  .ac-main { overflow: visible; }
-  .ac-ws-body { display: block; }
-  .ac-ws-col { display: none; border-right: 0; }
-  .ac-ws-col.show { display: block; }
-  .ac-ws-panes { display: flex; }
-  .ac-grid { grid-template-columns: 1fr; }
-  .ac-mod-primary, .ac-mod-wide, .ac-mod-tall { grid-column: span 1; }
-  .ac-modal { max-height: 92dvh; }
-
-  /* Offenes Bewerbungsprojekt: app-artiges, begrenztes Layout – nur INNEN scrollen. */
+  /* Arbeitsbereich als app-artiges Layout: nur INNEN scrollen, Seite wächst nicht. */
   .content:has(.ac-workspace-open) { overflow: hidden; padding-bottom: 0; }
   .ac.ac-workspace-open { height: calc(100dvh - 64px); overflow: hidden; }
   .ac-workspace-open .ac-main { flex: 1; min-height: 0; overflow: hidden; }
-  .ac-workspace-open .ac-ws { height: 100%; display: flex; flex-direction: column; min-height: 0; }
-  .ac-workspace-open .ac-ws-top { flex: none; position: sticky; top: 0; z-index: 12; row-gap: 8px; }
-  .ac-workspace-open .ac-ws-panes { order: 3; width: 100%; }
-  .ac-workspace-open .ac-panebtn { flex: 1; text-align: center; }
-  .ac-workspace-open .ac-ws-body { flex: 1; min-height: 0; overflow: hidden; }
-  .ac-workspace-open .ac-ws-col.show { height: 100%; }
-  .ac-workspace-open .ac-col-stelle.show, .ac-workspace-open .ac-col-docs.show { overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
-  .ac-workspace-open .ac-col-chat.show { overflow: hidden; }
-  .ac-workspace-open .ac-chat { height: 100%; display: flex; flex-direction: column; min-height: 0; padding-bottom: 0; }
-  .ac-workspace-open .ac-chat-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
-  .ac-workspace-open .ac-chat-input { flex: none; position: static; padding-bottom: calc(10px + env(safe-area-inset-bottom)); background: var(--bg-1); }
+  .ac-ws { height: 100%; }
+  .ac-ws-top { flex: none; }
+  .ac-ws-body { display: block; position: relative; }
+  .ac-ws-col { display: none; border-right: 0; height: 100%; }
+  .ac-ws-col.show { display: flex; }
+  .ac-col-list.show, .ac-col-info.show { overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+  .ac-col-chat.show { overflow: hidden; }
+
+  /* Info-Schiene zeigt je Tab nur den passenden Abschnitt */
+  .ac-ws[data-pane="docs"] .ac-inforail [data-only="stelle"] { display: none; }
+  .ac-ws[data-pane="stelle"] .ac-inforail [data-only="docs"] { display: none; }
+  .ac-inforail .ac-acc > summary { display: none; }
+  .ac-inforail .ac-acc { border: 0; background: transparent; }
+  .ac-inforail .ac-acc-body { border-top: 0; padding: 4px 0 0; }
+
+  /* Feste Tab-Leiste unten im Arbeitsbereich */
+  .ac-tabbar { display: flex; flex: none; border-top: 1px solid var(--line); background: var(--mat-thick); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur); padding: 6px 4px calc(6px + env(safe-area-inset-bottom)); }
+  .ac-tab-item { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; border: 0; background: transparent; color: var(--muted); font-size: 10px; padding: 5px 4px; border-radius: var(--r-sm); cursor: pointer; }
+  .ac-tab-item.on { color: var(--accent-ink); }
+  .ac-tab-ic { font-size: 17px; }
+  .ac-tab-l { font-size: 9.5px; }
+
+  /* Chat füllt die verfügbare Höhe, Eingabe fix unten */
+  .ac-col-chat.show .ac-chat { height: 100%; }
+  .ac-chat-input { padding-bottom: 12px; }
+}
+
+/* ---- Handy: Nav-Sidebar oben als Zeile, Überblick einspaltig ---- */
+@media (max-width: 780px) {
+  .ac:not(.ac-workspace-open) { flex-direction: column; height: auto; min-height: 0; overflow: visible; }
+  .content:has(.ac):not(:has(.ac-workspace-open)) { overflow-y: auto; padding-bottom: 72px; }
+  .ac:not(.ac-workspace-open) .ac-side { flex: none; flex-direction: row; align-items: center; gap: 6px; overflow-x: auto; padding: 10px; position: sticky; top: 0; z-index: 15; border-right: 0; border-bottom: 1px solid var(--line-2); }
+  .ac:not(.ac-workspace-open) .ac-side-head { display: none; }
+  .ac:not(.ac-workspace-open) .ac-nav { flex-direction: row; }
+  .ac:not(.ac-workspace-open) .ac-nav-item span:not(.ac-nav-ic) { display: none; }
+  .ac:not(.ac-workspace-open) .ac-nav-item { padding: 9px 12px; }
+  .ac:not(.ac-workspace-open) .ac-side-foot { margin: 0; padding: 0; }
+  /* Im offenen Arbeitsbereich braucht es die linke Sidebar nicht – Tabs übernehmen. */
+  .ac-workspace-open .ac-side { display: none; }
+  .ac-grid { grid-template-columns: 1fr; }
+  .ac-mod-primary, .ac-mod-wide, .ac-mod-tall { grid-column: span 1; }
+  .ac-modal { max-height: 92dvh; }
 }
 
 /* =========================================================================
@@ -1075,6 +1135,7 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--mat); }
 .ac-fchip.on { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent-line); }
 .ac-iconbtn { width: 32px; height: 32px; border-radius: var(--r-xs); border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--ink-2); cursor: pointer; font-size: 14px; display: inline-flex; align-items: center; justify-content: center; transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast); }
 .ac-iconbtn:hover { background: var(--raised); color: var(--ink); }
+.ac-iconbtn.sm { width: 26px; height: 26px; font-size: 13px; }
 .ac-iconbtn.danger:hover { background: var(--urgent-soft); color: var(--urgent); border-color: rgba(255,105,97,.35); }
 .ac-ws-menu { position: relative; margin-left: 6px; }
 .ac-menu-scrim { position: fixed; inset: 0; z-index: 18; }
