@@ -1,10 +1,28 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, memo } from "react";
 import { supabaseBrowser } from "@/lib/supabaseBrowser";
 import { PROVIDERS } from "@/lib/mailProviders";
 import { RELEVANCE_LABEL } from "@/lib/classify2";
 
 type Msg = any;
+
+// Bild-Einstellung (im Browser gespeichert): always | known | never (Standard: always).
+function imageMode(): string {
+  try { return localStorage.getItem("imgMode") || "always"; } catch { return "always"; }
+}
+function knownSenders(): Set<string> {
+  try { return new Set(JSON.parse(localStorage.getItem("imgKnown") || "[]")); } catch { return new Set(); }
+}
+function rememberImageSender(m: any) {
+  const s = (m.from_address || "").toLowerCase(); if (!s) return;
+  try { const set = knownSenders(); set.add(s); localStorage.setItem("imgKnown", JSON.stringify(Array.from(set))); } catch {}
+}
+function autoImages(m: any): boolean {
+  const mode = imageMode();
+  if (mode === "always") return true;
+  if (mode === "never") return false;
+  return knownSenders().has((m.from_address || "").toLowerCase());
+}
 
 // Inhaltliche Labels einer Nachricht (ohne Meta-Labels), Nutzer-Override zuerst.
 function labelsOfMsg(m: any): string[] {
@@ -127,7 +145,9 @@ export default function Cockpit({
   const [diag, setDiag] = useState<boolean>(false);
   const [classify, setClassify] = useState<{ total: number; done: number } | null>(null);
   const [classifyErr, setClassifyErr] = useState<string | null>(null);
+  const [backfill, setBackfill] = useState<any>(null);
   const [rules, setRules] = useState<any[]>([]);
+  const [listLimit, setListLimit] = useState(50);
   const accById: Record<string, Account> = Object.fromEntries(accounts.map((a) => [a.id, a]));
   const filter = { account: sel.account, folder: sel.ftype, cat: "all", unread: false, needs: false, q };
   const [drawer, setDrawer] = useState<any>(null); // { msg, mode, loading, draft, body, tone, customInstruction, confirmBinding, sending }
@@ -141,7 +161,7 @@ export default function Cockpit({
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       uidRef.current = user.id;
-      const { data } = await supabase.from("messages").select("*").eq("is_deleted", false).order("received_at", { ascending: false });
+      const { data } = await supabase.from("messages").select("*").eq("is_deleted", false).order("received_at", { ascending: false }).limit(600);
       setMsgs(data || []);
       channel = supabase
         .channel("messages-live")
@@ -329,7 +349,7 @@ export default function Cockpit({
   async function reloadMessages() {
     try {
       const supabase = supabaseBrowser();
-      const { data } = await supabase.from("messages").select("*").eq("is_deleted", false).order("received_at", { ascending: false });
+      const { data } = await supabase.from("messages").select("*").eq("is_deleted", false).order("received_at", { ascending: false }).limit(600);
       if (data) setMsgs(data);
     } catch {}
   }
@@ -361,6 +381,44 @@ export default function Cockpit({
     if (!confirm("Alle gespeicherten Mails werden gelöscht und komplett neu eingelesen. Das korrigiert falsche Kontozuordnungen. Manuelle Labels/Einstufungen auf einzelnen Mails gehen dabei verloren. Fortfahren?")) return;
     manualSync(false, true);
   }
+  // Vollständiger, sicherer Abgleich: fehlende Mails nachladen (keine Duplikate).
+  async function runBackfill() {
+    if (syncingRef.current) return;
+    syncingRef.current = true;
+    setBackfill({ running: true, label: "Abgleich wird vorbereitet…" });
+    const summary: any[] = [];
+    try {
+      const accs = ((await (await fetch("/api/mail/backfill")).json()).accounts) || [];
+      for (const a of accs) {
+        const prov = PROVIDERS[a.provider]?.label || a.provider;
+        for (const folder of ["inbox", "sent"] as const) {
+          const agg: any = { account: a.email, provider: prov, folder, checked: 0, saved: 0, updated: 0, skipped: 0, failed: 0, total: 0 };
+          let start = 1; let guard = 0;
+          while (guard < 400) {
+            guard++;
+            const resp = await fetch("/api/mail/backfill", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ accountId: a.id, folder, startSeq: start }) });
+            const r = await resp.json();
+            if (!resp.ok || r.error) { agg.failed++; break; }
+            agg.total = r.total; agg.checked += r.processed; agg.saved += r.saved; agg.updated += r.updated; agg.skipped += r.skipped; agg.failed += r.failed;
+            setBackfill({ running: true, label: `${prov} · ${folder === "inbox" ? "Posteingang" : "Gesendet"}: ${Math.min(agg.checked, r.total)} von ${r.total} geprüft`, summary });
+            if (r.next == null) break;
+            start = r.next;
+            await new Promise((res) => setTimeout(res, 300)); // WEB.DE schonen
+          }
+          summary.push(agg);
+          await reloadMessages();
+        }
+      }
+      setBackfill({ done: true, summary });
+    } catch (e: any) {
+      setBackfill({ done: true, error: e?.message || "Abgleich fehlgeschlagen", summary });
+    } finally {
+      syncingRef.current = false;
+      await reloadMessages();
+      runClassify();
+    }
+  }
+
   // Bestehende Mails neu einordnen (Mails bleiben, nur Labels/Relevanz neu).
   async function reclassifyAll() {
     if (!confirm("Alle Mails werden neu eingeordnet (z. B. damit Google-Sicherheitshinweise nicht mehr als dringend gelten). Deine manuellen Einstufungen bleiben erhalten. Fortfahren?")) return;
@@ -440,9 +498,12 @@ export default function Cockpit({
   }
 
   async function openReader(m: Msg, images = false) {
+    // Externe Bilder je nach Einstellung automatisch laden (Standard: immer).
+    if (!images) images = autoImages(m);
+    if (images) rememberImageSender(m); // "bekannt" für den Modus „bekannte Absender"
     setMobilePane("read");
     setReading((s: any) => ({ msg: m, loading: true, ...(s && s.msg?.id === m.id ? s : {}), loadingImages: images }));
-    if (!images) setReading({ msg: m, loading: true });
+    setReading({ msg: m, loading: true });
     if (!m.is_read) setMsgs((prev) => prev.map((x) => x.id === m.id ? { ...x, is_read: true } : x));
     try {
       const r = await fetch(`/api/mail/message?id=${m.id}${images ? "&images=1" : ""}`);
@@ -475,6 +536,9 @@ export default function Cockpit({
 
   // Nutzerregeln laden (für aktive Zustände der Dauerregel-Buttons).
   useEffect(() => { fetch("/api/rules").then((r) => r.json()).then((j) => setRules(j.rules || [])).catch(() => {}); }, []);
+
+  // Fenster der Liste zurücksetzen, wenn Ordner/Ansicht/Suche wechseln.
+  useEffect(() => { setListLimit(50); }, [sel, q]);
 
   // Dauerregel setzen/entfernen (Toggle). Gibt den neuen Zustand zurück.
   async function toggleRule(scope: "sender" | "domain", value: string, patch: any) {
@@ -616,6 +680,15 @@ export default function Cockpit({
                 <button className="mini-link" onClick={runClassify}>Erneut</button>
               </div>
             )}
+            {backfill && backfill.running && (
+              <div className="classify-banner"><span className="spin" /><span>{backfill.label}</span></div>
+            )}
+            {backfill && backfill.done && (
+              <div className="sync-banner" style={{ background: "var(--low-soft)", borderColor: "rgba(74,222,128,.3)", color: "#c9f7d8" }}>
+                <span>Abgleich fertig: {(backfill.summary || []).reduce((s: number, x: any) => s + x.saved, 0)} nachgeladen, {(backfill.summary || []).reduce((s: number, x: any) => s + x.checked, 0)} geprüft.</span>
+                <button className="mini-link" onClick={() => setBackfill(null)}>OK</button>
+              </div>
+            )}
             {status?.syncing && (
               <div className="sync-banner">
                 <span className="spin" />
@@ -628,19 +701,29 @@ export default function Cockpit({
                 <button className="mini-link" onClick={() => { setSel({ account: "all", ftype: "inbox" }); setFolderItems(null); }}>Filter zurücksetzen</button>
               </div>
             )}
-            <div className="mlist-scroll">
+            <div className="mlist-scroll" onScroll={(e) => {
+              const el = e.currentTarget;
+              if (el.scrollTop + el.clientHeight > el.scrollHeight - 400) setListLimit((n) => n + 40);
+            }}>
               {folderItems !== null ? (
                 folderLoading ? [0, 1, 2, 3].map((i) => <div className="sk-card" key={i} />)
                   : folderItems.length ? folderItems.map((it) => (
                     <MailRow key={it.uid} m={it} account={accById[it.account_id]} onOpen={() => openFolderItem(it)} selected={reading?.msg?.uid === it.uid} labelsOf={labelsOf} />
                   )) : <div className="empty" style={{ padding: 40 }}>Keine Nachrichten in diesem Ordner.</div>
               ) : (() => {
-                const list = msgs.filter(visible).sort((a, b) => new Date(b.received_at || 0).getTime() - new Date(a.received_at || 0).getTime());
+                // Nur sichtbare Nachrichten, sortiert; für Performance gefenstert.
+                const all = msgs.filter(visible).sort((a, b) => new Date(b.received_at || 0).getTime() - new Date(a.received_at || 0).getTime());
                 if (msgs.length === 0 && status?.syncing) return [0, 1, 2, 3].map((i) => <div className="sk-card" key={i} />);
-                if (!list.length) return <div className="empty" style={{ padding: 40 }}><div className="ic">✦</div>Keine Nachrichten.</div>;
-                return list.map((m) => (
-                  <MailRow key={m.id} m={m} account={accById[m.mail_account_id]} onOpen={() => openReader(m)} selected={reading?.msg?.id === m.id} labelsOf={labelsOf} />
-                ));
+                if (!all.length) return <div className="empty" style={{ padding: 40 }}><div className="ic">✦</div>Keine Nachrichten.</div>;
+                const shown = all.slice(0, listLimit);
+                return <>
+                  {shown.map((m) => (
+                    <MailRow key={m.id} m={m} account={accById[m.mail_account_id]} onOpen={() => openReader(m)} selected={reading?.msg?.id === m.id} labelsOf={labelsOf} />
+                  ))}
+                  {all.length > shown.length && (
+                    <button className="btn small" style={{ margin: "12px auto", display: "block" }} onClick={() => setListLimit((n) => n + 60)}>Weitere {Math.min(60, all.length - shown.length)} anzeigen</button>
+                  )}
+                </>;
               })()}
             </div>
           </div>
@@ -676,14 +759,14 @@ export default function Cockpit({
         visibleCount: msgs.filter(visible).length,
         unreadInboxDb: unreadInbox(),
         sel, report: status?.report, syncedAt: status?.syncedAt, syncing: !!status?.syncing, classifyError: status?.classifyError, errors: status?.errors
-      }} onReseed={() => { setMailDiag(false); manualSync(true); }} onClean={() => { setMailDiag(false); cleanResync(); }} onReclassify={() => { setMailDiag(false); reclassifyAll(); }} />}
+      }} onReseed={() => { setMailDiag(false); manualSync(true); }} onClean={() => { setMailDiag(false); cleanResync(); }} onReclassify={() => { setMailDiag(false); reclassifyAll(); }} onBackfill={() => { setMailDiag(false); runBackfill(); }} />}
       {compose && <ComposeModal compose={compose} setCompose={setCompose} accounts={accounts} sendEnabled={sendEnabled} />}
     </>
   );
 }
 
 // Owner-Diagnose der Mail-Synchronisierung (keine Passwörter/Tokens/Inhalte).
-function MailDiagModal({ onClose, client, onReseed, onClean, onReclassify }: any) {
+function MailDiagModal({ onClose, client, onReseed, onClean, onReclassify, onBackfill }: any) {
   const [s, setS] = useState<any>({ loading: true });
   useEffect(() => { fetch("/api/mail/diag").then((r) => r.json()).then((d) => setS({ loading: false, ...d })).catch(() => setS({ loading: false, error: true })); }, []);
   return (
@@ -750,6 +833,7 @@ function MailDiagModal({ onClose, client, onReseed, onClean, onReclassify }: any
           <div className="note" style={{ fontSize: 12, marginTop: 12 }}>Keine Passwörter, Tokens oder Mailinhalte werden angezeigt.</div>
         </div>
         <div className="df" style={{ flexWrap: "wrap" }}>
+          {onBackfill && <button className="btn btn-primary" onClick={onBackfill} title="Alle Ordner mit dem Server abgleichen und fehlende Mails nachladen (keine Duplikate)">Vollständiger Abgleich</button>}
           {onReclassify && <button className="btn" onClick={onReclassify} title="Alle Mails neu einordnen (Labels/Relevanz), ohne sie zu löschen">Alles neu einordnen</button>}
           {onReseed && <button className="btn" onClick={onReseed} title="Setzt den Sync-Zeiger zurück und holt die letzten ~40 Mails neu">Posteingang neu einlesen</button>}
           {onClean && <button className="btn btn-primary" onClick={onClean} title="Alle Mails löschen und sauber neu einlesen – korrigiert falsche Kontozuordnung">Bereinigt neu einlesen</button>}
@@ -760,7 +844,7 @@ function MailDiagModal({ onClose, client, onReseed, onClean, onReclassify }: any
   );
 }
 
-function MailRow({ m, account, onOpen, selected, labelsOf }: any) {
+const MailRow = memo(function MailRow({ m, account, onOpen, selected, labelsOf }: any) {
   const isSent = m.folder_type === "sent";
   const provider = account ? (PROVIDERS[account.provider]?.label || account.provider) : (m.account_display_name || "");
   const labels: string[] = (labelsOf ? labelsOf(m) : (m.labels || [])).filter((l: string) => l !== "Automatisch" && l !== "Persönlich" && l !== "Sonstiges").slice(0, 2);
@@ -785,7 +869,7 @@ function MailRow({ m, account, onOpen, selected, labelsOf }: any) {
       </div>
     </div>
   );
-}
+});
 
 function wantSummary(m: any): string {
   switch (m.message_type) {

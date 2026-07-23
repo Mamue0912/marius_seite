@@ -57,6 +57,59 @@ export interface SyncResult {
   newUids: number[]; skippedUids: number[];
 }
 
+export interface BackfillBatch {
+  total: number; processed: number; saved: number; updated: number; skipped: number; failed: number;
+  next: number | null; // nächste Sequenznummer oder null (fertig)
+}
+
+// Sicherer Backfill: prüft einen Sequenzbereich eines Ordners, lädt NUR
+// fehlende Nachrichten nach (keine Duplikate), aktualisiert Gelesen-Status
+// vorhandener, ohne Nutzer-Klassifizierungen zu überschreiben.
+export async function backfillBatch(acc: MailAccount, ftype: "inbox" | "sent", startSeq: number, batch: number): Promise<BackfillBatch> {
+  const admin = supabaseAdmin();
+  const client = makeClient(acc);
+  const rules = await loadRules(acc.user_id).catch(() => []);
+  const res: BackfillBatch = { total: 0, processed: 0, saved: 0, updated: 0, skipped: 0, failed: 0, next: null };
+  await client.connect();
+  try {
+    const path = ftype === "inbox" ? "INBOX" : (await findMailbox(client, "sent"))?.path;
+    if (!path) return res;
+    const lock = await client.getMailboxLock(path);
+    try {
+      const box: any = client.mailbox;
+      const exists = Number(box?.exists || 0);
+      res.total = exists;
+      if (exists === 0 || startSeq > exists) return res;
+      const end = Math.min(startSeq + batch - 1, exists);
+      const msgs: any[] = [];
+      for await (const msg of client.fetch(`${startSeq}:${end}`, { uid: true, envelope: true, flags: true, internalDate: true, bodyStructure: true, headers: HEADER_FIELDS })) {
+        msgs.push(msg);
+      }
+      const gidOf = (m: any) => `${acc.id}:${m.envelope?.messageId || `uid-${ftype}-${m.uid}`}`;
+      const gids = msgs.map(gidOf);
+      const { data: existing } = await admin.from("messages").select("graph_id").eq("user_id", acc.user_id).in("graph_id", gids);
+      const existSet = new Set((existing || []).map((x: any) => x.graph_id));
+      for (const msg of msgs) {
+        res.processed++;
+        const gid = gidOf(msg);
+        try {
+          if (existSet.has(gid)) {
+            // Nur Gelesen-/Flag-Status auffrischen (keine Reklassifizierung).
+            const flags: Set<string> = msg.flags instanceof Set ? msg.flags : new Set(msg.flags || []);
+            await admin.from("messages").update({ is_read: ftype === "sent" ? true : flags.has("\\Seen"), is_flagged: flags.has("\\Flagged") }).eq("user_id", acc.user_id).eq("graph_id", gid);
+            res.updated++; res.skipped++;
+          } else {
+            await upsertMessage(acc, msg, ftype, path, rules);
+            res.saved++;
+          }
+        } catch { res.failed++; }
+      }
+      res.next = end >= exists ? null : end + 1;
+    } finally { lock.release(); }
+  } finally { await client.logout().catch(() => {}); }
+  return res;
+}
+
 // Hauptsync: Posteingang (inkrementell) + Gesendet (Seed), dann KI-Kategorien.
 export async function syncInbox(acc: MailAccount): Promise<SyncResult> {
   const admin = supabaseAdmin();

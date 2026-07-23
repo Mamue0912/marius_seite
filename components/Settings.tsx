@@ -1,6 +1,27 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PROVIDERS } from "@/lib/mailProviders";
+
+function ImageSetting() {
+  const [mode, setMode] = useState("always");
+  useEffect(() => { try { setMode(localStorage.getItem("imgMode") || "always"); } catch {} }, []);
+  function set(v: string) { setMode(v); try { localStorage.setItem("imgMode", v); } catch {} }
+  const opts = [["always", "Bilder immer automatisch laden", "Logos und Bilder erscheinen sofort (empfohlen)."], ["known", "Nur bei bekannten Absendern", "Automatisch nur bei Absendern, deren Bilder du schon einmal geladen hast."], ["never", "Bilder immer blockieren", "Bilder erst nach Klick auf „Externe Bilder laden“."]];
+  return (
+    <div className="bucket">
+      <div className="bh"><span className="bt">E-Mail-Bilder</span></div>
+      <div className="note" style={{ marginTop: 0, marginBottom: 10 }}>
+        Externe Bilder werden über einen sicheren Proxy geladen (deine IP/Adresse geht nicht an den Bildserver), typische 1×1-Trackingpixel werden blockiert. Skripte/Formulare bleiben immer blockiert.
+      </div>
+      {opts.map(([v, t, d]) => (
+        <label key={v} className="mail" style={{ display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer" }}>
+          <input type="radio" name="imgmode" checked={mode === v} onChange={() => set(v)} style={{ marginTop: 3 }} />
+          <span><b style={{ fontSize: 13.5 }}>{t}</b><br /><span className="note" style={{ margin: 0 }}>{d}</span></span>
+        </label>
+      ))}
+    </div>
+  );
+}
 
 const CATEGORIES = ["Wichtig", "Antwort erforderlich", "Schule", "Bewerbungen und Karriere", "Sport und Karate", "Reisen", "Termine und Veranstaltungen", "Rechnungen und Finanzen", "Bestellungen und Lieferungen", "Verträge und Versicherungen", "Behörden", "Konten und Sicherheit", "Persönlich", "Newsletter und Werbung", "Automatische Benachrichtigungen", "Sonstiges"];
 
@@ -159,6 +180,8 @@ export default function Settings({ accounts, initialRules, initialFolders = [], 
           })}
           {folders.length === 0 && <div className="empty" style={{ padding: 20 }}>Noch keine Ordner geladen. Öffne einmal den E-Mail-Bereich.</div>}
         </div>
+
+        <ImageSetting />
 
         <div className="bucket">
           <div className="bh"><span className="bt">Versand</span></div>

@@ -21,11 +21,22 @@ function safeHtml(html: string, withImages: boolean): string {
     allowedAttributes: {
       "*": ["style", "align", "valign", "width", "height", "bgcolor", "color", "colspan", "rowspan", "cellpadding", "cellspacing", "border", "dir"],
       a: ["href", "style", "target", "align"],
-      img: withImages ? ["src", "alt", "width", "height", "style"] : ["alt", "width", "height", "style"],
+      img: withImages ? ["src", "alt", "width", "height", "style", "loading", "decoding", "referrerpolicy"] : ["alt", "width", "height", "style"],
       font: ["face", "size", "color"]
     },
-    allowedSchemes: ["http", "https", "mailto"],
-    allowedSchemesByTag: { img: withImages ? ["http", "https"] : [] },
+    allowedSchemes: ["http", "https", "mailto", "data"],
+    allowedSchemesByTag: { img: withImages ? ["http", "https", "data"] : [] },
+    // Tracking-Pixel (1×1 o. Ä.) entfernen, auch wenn Bilder erlaubt sind.
+    exclusiveFilter: (frame) => {
+      if (frame.tag !== "img") return false;
+      const a = frame.attribs || {};
+      const w = parseInt(a.width || "", 10);
+      const h = parseInt(a.height || "", 10);
+      if ((w > 0 && w <= 2) || (h > 0 && h <= 2)) return true;
+      if (/(width\s*:\s*1px|height\s*:\s*1px)/i.test(a.style || "")) return true;
+      if (/(\/(open|track|trk|pixel|beacon|wf\/open|o\/)|utm_|email_open|mailstat|spacer\.gif)/i.test(a.src || "")) return true;
+      return false;
+    },
     // Gefährliche/positionierende Styles raus, Layout-Styles behalten.
     allowedStyles: {
       "*": {
@@ -39,7 +50,18 @@ function safeHtml(html: string, withImages: boolean): string {
       }
     },
     transformTags: {
-      a: (tag, attribs) => ({ tagName: "a", attribs: { ...attribs, target: "_blank", rel: "noopener noreferrer nofollow" } })
+      a: (tag, attribs) => ({ tagName: "a", attribs: { ...attribs, target: "_blank", rel: "noopener noreferrer nofollow" } }),
+      // Externe Bilder über den sicheren serverseitigen Proxy laden (schützt IP,
+      // sendet keine Cookies/Referer), lazy laden, kein Referrer.
+      img: (tag, attribs) => {
+        const clean: Record<string, string> = {};
+        for (const [k, v] of Object.entries(attribs)) if (v != null) clean[k] = String(v);
+        if (!withImages) { delete clean.src; return { tagName: "img", attribs: clean } as any; }
+        const src = clean.src || "";
+        if (/^https?:\/\//i.test(src)) clean.src = `/api/mail/img?u=${encodeURIComponent(src)}`;
+        clean.loading = "lazy"; clean.decoding = "async"; clean.referrerpolicy = "no-referrer";
+        return { tagName: "img", attribs: clean } as any;
+      }
     }
   });
 }
