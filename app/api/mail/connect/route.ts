@@ -90,9 +90,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `Speichern fehlgeschlagen: ${error?.message || "unbekannt"}` }, { status: 500 });
   }
 
+  // Erst-Sync zeitlich begrenzen: Das Konto ist bereits gespeichert. Läuft der
+  // Sync in die Länge (langsamer Server, viele Mails), brechen wir kontrolliert
+  // ab und liefern trotzdem sauberes JSON zurück – der reguläre Sync (Fokus/
+  // Intervall/Cron) holt den Rest nach. So kein 504/Nicht-JSON-Fehler.
   let synced = 0;
   try {
-    synced = (await syncInbox(account as MailAccount)).processed;
+    const res = await Promise.race([
+      syncInbox(account as MailAccount),
+      new Promise<{ processed: number }>((_, rej) => setTimeout(() => rej(new Error("sync_timeout")), 18000))
+    ]);
+    synced = (res as { processed: number }).processed;
   } catch (e) {
     await admin.from("mail_accounts").update({ last_error: (e as Error).message }).eq("id", (account as any).id);
   }

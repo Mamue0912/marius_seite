@@ -1224,8 +1224,17 @@ function ConnectForm({ accounts, onClose }: { accounts: Account[]; onClose: () =
       const r = await fetch("/api/mail/connect", {
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload())
       });
-      const j = await r.json();
-      if (!r.ok) { setErr(j.error || "Verbindung fehlgeschlagen."); setBusy(false); return; }
+      // Antwort robust lesen: Bei Timeout/Serverfehler kommt evtl. eine HTML-
+      // Fehlerseite statt JSON – die darf nicht als „Unexpected token" abstürzen.
+      const text = await r.text();
+      let j: any = {};
+      try { j = text ? JSON.parse(text) : {}; } catch { j = {}; }
+      if (!r.ok) {
+        setErr(j.error || (r.status === 504
+          ? "Zeitüberschreitung beim Verbinden. Das Postfach wurde eventuell schon gespeichert – bitte die Seite neu laden und prüfen."
+          : `Verbindung fehlgeschlagen (${r.status}).`));
+        setBusy(false); return;
+      }
       window.location.reload();
     } catch (e: any) {
       setErr(e.message || "Netzwerkfehler.");
