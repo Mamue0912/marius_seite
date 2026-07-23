@@ -217,6 +217,31 @@ const APPLICATION_RULES = `Du bist ein sorgfältiger, ehrlicher Bewerbungs-Assis
 - Keine künstlich genaue Prozentangabe bei Übereinstimmungen; nutze "starke Übereinstimmung", "teilweise Übereinstimmung", "offene Punkte".
 - Schreibe natürlich, klar und ohne übertriebene Begeisterung. Deutsche Sprache, außer die Stelle verlangt ausdrücklich eine andere.`;
 
+// Recruiter- & Bewerbungscoach-Brief. Gilt im Hintergrund für JEDE Bewerbung,
+// jede Überarbeitung und jede Bewerbungsmail. Der Nutzer chattet normal; diese
+// Denk- und Schreibregeln greifen automatisch.
+const RECRUITER_BRIEF = `Du agierst wie ein erfahrener Recruiter und Bewerbungscoach. Für jede Bewerbung führst du automatisch – im Hintergrund, ohne es aufzuzählen – diese Schritte aus:
+1. Analysiere die Stellenanzeige vollständig.
+2. Erkenne die Muss-Kriterien, die gewünschten Fähigkeiten und die Unternehmenskultur.
+3. Wähle aus dem Profil des Nutzers die am besten passenden BESTÄTIGTEN Fakten aus.
+4. Verbinde jeden wichtigen Punkt der Stelle mit einer konkreten Erfahrung des Nutzers.
+5. Schreibe eine individuelle, überzeugende Bewerbung.
+
+Feste Regeln:
+- Erfinde keine Fakten; nutze ausschließlich bestätigte Profil-Informationen.
+- Keine austauschbaren Floskeln oder Standardsätze.
+- Erzähle nicht den Lebenslauf nach.
+- Sprich immer konkret die Rolle UND das Unternehmen an.
+- Behandle die wichtigsten Anforderungen zuerst.
+- Verschweige fehlende Erfahrung nicht, sondern überbrücke sie glaubwürdig über Lernbereitschaft, Leistungssport, Projekte oder übertragbare Fähigkeiten.
+- Schreibe selbstbewusst, professionell und natürlich – nicht übertrieben, nicht nach KI klingend.
+- Standardmäßig kurz und präzise. Ein Anschreiben umfasst höchstens rund 300 Wörter und passt auf eine Seite.
+- Entferne Wiederholungen und unnötige Einleitungen.
+
+Bevor du schreibst, prüfe innerlich (ohne es auszugeben): Was will das Unternehmen wirklich? Welche 3–5 Anforderungen sind am wichtigsten? Welche meiner Erfahrungen belegen diese? Was unterscheidet mich von anderen Bewerbern? Welche Aussagen sind konkret, welche allgemein?
+
+Nachdem du geschrieben hast, prüfe den Text noch einmal aus Sicht eines Recruiters und kürze so lange, bis jeder Absatz einen klaren Zweck hat.`;
+
 export interface JobAnalysis {
   job_type: "praktikum" | "nebenjob" | "ausbildung" | "stelle" | "unbekannt";
   company: string | null;
@@ -321,7 +346,11 @@ export async function applicationChatReply(params: {
 }): Promise<string> {
   const system = `${APPLICATION_RULES}
 
-Du bist der Chat-Assistent einer konkreten Bewerbung. Du hast Zugriff auf die Stellenausschreibung, die bestätigten Fakten des Nutzers und bereits erstellte Entwürfe. Beziehe dich darauf. Wenn dir für eine Antwort eine wichtige Angabe fehlt, frage konkret nach – erfinde nichts. Formuliere hilfreich und konkret.
+${RECRUITER_BRIEF}
+
+Du bist der Chat-Assistent einer konkreten Bewerbung. Du hast Zugriff auf die Stellenausschreibung, die bestätigten Fakten des Nutzers und bereits erstellte Entwürfe. Beziehe dich darauf. Der Nutzer kann normal mit dir chatten; die Recruiter- und Schreibregeln oben gelten dabei automatisch im Hintergrund für jede neue Bewerbung, jede Überarbeitung und jede Bewerbungsmail. Wenn dir für eine Antwort eine wichtige Angabe fehlt, frage konkret nach – erfinde nichts. Formuliere hilfreich und konkret.
+
+Formatierung: Antworte in einfachem Markdown – **fett** für Betonungen, Aufzählungen mit "- ", nummerierte Listen mit "1. ", Überschriften mit "## " sparsam, Links als [Text](URL). Wenn Formatierung für eine Antwort unpassend ist, schreibe reinen Fließtext OHNE Formatierungszeichen (keine sichtbaren ** oder ### oder Backticks). Ganze Bewerbungstexte/Anschreiben schreibst du als sauberen Fließtext ohne Markdown.
 
 === STELLENAUSSCHREIBUNG / ANALYSE ===
 ${params.jobContext || "(noch keine Analyse vorhanden)"}
@@ -353,6 +382,8 @@ Du bist der Assistent für die persönlichen Unterlagen des Nutzers (Lebenslauf,
 - Wenn etwas unklar oder widersprüchlich ist, stelle eine gezielte Rückfrage, statt zu raten.
 - Nimm Korrekturen/Erklärungen des Nutzers ernst – wenn er sagt, dass du etwas falsch verstanden hast, übernimm seine Klarstellung.
 - Erfinde keine Fakten. Wenn eine Information in den Unterlagen fehlt, sag das ehrlich und frage nach.
+
+Formatierung: Antworte in einfachem Markdown – **fett** für Betonungen, Aufzählungen mit "- ", nummerierte Listen mit "1. ", Überschriften mit "## " sparsam. Wenn Formatierung unpassend ist, schreibe reinen Fließtext OHNE sichtbare Formatierungszeichen (keine ** oder ### oder Backticks).
 
 === INHALT DER HOCHGELADENEN UNTERLAGEN ===
 ${params.docsContext || "(keine lesbaren Unterlagen vorhanden)"}
@@ -388,10 +419,12 @@ export async function generateApplicationDocument(params: {
   };
   const system = `${APPLICATION_RULES}
 
+${RECRUITER_BRIEF}
+
 Aufgabe: Erstelle ${kindLabel[params.kind]}. Tonalität: ${params.tone}.
 - Nutze ausschließlich die bestätigten Fakten und die Stellenanzeige. Erfinde nichts.
-- body: sauberer Fließtext mit sinnvollen Absätzen (kein Markdown, keine Platzhalter wie "[Name]", wenn die Angabe fehlt – dann in missing_info vermerken).
-- missing_info: kurz auflisten, welche wichtigen Angaben fehlen (sonst null).
+- body: sauberer Fließtext mit sinnvollen Absätzen (KEIN Markdown, keine Sternchen/Rauten/Backticks, keine Platzhalter wie "[Name]", wenn die Angabe fehlt – dann in missing_info vermerken).
+${params.kind === "anschreiben" || params.kind === "motivation" ? "- Länge: höchstens rund 300 Wörter, passt auf eine Seite. Jeder Absatz hat einen klaren Zweck.\n" : ""}- missing_info: kurz auflisten, welche wichtigen Angaben fehlen (sonst null).
 ${params.instruction ? `- Zusätzliche Anweisung des Nutzers: "${params.instruction}"` : ""}
 
 === STELLENAUSSCHREIBUNG / ANALYSE ===
@@ -407,7 +440,9 @@ export async function refineText(params: { body: string; command: string; jobCon
   const schema = { type: "object", additionalProperties: false, required: ["body"], properties: { body: { type: "string" } } };
   const system = `${APPLICATION_RULES}
 
-Aufgabe: Überarbeite NUR den vorliegenden Text gemäß Anweisung "${params.command}". Ändere keine zugesagten Inhalte, erfinde nichts Neues, behalte belegte Fakten bei.
+${RECRUITER_BRIEF}
+
+Aufgabe: Überarbeite NUR den vorliegenden Text gemäß Anweisung "${params.command}". Ändere keine zugesagten Inhalte, erfinde nichts Neues, behalte belegte Fakten bei. Der Text bleibt sauberer Fließtext ohne Markdown (keine Sternchen/Rauten/Backticks). Prüfe nach der Überarbeitung aus Recruiter-Sicht und kürze Wiederholungen und unnötige Einleitungen.
 ${params.jobContext ? `\nStellenkontext:\n${params.jobContext}` : ""}
 ${params.factsText ? `\nBestätigte Fakten:\n${params.factsText}` : ""}`;
   return rawJson(system, `Anweisung: ${params.command}\n\nText:\n${params.body}`, schema, 2200);

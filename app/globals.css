@@ -797,6 +797,20 @@ textarea { resize: vertical; line-height: 1.55; }
 .ac-msg-b { max-width: 82%; padding: 10px 13px; border-radius: 14px; font-size: 13.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
 .ac-msg.user .ac-msg-b { background: linear-gradient(180deg, var(--accent-2), var(--accent)); color: #fff; border-bottom-right-radius: 5px; box-shadow: 0 2px 10px var(--accent-soft); }
 .ac-msg.assistant .ac-msg-b { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); border-bottom-left-radius: 5px; }
+/* Sicher gerendertes Markdown in KI-Chatnachrichten */
+.ac-msg-b .md { white-space: normal; }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md-p { margin: 0 0 8px; }
+.md-h1 { font-size: 1.25em; font-weight: 700; margin: 12px 0 6px; }
+.md-h2 { font-size: 1.15em; font-weight: 700; margin: 11px 0 6px; }
+.md-h3 { font-size: 1.05em; font-weight: 600; margin: 10px 0 5px; }
+.md-h4 { font-size: 1em; font-weight: 600; margin: 9px 0 5px; }
+.md-ul, .md-ol { margin: 4px 0 8px; padding-left: 20px; }
+.md-ul li, .md-ol li { margin: 2px 0; }
+.md-a { color: var(--accent); text-decoration: underline; word-break: break-word; }
+.md-code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.9em; background: var(--sunken); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; }
+.md strong { font-weight: 700; }
 .ac-chat-input { display: flex; gap: 8px; padding: 12px 0; border-top: 1px solid var(--line-2); position: sticky; bottom: 0; background: linear-gradient(180deg, transparent, var(--bg-1) 30%); }
 .ac-chat-ta { flex: 1; min-height: 44px; max-height: 140px; resize: none; padding: 11px 13px; border-radius: var(--r); border: 1px solid var(--line-strong); background: var(--sunken); color: var(--ink); font-family: inherit; font-size: 13.5px; }
 .ac-chat-ta:focus { outline: none; border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-soft); }

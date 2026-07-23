@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState, useCallback } from "react";
+import Markdown from "@/components/Markdown";
 
 // ============================ Konstanten ============================
 const STATUS: { key: string; label: string; tone: string }[] = [
@@ -485,7 +486,7 @@ function DocumentsChat({ onDiag }: any) {
       <div className="ac-hint" style={{ marginTop: 0, marginBottom: 10 }}>Frag zu deinen Dokumenten, korrigiere Missverständnisse oder beantworte Rückfragen der KI. Die KI nutzt nur deine hochgeladenen Unterlagen.</div>
       <div className="ac-docchat-scroll">
         {!msgs.length && <div className="ac-suggests">{suggestions.map((s) => <button key={s} className="ac-suggest" onClick={() => send(s)}>{s}</button>)}</div>}
-        {msgs.map((m) => <div key={m.id} className={"ac-msg " + m.role}><div className="ac-msg-b">{m.content}</div></div>)}
+        {msgs.map((m) => <div key={m.id} className={"ac-msg " + m.role}><div className="ac-msg-b">{m.role === "assistant" ? <Markdown text={m.content} /> : m.content}</div></div>)}
         {busy && <div className="ac-msg assistant"><div className="ac-msg-b"><span className="spin" /> denkt nach…{ctrlRef.current && <button className="ac-diaglink" onClick={() => ctrlRef.current?.abort()}>Abbrechen</button>}</div></div>}
         <div ref={endRef} />
       </div>
@@ -768,7 +769,7 @@ function ChatPanel({ app, messages, onReload, onDiag }: any) {
             <div className="ac-suggests">{suggestions.map((s) => <button key={s} className="ac-suggest" onClick={() => send(s)}>{s}</button>)}</div>
           </div>
         )}
-        {msgs.map((m) => <div key={m.id} className={"ac-msg " + m.role}><div className="ac-msg-b">{m.content}</div></div>)}
+        {msgs.map((m) => <div key={m.id} className={"ac-msg " + m.role}><div className="ac-msg-b">{m.role === "assistant" ? <Markdown text={m.content} /> : m.content}</div></div>)}
         {busy && <div className="ac-msg assistant"><div className="ac-msg-b"><span className="spin" /> denkt nach…{ctrlRef.current && <button className="ac-diaglink" onClick={() => ctrlRef.current?.abort()}>Abbrechen</button>}</div></div>}
         <div ref={endRef} />
       </div>
