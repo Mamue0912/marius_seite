@@ -18,6 +18,29 @@ function ymd(d: Date): string {
 function evDayKey(e: Ev): string {
   return e.allDay ? e.start.slice(0, 10) : ymd(new Date(e.start));
 }
+// Alle Tage, die ein Termin abdeckt (für mehrtägige Ereignisse). Bei
+// ganztägigen Terminen ist Googles Enddatum exklusiv → letzter Tag = end − 1.
+function dayKeysOf(e: Ev): string[] {
+  const startKey = evDayKey(e);
+  if (!e.end) return [startKey];
+  let start: Date, end: Date;
+  if (e.allDay) {
+    start = new Date(e.start.slice(0, 10) + "T00:00:00");
+    end = new Date(e.end.slice(0, 10) + "T00:00:00");
+    end.setDate(end.getDate() - 1); // exklusives Ende → letzter belegter Tag
+  } else {
+    start = new Date(e.start); start.setHours(0, 0, 0, 0);
+    const rawEnd = new Date(e.end);
+    // Endet exakt um Mitternacht → dieser Tag zählt nicht mehr mit.
+    if (rawEnd.getHours() === 0 && rawEnd.getMinutes() === 0 && rawEnd.getTime() > start.getTime()) rawEnd.setMinutes(-1);
+    end = new Date(rawEnd); end.setHours(0, 0, 0, 0);
+  }
+  const keys: string[] = [];
+  const cur = new Date(start);
+  let guard = 0;
+  while (cur <= end && guard < 400) { keys.push(ymd(cur)); cur.setDate(cur.getDate() + 1); guard++; }
+  return keys.length ? keys : [startKey];
+}
 function timeLabel(e: Ev): string {
   if (e.allDay) return "ganztägig";
   return new Date(e.start).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
@@ -84,7 +107,9 @@ export default function CalendarView({ initialEmail }: { initialEmail?: string |
 
   const byDay = useMemo(() => {
     const m: Record<string, Ev[]> = {};
-    for (const e of events) { (m[evDayKey(e)] ||= []).push(e); }
+    for (const e of events) for (const k of dayKeysOf(e)) { (m[k] ||= []).push(e); }
+    // Innerhalb eines Tages: ganztägige/mehrtägige zuerst, dann nach Uhrzeit.
+    for (const k of Object.keys(m)) m[k].sort((a, b) => (a.allDay === b.allDay ? a.start.localeCompare(b.start) : a.allDay ? -1 : 1));
     return m;
   }, [events]);
 
@@ -255,9 +280,13 @@ function YearView({ year, byDay, todayKey, onPick }: any) {
 
 function AgendaView({ events, todayKey, loading }: any) {
   const groups = useMemo(() => {
-    const upcoming = [...events].filter((e: Ev) => evDayKey(e) >= todayKey).sort((a: Ev, b: Ev) => a.start.localeCompare(b.start));
+    // Termine ab heute; laufende mehrtägige Ereignisse unter dem ersten Tag ≥ heute.
+    const withDay = events
+      .map((e: Ev) => ({ e, day: dayKeysOf(e).find((k) => k >= todayKey) }))
+      .filter((x: { e: Ev; day?: string }) => !!x.day) as { e: Ev; day: string }[];
+    withDay.sort((a, b) => a.day.localeCompare(b.day) || a.e.start.localeCompare(b.e.start));
     const g: { day: string; items: Ev[] }[] = [];
-    for (const e of upcoming) { const k = evDayKey(e); const f = g.find((x) => x.day === k); if (f) f.items.push(e); else g.push({ day: k, items: [e] }); }
+    for (const { e, day } of withDay) { const f = g.find((x) => x.day === day); if (f) f.items.push(e); else g.push({ day, items: [e] }); }
     return g;
   }, [events, todayKey]);
   if (loading) return <div className="cal-empty">lädt…</div>;
