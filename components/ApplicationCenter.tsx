@@ -392,6 +392,68 @@ function GeneratedDocsAll({ apps, onOpen }: any) {
   );
 }
 
+const FACT_CAT_LABEL: Record<string, string> = {
+  schule: "Schule", abschluss: "Abschluss", note: "Noten", praktikum: "Praktika", erfahrung: "Erfahrungen",
+  sprache: "Sprachkenntnisse", projekt: "Projekte", zertifikat: "Zertifikate", sport: "Sport", faehigkeit: "Fähigkeiten", sonstiges: "Sonstiges"
+};
+
+// Zentrale, bearbeitbare Übersicht aller Fakten, die die App über den Nutzer kennt.
+function MyFacts() {
+  const [facts, setFacts] = useState<any[] | null>(null);
+  const [addCat, setAddCat] = useState("faehigkeit");
+  const [addVal, setAddVal] = useState("");
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(async () => { const r = await aj("/api/documents/facts", { timeoutMs: 20000 }); if (r.ok) setFacts(r.data.facts || []); }, []);
+  useEffect(() => { load(); }, [load]);
+
+  async function patch(id: string, patch: any) {
+    setFacts((fs) => (fs || []).map((f) => f.id === id ? { ...f, ...patch } : f));
+    await aj("/api/documents/facts", { method: "PATCH", json: { id, ...patch } });
+  }
+  async function del(id: string) { setFacts((fs) => (fs || []).filter((f) => f.id !== id)); await aj("/api/documents/facts", { method: "DELETE", json: { id } }); }
+  async function add() {
+    if (!addVal.trim()) return; setBusy(true);
+    const r = await aj("/api/documents/facts", { method: "POST", json: { category: addCat, value: addVal } });
+    setBusy(false);
+    if (r.ok && r.data.fact) { setFacts((fs) => [...(fs || []), r.data.fact]); setAddVal(""); }
+  }
+
+  const cats = Object.keys(FACT_CAT_LABEL);
+  const byCat: Record<string, any[]> = {};
+  for (const f of facts || []) (byCat[f.category] ||= []).push(f);
+
+  return (
+    <div className="ac-card ac-myfacts">
+      <div className="ac-panel-h" style={{ position: "static" }}>Was das Cockpit über dich weiß</div>
+      <div className="ac-hint" style={{ marginTop: 0, marginBottom: 10 }}>Alle erkannten und selbst ergänzten Angaben. Du kannst sie bearbeiten, bestätigen, ergänzen oder löschen. <b>Nur bestätigte</b> Fakten werden in Bewerbungen verwendet.</div>
+      {facts === null ? <div className="ac-empty"><span className="spin" /></div> : (
+        <>
+          {!facts.length && <div className="ac-mod-empty">Noch keine Fakten. Lade Unterlagen hoch und nutze „Fakten erkennen" – oder ergänze unten selbst.</div>}
+          {cats.filter((c) => byCat[c]?.length).map((c) => (
+            <div key={c} className="ac-fact-group">
+              <div className="ac-fact-grouphead">{FACT_CAT_LABEL[c]}</div>
+              {byCat[c].map((f) => (
+                <div key={f.id} className={"ac-fact " + (f.status === "bestaetigt" ? "ok" : f.status === "abgelehnt" ? "" : "offen")}>
+                  <input className="ac-fact-input" defaultValue={f.value} onBlur={(e) => { if (e.target.value.trim() && e.target.value !== f.value) patch(f.id, { value: e.target.value }); }} />
+                  {f.status !== "bestaetigt"
+                    ? <button className="ac-fact-badge todo" onClick={() => patch(f.id, { status: "bestaetigt" })} title="Bestätigen">✓ bestätigen</button>
+                    : <span className="ac-fact-badge done">bestätigt</span>}
+                  <button className="ac-fact-del" onClick={() => del(f.id)} title="Löschen">✕</button>
+                </div>
+              ))}
+            </div>
+          ))}
+          <div className="ac-fact-add" style={{ marginTop: 12 }}>
+            <select className="ac-select sm" value={addCat} onChange={(e) => setAddCat(e.target.value)}>{cats.map((c) => <option key={c} value={c}>{FACT_CAT_LABEL[c]}</option>)}</select>
+            <input className="ac-input sm" placeholder="Eigene Angabe ergänzen…" value={addVal} onChange={(e) => setAddVal(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") add(); }} />
+            <button className="ac-btn sm primary" disabled={busy || !addVal.trim()} onClick={add}>Hinzufügen</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // Chat über die eigenen Unterlagen (Erklärungen geben, Rückfragen beantworten).
 function DocumentsChat({ onDiag }: any) {
   const [msgs, setMsgs] = useState<any[]>([]);
@@ -467,6 +529,7 @@ function Documents({ docs, reload, onDiag }: any) {
       </div>
       <div className="ac-hint">Privat gespeichert (kein öffentlicher Link). Unterstützt PDF, DOCX, TXT und Bilder. Die KI erkennt Fakten – nur von dir <b>bestätigte</b> Fakten werden in Bewerbungen verwendet.</div>
       {chatOpen && <DocumentsChat onDiag={onDiag} />}
+      <MyFacts />
       {error && <div className="ac-note bad">{error}</div>}
       {!docs.length ? <div className="ac-card ac-empty2">Noch keine Unterlagen. Lade Lebenslauf, Zeugnisse, Zertifikate usw. hoch.</div> : (
         <div className="ac-doc-grid">

@@ -1050,3 +1050,17 @@ textarea { resize: vertical; line-height: 1.55; }
 /* Ordneranzeige-Bearbeitung (Einstellungen) */
 .folder-edit .fe-name { flex: 1; min-width: 0; }
 .folder-edit .fe-type { width: 130px; }
+
+/* Meine Fakten (zentrale, bearbeitbare Übersicht) */
+.ac-myfacts { margin-bottom: 16px; }
+.ac-fact-group { margin-bottom: 12px; }
+.ac-fact-grouphead { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); font-weight: 660; margin: 8px 0 5px; }
+.ac-myfacts .ac-fact { display: flex; align-items: center; gap: 8px; padding: 5px 8px; }
+.ac-fact-input { flex: 1; min-width: 0; padding: 7px 10px; border-radius: var(--r-xs); border: 1px solid var(--line-strong); background: var(--sunken); color: var(--ink); font: inherit; font-size: 13px; }
+.ac-fact-input:focus { outline: none; border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-soft); }
+.ac-fact-badge { border: 0; border-radius: var(--r-pill); font-size: 11px; font-weight: 620; padding: 3px 10px; cursor: default; white-space: nowrap; }
+.ac-fact-badge.done { color: var(--ok); background: var(--low-soft); }
+.ac-fact-badge.todo { color: var(--high); background: var(--high-soft); cursor: pointer; }
+.ac-fact-badge.todo:hover { filter: brightness(1.1); }
+.ac-fact-del { width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--muted); cursor: pointer; flex: none; }
+.ac-fact-del:hover { color: var(--urgent); border-color: rgba(255,105,97,.35); background: var(--urgent-soft); }
