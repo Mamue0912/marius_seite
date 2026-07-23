@@ -87,7 +87,9 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; min-height: 100%; }
-html { scrollbar-width: thin; scrollbar-color: var(--scroll) transparent; }
+/* Firefox: Scrollbalken standardmäßig unsichtbar, beim Scrollen kurz sichtbar. */
+html { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+html.scrolling, html.scrolling * { scrollbar-color: var(--scroll) transparent; }
 body {
   background: var(--bg-grad) fixed, var(--bg-0);
   color: var(--ink);
@@ -101,16 +103,21 @@ body {
 a { color: var(--accent-ink); text-decoration: none; }
 h1, h2, h3 { font-family: var(--sans); }
 
-/* ---- Scrollbars (dezent, erst bei Interaktion deutlicher) ---- */
+/* ---- Scrollbars (macOS-artig: nur beim Scrollen sichtbar, sonst ausgeblendet) ---- */
 ::-webkit-scrollbar { width: 11px; height: 11px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: var(--scroll); border-radius: var(--r-pill);
+  background: transparent; border-radius: var(--r-pill);
   border: 3px solid transparent; background-clip: padding-box;
-  transition: background-color var(--t);
+  transition: background-color .35s var(--ease);
 }
-::-webkit-scrollbar-thumb:hover { background: var(--scroll-h); background-clip: padding-box; }
 ::-webkit-scrollbar-corner { background: transparent; }
+/* Beim aktiven Scrollen (JS setzt .scrolling) und beim Hovern eines
+   Scrollbereichs erscheinen die Balken, danach blenden sie weich wieder aus. */
+html.scrolling ::-webkit-scrollbar-thumb,
+:hover::-webkit-scrollbar-thumb { background: var(--scroll); background-clip: padding-box; }
+html.scrolling ::-webkit-scrollbar-thumb:hover,
+:hover::-webkit-scrollbar-thumb:hover { background: var(--scroll-h); background-clip: padding-box; }
 
 /* =========================== Layout =========================== */
 .wrap { max-width: 880px; margin: 0 auto; padding: var(--s-5) var(--s-4) 96px; }
