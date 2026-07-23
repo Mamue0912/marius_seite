@@ -55,6 +55,19 @@ export default function Settings({ accounts, initialRules, initialFolders = [], 
     return folders.filter((f) => f.account_id === accId)
       .sort((a, b) => (a.sort_order ?? 999) - (b.sort_order ?? 999));
   }
+  const [newName, setNewName] = useState<Record<string, string>>({});
+  const [creating, setCreating] = useState<string | null>(null);
+  async function createFolder(accId: string, name: string) {
+    if (!name.trim()) return;
+    setCreating(accId);
+    const r = await fetch("/api/mail/create-folder", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ account: accId, name: name.trim() }) });
+    const j = await r.json();
+    setCreating(null);
+    if (r.ok) {
+      setFolders((fs) => [...fs.filter((x) => !(x.account_id === accId && x.path === j.path)), { account_id: accId, path: j.path, folder_type: j.folder_type, unread: 0, total: 0 }]);
+      setNewName((n) => ({ ...n, [accId]: "" }));
+    } else alert(j.message || "Ordner konnte nicht erstellt werden.");
+  }
   async function move(accId: string, f: any, dir: number) {
     const list = foldersOf(accId);
     const i = list.findIndex((x) => x.path === f.path);
@@ -155,7 +168,7 @@ export default function Settings({ accounts, initialRules, initialFolders = [], 
         <div className="bucket">
           <div className="bh"><span className="bt">Ordneranzeige</span></div>
           <div className="note" style={{ marginTop: 0, marginBottom: 12 }}>
-            Nur die <b>Anzeige im Cockpit</b> – umbenennen, aus-/einblenden, Reihenfolge und Typ ändern. Der tatsächliche IMAP-Ordner auf dem Server bleibt unverändert.
+            Umbenennen, aus-/einblenden, Reihenfolge und Typ ändern <b>nur die Anzeige</b> – der Server-Ordner bleibt unverändert. <b>„Ordner erstellen"</b> hingegen legt einen <b>echten</b> Ordner auf dem Mailserver an (z. B. „Archiv" für WEB.DE).
           </div>
           {accounts.map((a) => {
             const fl = foldersOf(a.id);
@@ -175,6 +188,13 @@ export default function Settings({ accounts, initialRules, initialFolders = [], 
                     <button className="btn small" onClick={() => patchFolder(f, { hidden: !f.hidden })}>{f.hidden ? "Einblenden" : "Ausblenden"}</button>
                   </div>
                 ))}
+                <div className="mail" style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+                  <input className="fe-name" placeholder="Neuer Ordnername (z. B. Archiv)" value={newName[a.id] || ""} onChange={(e) => setNewName((n) => ({ ...n, [a.id]: e.target.value }))} />
+                  <button className="btn small btn-primary" disabled={creating === a.id || !(newName[a.id] || "").trim()} onClick={() => createFolder(a.id, newName[a.id] || "")}>{creating === a.id ? "Erstelle…" : "Ordner erstellen"}</button>
+                  {!fl.some((f) => (f.type_override || f.folder_type) === "archive") && (
+                    <button className="btn small" disabled={creating === a.id} onClick={() => createFolder(a.id, "Archiv")} title="Echten Archiv-Ordner auf dem Server anlegen">＋ Archiv anlegen</button>
+                  )}
+                </div>
               </div>
             );
           })}
