@@ -55,7 +55,10 @@ export async function GET(req: NextRequest) {
             received_at: m.internalDate ? new Date(m.internalDate).toISOString() : env.date ? new Date(env.date).toISOString() : null,
             is_read: flags.has("\\Seen"),
             semantic_category: semanticCategoryOf(cls),
-            labels: cls.labels, relevance: cls.relevance, needs_reply: cls.needs_reply, summary: cls.summary
+            labels: cls.labels, relevance: cls.relevance, needs_reply: cls.needs_reply,
+            action_status: cls.action_status, message_type: cls.message_type, summary: cls.summary,
+            // Als eingeordnet markieren, damit die Liste nicht „Wird eingeordnet…" zeigt.
+            classified_at: new Date().toISOString()
           });
         }
       }

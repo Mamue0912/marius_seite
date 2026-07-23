@@ -335,14 +335,15 @@ export default function Cockpit({
   function selectView(view: string) {
     setSel({ account: "all", ftype: "inbox", view }); setFolderItems(null); setReading(null); setMobilePane("list");
   }
-  async function openFolderItem(it: any) {
+  async function openFolderItem(it: any, images?: boolean) {
+    if (images === undefined) images = autoImages(it);
     const synthetic = { id: `imap:${it.account_id}:${it.uid}`, ...it, folder_type: sel.ftype, folder_path: it.path, mail_account_id: it.account_id, readonly: true };
     setReading({ msg: synthetic, loading: true });
     setMobilePane("read");
     // Als gelesen markieren (der Server setzt \Seen beim Öffnen) – auch in der Liste.
     setFolderItems((prev) => prev ? prev.map((x) => x.uid === it.uid && x.path === it.path ? { ...x, is_read: true } : x) : prev);
     try {
-      const r = await fetch(`/api/mail/message?uid=${it.uid}&account=${it.account_id}&path=${encodeURIComponent(it.path)}`);
+      const r = await fetch(`/api/mail/message?uid=${it.uid}&account=${it.account_id}&path=${encodeURIComponent(it.path)}${images ? "&images=1" : ""}`);
       const j = await r.json();
       setReading((s: any) => s && s.msg.id === synthetic.id ? { ...s, loading: false, ...j } : s);
     } catch { setReading((s: any) => s ? { ...s, loading: false, error: true } : s); }
@@ -743,7 +744,7 @@ export default function Cockpit({
             {reading ? (
               <Reader reading={reading} account={accById[reading.msg.mail_account_id]} onClose={() => { setReading(null); setMobilePane("list"); }}
                 onReply={(opts: any) => { openDraft(reading.msg, opts); }} suggests={suggests[reading.msg.id]} suggestsLoading={!!suggestLoading[reading.msg.id]} ensure={ensureSuggestions}
-                onCategorize={categorize} onCorrect={categorize} onLoadImages={() => openReader(reading.msg, true)} onAction={mailAction} onSetReply={setReplyFlag} onAnswered={markAnswered} onAddLabel={addLabel} rules={rules} onRule={toggleRule} onDiag={() => setDiag(true)} />
+                onCategorize={categorize} onCorrect={categorize} onLoadImages={() => reading.msg.readonly ? openFolderItem(reading.msg, true) : openReader(reading.msg, true)} onAction={mailAction} onSetReply={setReplyFlag} onAnswered={markAnswered} onAddLabel={addLabel} rules={rules} onRule={toggleRule} onDiag={() => setDiag(true)} />
             ) : (
               <div className="mread-empty"><div className="ic">✉</div><div>Wähle eine Nachricht zum Lesen.</div></div>
             )}
