@@ -579,8 +579,20 @@ export default function Cockpit({
     const patch: any = answered
       ? { reply_sent_at: new Date().toISOString(), draft_status: "gesendet", needs_reply: false, user_needs_reply: false, action_status: "no_action" }
       : { reply_sent_at: null, draft_status: null, needs_reply: true, user_needs_reply: true, action_status: "reply_required" };
+    // In der „Antwort nötig"-Ansicht verschwindet die Mail nach dem Beantworten
+    // aus der Liste – dann direkt zur nächsten offenen Mail springen.
+    let nextMsg: Msg | null = null;
+    if (answered && sel.view === "reply") {
+      const all = msgs.filter(visible).sort((a, b) => new Date(b.received_at || 0).getTime() - new Date(a.received_at || 0).getTime());
+      const idx = all.findIndex((x) => x.id === m.id);
+      if (idx >= 0) nextMsg = all[idx + 1] || all[idx - 1] || null;
+    }
     setMsgs((prev) => prev.map((x) => x.id === m.id ? { ...x, ...patch } : x));
-    setReading((s: any) => s && s.msg.id === m.id ? { ...s, msg: { ...s.msg, ...patch } } : s);
+    if (answered && sel.view === "reply") {
+      if (nextMsg) openReader(nextMsg); else setReading(null);
+    } else {
+      setReading((s: any) => s && s.msg.id === m.id ? { ...s, msg: { ...s.msg, ...patch } } : s);
+    }
     await fetch("/api/mail/categorize", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messageId: m.id, answered }) });
   }
 
