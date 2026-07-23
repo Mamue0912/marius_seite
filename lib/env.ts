@@ -25,6 +25,14 @@ export const env = {
     }
   },
   enableSend: () => opt("ENABLE_SEND") === "true",
+  // Google-Kalender (nur Lesen). Optional: nur nötig, wenn der Kalender genutzt wird.
+  google: {
+    clientId: () => req("GOOGLE_CLIENT_ID"),
+    clientSecret: () => req("GOOGLE_CLIENT_SECRET"),
+    redirectPath: () => opt("GOOGLE_REDIRECT_PATH", "/api/auth/google/callback"),
+    scopes: () => "openid email profile https://www.googleapis.com/auth/calendar.readonly",
+    configured: () => !!process.env.GOOGLE_CLIENT_ID && !!process.env.GOOGLE_CLIENT_SECRET
+  },
   anthropicKey: () => req("ANTHROPIC_API_KEY"),
   anthropicModel: () => opt("ANTHROPIC_MODEL", "claude-opus-4-8"),
   supabase: {

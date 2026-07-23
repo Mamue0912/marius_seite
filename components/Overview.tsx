@@ -1,5 +1,6 @@
 "use client";
 import { PROVIDERS } from "@/lib/mailProviders";
+import CalendarTile from "@/components/CalendarTile";
 
 function greeting() {
   const h = new Date().getHours();
@@ -87,10 +88,7 @@ export default function Overview({ accounts, summary, newest, newestUnread = [],
           )) : <div className="tile-empty">Keine offenen Fristen erkannt.</div>}
         </a>
 
-        <a className="tile" href="/calendar">
-          <div className="tile-h"><span className="tile-ic">▦</span><span className="tile-t">Kalender</span><span className="tile-go">→</span></div>
-          <div className="tile-empty">Google-Kalender noch nicht in dieser App verbunden. Zum Einrichten öffnen.</div>
-        </a>
+        <CalendarTile />
 
         <a className="tile" href="/tasks">
           <div className="tile-h"><span className="tile-ic">☑</span><span className="tile-t">Aufgaben</span><span className="tile-go">→</span></div>
