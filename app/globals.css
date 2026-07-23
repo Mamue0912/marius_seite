@@ -18,11 +18,11 @@
     radial-gradient(1000px 900px at 60% 116%, rgba(74,222,128,0.035) 0%, rgba(74,222,128,0) 52%),
     linear-gradient(180deg, #0a0a0c 0%, #08080a 100%);
 
-  /* ---- Oberflächen (neutrales Graphit) ---- */
-  --surface: #161619;
-  --surface-2: #1c1c20;
-  --raised: #232327;
-  --sunken: #0d0d0f;
+  /* ---- Oberflächen (neutrales Graphit, klar gestaffelte Elevation) ---- */
+  --surface: #17171b;
+  --surface-2: #1e1e23;
+  --raised: #26262c;
+  --sunken: #101012;
 
   /* ---- Glas-Materialien ---- */
   --mat-thin: rgba(24,24,30,0.55);
@@ -30,23 +30,23 @@
   --mat-thick: rgba(26,26,33,0.82);
   --mat-hi: rgba(255,255,255,0.06);   /* oberer Lichtsaum */
 
-  /* ---- Konturen (hauchfein) ---- */
-  --line: rgba(255,255,255,0.08);
-  --line-2: rgba(255,255,255,0.05);
-  --line-strong: rgba(255,255,255,0.13);
+  /* ---- Konturen (hauchfein – Elevation trägt, nicht Rahmen) ---- */
+  --line: rgba(255,255,255,0.07);
+  --line-2: rgba(255,255,255,0.045);
+  --line-strong: rgba(255,255,255,0.12);
 
-  /* ---- Text ---- */
-  --ink: rgba(255,255,255,0.92);
-  --ink-2: rgba(235,235,245,0.68);
-  --muted: rgba(235,235,245,0.48);
-  --faint: rgba(235,235,245,0.30);
+  /* ---- Text (auf dunkel getunt: klare Hierarchie) ---- */
+  --ink: rgba(255,255,255,0.94);
+  --ink-2: rgba(235,235,245,0.70);
+  --muted: rgba(235,235,245,0.50);
+  --faint: rgba(235,235,245,0.32);
 
-  /* ---- Akzent (leicht entsättigt) ---- */
+  /* ---- Akzent (Apple-inspiriertes Indigo) ---- */
   --accent: #5E5CE6;
-  --accent-2: #7C7AF2;
-  --accent-ink: #B4B2FF;
-  --accent-soft: rgba(94,92,230,0.18);
-  --accent-line: rgba(124,122,242,0.34);
+  --accent-2: #7D7BF4;
+  --accent-ink: #C3C2FF;
+  --accent-soft: rgba(94,92,230,0.16);
+  --accent-line: rgba(124,122,242,0.32);
 
   /* ---- Status (gedämpft) ---- */
   --urgent: #FF6961; --urgent-soft: rgba(255,105,97,0.14);
@@ -59,17 +59,17 @@
   --scroll: rgba(235,235,245,0.14);
   --scroll-h: rgba(235,235,245,0.30);
 
-  /* ---- Schatten (geringe Deckkraft, gestaffelt) ---- */
-  --shadow-sm: 0 1px 2px rgba(0,0,0,0.30);
-  --shadow: 0 4px 16px rgba(0,0,0,0.32), 0 1px 2px rgba(0,0,0,0.30);
-  --shadow-lg: 0 24px 70px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.4);
+  /* ---- Schatten (weich, diffus – Tiefe statt harter Kanten) ---- */
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.34);
+  --shadow: 0 8px 26px -8px rgba(0,0,0,0.46), 0 2px 6px -3px rgba(0,0,0,0.36);
+  --shadow-lg: 0 34px 80px -14px rgba(0,0,0,0.62), 0 8px 24px -8px rgba(0,0,0,0.42);
 
   /* ---- Blur ---- */
   --blur: saturate(180%) blur(26px);
   --blur-sm: saturate(160%) blur(14px);
 
-  /* ---- Radien ---- */
-  --r-xs: 8px; --r-sm: 11px; --r: 14px; --r-lg: 18px; --r-xl: 24px; --r-pill: 999px;
+  /* ---- Radien (weich, modern; --r-md ergänzt) ---- */
+  --r-xs: 8px; --r-sm: 11px; --r-md: 13px; --r: 14px; --r-lg: 18px; --r-xl: 24px; --r-pill: 999px;
 
   /* ---- Abstände ---- */
   --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 22px; --s-6: 32px; --s-7: 48px;
@@ -343,12 +343,14 @@ textarea { resize: vertical; line-height: 1.55; }
 .side-toggle:hover { background: var(--surface-2); color: var(--ink); }
 .side-nav { display: flex; flex-direction: column; gap: 2px; }
 .nav-item {
+  position: relative;
   display: flex; align-items: center; gap: 12px; padding: 9px 11px; border-radius: var(--r-sm);
   color: var(--ink-2); font-size: 13.5px; font-weight: 520; white-space: nowrap;
   transition: background-color var(--t-fast), color var(--t-fast);
 }
 .nav-item:hover { background: var(--surface-2); color: var(--ink); }
 .nav-item.active { background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
+.nav-item.active::before { content: ""; position: absolute; left: 3px; top: 50%; transform: translateY(-50%); width: 3px; height: 17px; border-radius: 2px; background: var(--accent); }
 .nav-ic { width: 20px; text-align: center; font-size: 15px; flex: 0 0 auto; opacity: .9; }
 .shell.collapsed .nav-lbl { display: none; }
 .shell.collapsed .side-title { display: none; }
@@ -367,10 +369,11 @@ textarea { resize: vertical; line-height: 1.55; }
 
 /* =========================== Übersicht =========================== */
 .ov { max-width: 1180px; margin: 0 auto; padding: 30px 28px 100px; }
-.ov-hero { margin-bottom: 26px; animation: rise var(--t) var(--ease) both; }
-.ov-hero h1 { margin: 0; font-size: 30px; font-weight: 700; letter-spacing: -.03em; }
-.ov-date { color: var(--muted); font-size: 14px; margin-top: 4px; text-transform: capitalize; }
-.ov-sum { color: var(--ink-2); font-size: 15px; margin-top: 10px; }
+.ov { max-width: 1180px; }
+.ov-hero { margin-bottom: 28px; animation: rise var(--t) var(--ease) both; }
+.ov-hero h1 { margin: 0; font-size: 25px; font-weight: 680; letter-spacing: -.025em; }
+.ov-date { color: var(--muted); font-size: 13.5px; margin-top: 5px; text-transform: capitalize; }
+.ov-sum { color: var(--ink-2); font-size: 14.5px; margin-top: 10px; line-height: 1.55; }
 .ov-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
 .tile {
   position: relative; display: block; color: inherit;
@@ -579,9 +582,10 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--surface-2);
 .mail3 { display: flex; height: calc(100dvh - 55px); overflow: hidden; }
 
 .msidebar { width: 232px; flex: 0 0 232px; overflow-y: auto; padding: 10px 8px; border-right: 1px solid var(--line-2); background: var(--mat-thin); backdrop-filter: var(--blur-sm); -webkit-backdrop-filter: var(--blur-sm); }
-.mfolder { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; border: 0; background: transparent; color: var(--ink-2); font-size: 13px; font-weight: 480; padding: 7px 9px; border-radius: var(--r-xs); cursor: pointer; transition: background-color var(--t-fast), color var(--t-fast); }
+.mfolder { position: relative; display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; border: 0; background: transparent; color: var(--ink-2); font-size: 13px; font-weight: 480; padding: 7px 9px; border-radius: var(--r-xs); cursor: pointer; transition: background-color var(--t-fast), color var(--t-fast); }
 .mfolder:hover { background: var(--surface-2); color: var(--ink); }
 .mfolder.active { background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
+.mfolder.active::before { content: ""; position: absolute; left: 2px; top: 50%; transform: translateY(-50%); width: 3px; height: 15px; border-radius: 2px; background: var(--accent); }
 .mfolder.top { font-weight: 600; color: var(--ink); margin-bottom: 4px; }
 .mf-ic { width: 18px; text-align: center; font-size: 13px; flex: 0 0 auto; opacity: .85; }
 .mf-lbl { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -706,7 +710,7 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--surface-2);
 
 /* ---- Hero (leerer Zustand) ---- */
 .ac-hero { max-width: 620px; margin: 8vh auto 0; text-align: center; animation: acFade var(--t-slow) var(--ease); }
-.ac-hero h1 { font-size: 30px; font-weight: 720; letter-spacing: -.6px; margin: 0 0 12px; }
+.ac-hero h1 { font-size: 25px; font-weight: 700; letter-spacing: -.5px; margin: 0 0 12px; }
 .ac-hero p { color: var(--ink-2); font-size: 15px; line-height: 1.6; margin: 0 0 22px; }
 
 /* ---- Übersicht: gestaffelte Modulgrößen ---- */
@@ -724,7 +728,7 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--surface-2);
 .ac-mod-tall { grid-row: span 2; grid-column: span 2; }
 .ac-mod-primary { grid-column: span 4; background: linear-gradient(135deg, rgba(94,92,230,.16), rgba(48,120,255,.08)), var(--mat-thick); border-color: var(--accent-line); }
 .ac-mod-k { font-size: 11.5px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); font-weight: 640; }
-.ac-mod-num { font-size: 40px; font-weight: 720; letter-spacing: -1px; margin-top: 8px; line-height: 1; }
+.ac-mod-num { font-size: 32px; font-weight: 700; letter-spacing: -.6px; margin-top: 8px; line-height: 1.05; }
 .ac-mod-big { font-size: 20px; font-weight: 640; letter-spacing: -.3px; margin-top: 10px; line-height: 1.35; }
 .ac-mod-title { font-size: 17px; font-weight: 620; margin: 8px 0 10px; }
 .ac-mod-cta { margin-top: 14px; color: var(--accent-ink); font-weight: 600; font-size: 13px; }
@@ -884,9 +888,9 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--surface-2);
 .ac-suggest:hover { transform: translateX(2px); border-color: var(--accent-line); }
 .ac-msg { display: flex; animation: acRise var(--t-fast) var(--ease) both; }
 .ac-msg.user { justify-content: flex-end; }
-.ac-msg-b { max-width: 82%; padding: 10px 13px; border-radius: 14px; font-size: 13.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
-.ac-msg.user .ac-msg-b { background: linear-gradient(180deg, var(--accent-2), var(--accent)); color: #fff; border-bottom-right-radius: 5px; box-shadow: 0 2px 10px var(--accent-soft); }
-.ac-msg.assistant .ac-msg-b { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); border-bottom-left-radius: 5px; }
+.ac-msg-b { max-width: 78%; padding: 11px 14px; border-radius: 17px; font-size: 13.5px; line-height: 1.58; white-space: pre-wrap; word-break: break-word; }
+.ac-msg.user .ac-msg-b { background: linear-gradient(180deg, var(--accent-2), var(--accent)); color: #fff; border-bottom-right-radius: 6px; box-shadow: 0 4px 14px -4px var(--accent-soft); }
+.ac-msg.assistant .ac-msg-b { background: var(--surface); border: 1px solid var(--line-2); color: var(--ink); border-bottom-left-radius: 6px; box-shadow: var(--shadow-sm); }
 /* Sicher gerendertes Markdown in KI-Chatnachrichten */
 .ac-msg-b .md { white-space: normal; }
 .md > :first-child { margin-top: 0; }
