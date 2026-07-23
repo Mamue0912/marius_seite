@@ -2,6 +2,14 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabaseBrowser";
+import { calPrefetchDefault } from "@/lib/calendarStore";
+import { prefetchApplications } from "@/lib/appsStore";
+
+// Daten der Zielseite schon beim Hovern/Antippen im Hintergrund vorladen.
+function prefetchData(href: string) {
+  if (href === "/calendar") calPrefetchDefault();
+  else if (href === "/applications") prefetchApplications();
+}
 
 const NAV = [
   { href: "/", label: "Übersicht", icon: "◉" },
@@ -64,7 +72,7 @@ export default function AppShell({ active, topbar, children }: { active: string;
           {NAV.map((n) => {
             const b = badgeFor(n.href);
             return (
-              <Link key={n.href} href={n.href} prefetch className={"nav-item" + (active === n.href ? " active" : "")} title={b ? `${n.label} · ${b} ungelesen` : n.label}>
+              <Link key={n.href} href={n.href} prefetch onMouseEnter={() => prefetchData(n.href)} onTouchStart={() => prefetchData(n.href)} onFocus={() => prefetchData(n.href)} className={"nav-item" + (active === n.href ? " active" : "")} title={b ? `${n.label} · ${b} ungelesen` : n.label}>
                 <span className="nav-ic">{n.icon}</span>
                 {!collapsed && <span className="nav-lbl">{n.label}</span>}
                 {b > 0 && <span className={"nav-badge" + (collapsed ? " dot" : "")}>{collapsed ? "" : b}</span>}
@@ -83,7 +91,7 @@ export default function AppShell({ active, topbar, children }: { active: string;
         {NAV.filter((n) => !["/settings", "/deadlines"].includes(n.href)).map((n) => {
           const b = badgeFor(n.href);
           return (
-            <Link key={n.href} href={n.href} prefetch className={"bn-item" + (active === n.href ? " active" : "")}>
+            <Link key={n.href} href={n.href} prefetch onTouchStart={() => prefetchData(n.href)} className={"bn-item" + (active === n.href ? " active" : "")}>
               <span className="bn-ic">{n.icon}{b > 0 && <span className="bn-badge">{b > 99 ? "99+" : b}</span>}</span>
               <span className="bn-lbl">{n.label}</span>
             </Link>

@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import Markdown from "@/components/Markdown";
 import OverlayScroll from "@/components/OverlayScroll";
+import { getAppsCache, getDocsCache, fetchApps, fetchDocs } from "@/lib/appsStore";
 
 // ============================ Konstanten ============================
 const STATUS: { key: string; label: string; tone: string }[] = [
@@ -61,21 +62,18 @@ type Account = { id: string; email: string; provider: string };
 export default function ApplicationCenter({ accounts, sendEnabled, initialSection, initialOpenId }: { accounts: Account[]; sendEnabled: boolean; initialSection?: string; initialOpenId?: string | null }) {
   const validSection = ["uebersicht", "neu", "aktiv", "unterlagen", "dokumente"].includes(initialSection || "") ? (initialSection as any) : "uebersicht";
   const [section, setSection] = useState<"uebersicht" | "neu" | "aktiv" | "unterlagen" | "dokumente">(validSection);
-  const [apps, setApps] = useState<any[]>([]);
-  const [docs, setDocs] = useState<any[]>([]);
+  // Aus dem seitenübergreifenden Cache initialisieren → sofortige Anzeige, wenn
+  // beim Hovern über „Bewerbungen" bereits vorgeladen wurde.
+  const [apps, setApps] = useState<any[]>(() => getAppsCache() || []);
+  const [docs, setDocs] = useState<any[]>(() => getDocsCache() || []);
   const [openId, setOpenId] = useState<string | null>(initialOpenId || null);
   const [listFilter, setListFilter] = useState<string>("all");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => getAppsCache() === null || getDocsCache() === null);
   const [diag, setDiag] = useState(false);
 
-  const loadApps = useCallback(async () => {
-    const r = await aj("/api/applications", { timeoutMs: 20000 });
-    if (r.ok) setApps(r.data.applications || []);
-  }, []);
-  const loadDocs = useCallback(async () => {
-    const r = await aj("/api/documents", { timeoutMs: 20000 });
-    if (r.ok) setDocs(r.data.documents || []);
-  }, []);
+  const loadApps = useCallback(async () => { setApps(await fetchApps()); }, []);
+  const loadDocs = useCallback(async () => { setDocs(await fetchDocs()); }, []);
+  // Immer im Hintergrund aktualisieren; blockt aber nicht, wenn schon Cache da ist.
   useEffect(() => { (async () => { await Promise.all([loadApps(), loadDocs()]); setLoading(false); })(); }, [loadApps, loadDocs]);
 
   const NAV: { key: any; label: string; ic: string }[] = [
