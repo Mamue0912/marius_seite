@@ -78,7 +78,7 @@ export async function POST(req: NextRequest) {
       {
         user_id: user.id, provider: preset.id, email, display_name: displayName,
         imap_host, imap_port, imap_secure, smtp_host, smtp_port, smtp_secure,
-        username, password_enc, auth_method: "password",
+        username, password_enc,
         status: "connected", last_error: null, updated_at: new Date().toISOString()
       },
       { onConflict: "user_id,email" }

@@ -636,6 +636,7 @@ export default function Cockpit({
         <div className={"mail3 pane-" + mobilePane}>
           {/* Spalte 1: Konten, echte Ordner, intelligente Ansichten */}
           <div className="msidebar">
+            <OverlayScroll className="msidebar-scroll">
             <button className={"mfolder top" + (sel.account === "all" && !sel.view && sel.ftype === "inbox" ? " active" : "")} onClick={() => selectFolder("all", "inbox")}>
               <span className="mf-ic">📥</span><span className="mf-lbl">Alle Postfächer</span>
               {unreadInbox() > 0 && <span className="mf-count">{unreadInbox()}</span>}
@@ -676,6 +677,7 @@ export default function Cockpit({
             ))}
             <button className="btn small" style={{ margin: "12px 8px 4px" }} onClick={() => setShowConnect(true)}>+ Postfach</button>
             <button className="ac-diaglink" style={{ margin: "0 8px 12px", display: "block" }} onClick={() => setMailDiag(true)}>Sync-Diagnose</button>
+            </OverlayScroll>
           </div>
 
           {/* Spalte 2: kompakte Nachrichtenliste */}
