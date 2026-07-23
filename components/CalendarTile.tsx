@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 
-interface Ev { id: string; title: string; start: string; allDay: boolean }
+interface Ev { id: string; title: string; start: string; allDay: boolean; color?: string }
 
 // Kompakte Kalender-Kachel für die Übersicht: zeigt die nächsten Termine,
 // oder einen Hinweis zum Verbinden. Lädt clientseitig, damit das Dashboard
@@ -34,6 +34,7 @@ export default function CalendarTile() {
         ? <div className="tile-empty">Keine anstehenden Termine.</div>
         : events.map((e) => (
             <div className="tile-row" key={e.id}>
+              <span className="tile-dot" style={{ background: e.color || "var(--accent)" }} />
               <span className="tile-when">{e.allDay
                 ? new Date(e.start + "T00:00:00").toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" })
                 : new Date(e.start).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" })}</span> {e.title}

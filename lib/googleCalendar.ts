@@ -131,37 +131,58 @@ export interface CalendarEvent {
   end: string | null;
   allDay: boolean;
   location: string | null;
-  calendar: string;   // Kalendername/-farbe zur Herkunft
+  calendar: string;   // Kalendername zur Herkunft
+  color: string;      // Hintergrundfarbe (Hex) – wie im Google-Kalender
+  textColor: string;  // gut lesbare Textfarbe (Hex)
   htmlLink: string | null;
 }
 
-// Termine über alle sichtbaren Kalender im Zeitfenster [timeMin, timeMax) holen.
+// Guten Kontrast-Text (schwarz/weiß) zu einer Hex-Hintergrundfarbe wählen.
+function readableText(hex: string): string {
+  const h = hex.replace("#", "");
+  if (h.length < 6) return "#ffffff";
+  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+  // relative Helligkeit (YIQ)
+  return (r * 299 + g * 587 + b * 114) / 1000 >= 150 ? "#1a1a1a" : "#ffffff";
+}
+
+// Termine über alle sichtbaren Kalender im Zeitfenster [timeMin, timeMax) holen –
+// inkl. der echten Google-Farben (Ereignis-colorId bzw. Kalenderfarbe).
 export async function fetchGoogleEvents(
   accessToken: string,
   timeMin: string,
   timeMax: string
 ): Promise<CalendarEvent[]> {
-  const listRes = await fetch("https://www.googleapis.com/calendar/v3/users/me/calendarList?minAccessRole=reader", {
-    headers: { authorization: `Bearer ${accessToken}` }
-  });
+  const headers = { authorization: `Bearer ${accessToken}` };
+
+  // Kalenderliste + globale Farbpalette parallel holen.
+  const [listRes, colorsRes] = await Promise.all([
+    fetch("https://www.googleapis.com/calendar/v3/users/me/calendarList?minAccessRole=reader", { headers }),
+    fetch("https://www.googleapis.com/calendar/v3/colors", { headers })
+  ]);
   if (!listRes.ok) throw new Error(`Kalenderliste fehlgeschlagen (${listRes.status}).`);
   const list = await listRes.json();
+  const colors = colorsRes.ok ? await colorsRes.json() : { event: {}, calendar: {} };
+  const eventColors: Record<string, { background: string }> = colors.event || {};
   const calendars: any[] = (list.items || []).filter((c: any) => c.selected !== false);
 
   const all: CalendarEvent[] = [];
   await Promise.all(calendars.map(async (cal: any) => {
+    const calColor: string = cal.backgroundColor || "#5E5CE6";
     const p = new URLSearchParams({
       timeMin, timeMax, singleEvents: "true", orderBy: "startTime", maxResults: "250"
     });
     const evRes = await fetch(
       `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(cal.id)}/events?${p.toString()}`,
-      { headers: { authorization: `Bearer ${accessToken}` } }
+      { headers }
     );
     if (!evRes.ok) return; // einzelnen Kalender überspringen statt alles zu kippen
     const data = await evRes.json();
     for (const ev of data.items || []) {
       if (ev.status === "cancelled") continue;
       const allDay = !!ev.start?.date;
+      // Ereignis-eigene Farbe (colorId) hat Vorrang, sonst Kalenderfarbe.
+      const color = (ev.colorId && eventColors[ev.colorId]?.background) || calColor;
       all.push({
         id: ev.id,
         title: ev.summary || "(ohne Titel)",
@@ -170,6 +191,8 @@ export async function fetchGoogleEvents(
         allDay,
         location: ev.location || null,
         calendar: cal.summaryOverride || cal.summary || "Kalender",
+        color,
+        textColor: readableText(color),
         htmlLink: ev.htmlLink || null
       });
     }

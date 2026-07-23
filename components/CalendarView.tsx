@@ -3,166 +3,273 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 interface Ev {
   id: string; title: string; start: string; end: string | null;
-  allDay: boolean; location: string | null; calendar: string; htmlLink: string | null;
+  allDay: boolean; location: string | null; calendar: string;
+  color: string; textColor: string; htmlLink: string | null;
 }
+type View = "month" | "week" | "year" | "agenda";
 
 const WD = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const MON = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
+const MON_S = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
 
 function ymd(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 function evDayKey(e: Ev): string {
-  // All-day-Termine haben start="YYYY-MM-DD"; getaktete Termine ISO mit Zeit.
   return e.allDay ? e.start.slice(0, 10) : ymd(new Date(e.start));
 }
 function timeLabel(e: Ev): string {
   if (e.allDay) return "ganztägig";
-  const d = new Date(e.start);
-  return d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+  return new Date(e.start).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+}
+// Montag der Woche, in der d liegt.
+function mondayOf(d: Date): Date {
+  const off = (d.getDay() + 6) % 7;
+  const m = new Date(d); m.setDate(d.getDate() - off); m.setHours(0, 0, 0, 0); return m;
 }
 
 export default function CalendarView({ initialEmail }: { initialEmail?: string | null }) {
   const [cursor, setCursor] = useState(() => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), 1); });
+  const [weekAnchor, setWeekAnchor] = useState(() => mondayOf(new Date()));
   const [events, setEvents] = useState<Ev[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [needsReauth, setNeedsReauth] = useState(false);
-  const [view, setView] = useState<"month" | "agenda">("month");
+  const [view, setView] = useState<View>("month");
   const [selected, setSelected] = useState<string>(() => ymd(new Date()));
   const [disconnecting, setDisconnecting] = useState(false);
 
   async function disconnect() {
     if (disconnecting || !confirm("Google-Kalender wirklich trennen?")) return;
     setDisconnecting(true);
-    try {
-      await fetch("/api/auth/google/disconnect", { method: "POST" });
-      window.location.href = "/calendar";
-    } catch { setDisconnecting(false); }
+    try { await fetch("/api/auth/google/disconnect", { method: "POST" }); window.location.href = "/calendar"; }
+    catch { setDisconnecting(false); }
   }
 
+  // Zu ladendes Zeitfenster je nach Ansicht.
   const range = useMemo(() => {
-    // Sichtbares Monatsraster: von Montag der ersten Woche bis Sonntag der letzten.
+    if (view === "year") {
+      return { min: new Date(cursor.getFullYear(), 0, 1), max: new Date(cursor.getFullYear() + 1, 0, 1) };
+    }
+    if (view === "week") {
+      const min = new Date(weekAnchor); const max = new Date(weekAnchor); max.setDate(max.getDate() + 7);
+      return { min, max };
+    }
+    if (view === "agenda") {
+      const min = new Date(); min.setHours(0, 0, 0, 0);
+      const max = new Date(min); max.setDate(max.getDate() + 60);
+      return { min, max };
+    }
+    // month: 6-Wochen-Raster
     const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
-    const startOffset = (first.getDay() + 6) % 7; // Mo=0
-    const gridStart = new Date(first); gridStart.setDate(first.getDate() - startOffset);
+    const gridStart = mondayOf(first);
     const gridEnd = new Date(gridStart); gridEnd.setDate(gridStart.getDate() + 42);
-    return { gridStart, gridEnd };
-  }, [cursor]);
+    return { min: gridStart, max: gridEnd };
+  }, [view, cursor, weekAnchor]);
 
   const load = useCallback(async () => {
     setLoading(true); setError(null); setNeedsReauth(false);
     try {
-      const p = new URLSearchParams({ timeMin: range.gridStart.toISOString(), timeMax: range.gridEnd.toISOString() });
+      const p = new URLSearchParams({ timeMin: range.min.toISOString(), timeMax: range.max.toISOString() });
       const res = await fetch(`/api/calendar/events?${p.toString()}`, { cache: "no-store" });
       const data = await res.json();
       if (data.needsReauth) { setNeedsReauth(true); setEvents([]); }
       else if (data.error) { setError(data.error); setEvents([]); }
       else setEvents(data.events || []);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally { setLoading(false); }
+    } catch (e) { setError((e as Error).message); }
+    finally { setLoading(false); }
   }, [range]);
 
   useEffect(() => { load(); }, [load]);
 
   const byDay = useMemo(() => {
     const m: Record<string, Ev[]> = {};
-    for (const e of events) { const k = evDayKey(e); (m[k] ||= []).push(e); }
+    for (const e of events) { (m[evDayKey(e)] ||= []).push(e); }
     return m;
   }, [events]);
 
-  const cells = useMemo(() => {
-    const out: Date[] = [];
-    for (let i = 0; i < 42; i++) { const d = new Date(range.gridStart); d.setDate(d.getDate() + i); out.push(d); }
-    return out;
-  }, [range]);
-
   const todayKey = ymd(new Date());
-  const selectedEvents = byDay[selected] || [];
 
-  // Agenda: alle geladenen Termine ab heute, chronologisch, nach Tag gruppiert.
-  const agenda = useMemo(() => {
-    const upcoming = [...events].filter((e) => evDayKey(e) >= todayKey).sort((a, b) => a.start.localeCompare(b.start));
-    const groups: { day: string; items: Ev[] }[] = [];
-    for (const e of upcoming) {
-      const k = evDayKey(e);
-      const g = groups.find((x) => x.day === k);
-      if (g) g.items.push(e); else groups.push({ day: k, items: [e] });
-    }
-    return groups;
-  }, [events, todayKey]);
-
-  function shiftMonth(delta: number) {
-    setCursor((c) => new Date(c.getFullYear(), c.getMonth() + delta, 1));
+  // Titel + Navigation je nach Ansicht.
+  function shift(delta: number) {
+    if (view === "year") setCursor((c) => new Date(c.getFullYear() + delta, 0, 1));
+    else if (view === "week") setWeekAnchor((w) => { const n = new Date(w); n.setDate(n.getDate() + delta * 7); return n; });
+    else setCursor((c) => new Date(c.getFullYear(), c.getMonth() + delta, 1));
   }
+  function goToday() {
+    const n = new Date();
+    setCursor(new Date(n.getFullYear(), n.getMonth(), 1));
+    setWeekAnchor(mondayOf(n)); setSelected(ymd(n));
+  }
+  const title = view === "year" ? String(cursor.getFullYear())
+    : view === "week"
+      ? (() => { const e = new Date(weekAnchor); e.setDate(e.getDate() + 6); return `${weekAnchor.getDate()}.–${e.getDate()}. ${MON[e.getMonth()]} ${e.getFullYear()}`; })()
+      : `${MON[cursor.getMonth()]} ${cursor.getFullYear()}`;
 
   return (
     <div className="cal">
       <div className="cal-toolbar">
         <div className="cal-nav">
-          <button className="cal-btn" onClick={() => shiftMonth(-1)} aria-label="Vorheriger Monat">‹</button>
-          <div className="cal-title">{MON[cursor.getMonth()]} {cursor.getFullYear()}</div>
-          <button className="cal-btn" onClick={() => shiftMonth(1)} aria-label="Nächster Monat">›</button>
-          <button className="cal-today" onClick={() => { const n = new Date(); setCursor(new Date(n.getFullYear(), n.getMonth(), 1)); setSelected(ymd(n)); }}>Heute</button>
+          <button className="cal-btn" onClick={() => shift(-1)} aria-label="Zurück">‹</button>
+          <div className="cal-title">{title}</div>
+          <button className="cal-btn" onClick={() => shift(1)} aria-label="Weiter">›</button>
+          <button className="cal-today" onClick={goToday}>Heute</button>
         </div>
         <div className="cal-right">
           {initialEmail && <span className="cal-acct">{initialEmail}</span>}
           <div className="cal-viewswitch">
-            <button className={"cal-vbtn" + (view === "month" ? " on" : "")} onClick={() => setView("month")}>Monat</button>
-            <button className={"cal-vbtn" + (view === "agenda" ? " on" : "")} onClick={() => setView("agenda")}>Agenda</button>
+            {(["week", "month", "year", "agenda"] as View[]).map((v) => (
+              <button key={v} className={"cal-vbtn" + (view === v ? " on" : "")} onClick={() => setView(v)}>
+                {v === "week" ? "Woche" : v === "month" ? "Monat" : v === "year" ? "Jahr" : "Agenda"}
+              </button>
+            ))}
           </div>
           <button className="cal-disc" onClick={disconnect} disabled={disconnecting}>{disconnecting ? "…" : "Trennen"}</button>
         </div>
       </div>
 
-      {needsReauth && (
-        <div className="cal-note bad">Die Google-Verbindung ist abgelaufen. <a href="/api/auth/google">Erneut verbinden</a></div>
-      )}
+      {needsReauth && <div className="cal-note bad">Die Google-Verbindung ist abgelaufen. <a href="/api/auth/google">Erneut verbinden</a></div>}
       {error && <div className="cal-note bad">Kalender konnte nicht geladen werden: {error}</div>}
 
-      {view === "month" ? (
-        <div className="cal-grid-wrap">
-          <div className="cal-wd">{WD.map((w) => <div key={w} className="cal-wdc">{w}</div>)}</div>
-          <div className="cal-grid">
-            {cells.map((d) => {
-              const k = ymd(d);
-              const inMonth = d.getMonth() === cursor.getMonth();
-              const dayEvents = byDay[k] || [];
-              return (
-                <button
-                  key={k}
-                  className={"cal-cell" + (inMonth ? "" : " out") + (k === todayKey ? " today" : "") + (k === selected ? " sel" : "")}
-                  onClick={() => setSelected(k)}
-                >
-                  <span className="cal-dnum">{d.getDate()}</span>
-                  <span className="cal-dots">
-                    {dayEvents.slice(0, 3).map((e) => <span key={e.id} className="cal-chip" title={e.title}>{e.allDay ? "" : timeLabel(e) + " "}{e.title}</span>)}
-                    {dayEvents.length > 3 && <span className="cal-more">+{dayEvents.length - 3}</span>}
+      {view === "month" && <MonthView cursor={cursor} byDay={byDay} todayKey={todayKey} selected={selected} setSelected={setSelected} loading={loading} />}
+      {view === "week" && <WeekView anchor={weekAnchor} byDay={byDay} todayKey={todayKey} loading={loading} />}
+      {view === "year" && <YearView year={cursor.getFullYear()} byDay={byDay} todayKey={todayKey} onPick={(m: number) => { setCursor(new Date(cursor.getFullYear(), m, 1)); setView("month"); }} />}
+      {view === "agenda" && <AgendaView events={events} todayKey={todayKey} loading={loading} />}
+    </div>
+  );
+}
+
+function MonthView({ cursor, byDay, todayKey, selected, setSelected, loading }: any) {
+  const cells = useMemo(() => {
+    const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+    const off = (first.getDay() + 6) % 7;
+    const start = new Date(first); start.setDate(first.getDate() - off);
+    const out: Date[] = [];
+    for (let i = 0; i < 42; i++) { const d = new Date(start); d.setDate(d.getDate() + i); out.push(d); }
+    return out;
+  }, [cursor]);
+  const selEvents: Ev[] = byDay[selected] || [];
+  return (
+    <div className="cal-grid-wrap">
+      <div className="cal-wd">{WD.map((w) => <div key={w} className="cal-wdc">{w}</div>)}</div>
+      <div className="cal-grid">
+        {cells.map((d) => {
+          const k = ymd(d);
+          const inMonth = d.getMonth() === cursor.getMonth();
+          const evs: Ev[] = byDay[k] || [];
+          return (
+            <button key={k} className={"cal-cell" + (inMonth ? "" : " out") + (k === todayKey ? " today" : "") + (k === selected ? " sel" : "")} onClick={() => setSelected(k)}>
+              <span className="cal-dnum">{d.getDate()}</span>
+              <span className="cal-dots">
+                {evs.slice(0, 3).map((e) => (
+                  <span key={e.id} className="cal-chip" style={{ background: e.color, color: e.textColor }} title={e.title}>
+                    {e.allDay ? "" : timeLabel(e) + " "}{e.title}
                   </span>
-                </button>
-              );
-            })}
+                ))}
+                {evs.length > 3 && <span className="cal-more">+{evs.length - 3}</span>}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="cal-day">
+        <div className="cal-day-h">{new Date(selected + "T00:00:00").toLocaleDateString("de-DE", { weekday: "long", day: "2-digit", month: "long" })}</div>
+        {loading ? <div className="cal-empty">lädt…</div>
+          : selEvents.length === 0 ? <div className="cal-empty">Keine Termine an diesem Tag.</div>
+          : selEvents.map((e) => <EventRow key={e.id} e={e} />)}
+      </div>
+    </div>
+  );
+}
+
+function WeekView({ anchor, byDay, todayKey, loading }: any) {
+  const days = useMemo(() => {
+    const out: Date[] = [];
+    for (let i = 0; i < 7; i++) { const d = new Date(anchor); d.setDate(anchor.getDate() + i); out.push(d); }
+    return out;
+  }, [anchor]);
+  return (
+    <div className="cal-week">
+      {days.map((d) => {
+        const k = ymd(d);
+        const evs: Ev[] = byDay[k] || [];
+        return (
+          <div key={k} className={"cal-wcol" + (k === todayKey ? " today" : "")}>
+            <div className="cal-wcol-h">
+              <span className="cal-wcol-wd">{WD[(d.getDay() + 6) % 7]}</span>
+              <span className="cal-wcol-d">{d.getDate()}</span>
+            </div>
+            <div className="cal-wcol-body">
+              {loading ? <div className="cal-empty sm">…</div>
+                : evs.length === 0 ? <div className="cal-wcol-empty" />
+                : evs.map((e) => (
+                  e.htmlLink
+                    ? <a key={e.id} className="cal-wev" href={e.htmlLink} target="_blank" rel="noopener noreferrer" style={{ background: e.color, color: e.textColor }} title={e.title}>
+                        {!e.allDay && <span className="cal-wev-t">{timeLabel(e)}</span>}{e.title}
+                      </a>
+                    : <div key={e.id} className="cal-wev" style={{ background: e.color, color: e.textColor }} title={e.title}>
+                        {!e.allDay && <span className="cal-wev-t">{timeLabel(e)}</span>}{e.title}
+                      </div>
+                ))}
+            </div>
           </div>
-          <div className="cal-day">
-            <div className="cal-day-h">{new Date(selected + "T00:00:00").toLocaleDateString("de-DE", { weekday: "long", day: "2-digit", month: "long" })}</div>
-            {loading ? <div className="cal-empty">lädt…</div>
-              : selectedEvents.length === 0 ? <div className="cal-empty">Keine Termine an diesem Tag.</div>
-              : selectedEvents.map((e) => <EventRow key={e.id} e={e} />)}
-          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function YearView({ year, byDay, todayKey, onPick }: any) {
+  return (
+    <div className="cal-year">
+      {MON_S.map((mLabel, m) => {
+        const first = new Date(year, m, 1);
+        const off = (first.getDay() + 6) % 7;
+        const start = new Date(first); start.setDate(first.getDate() - off);
+        const cells: Date[] = [];
+        for (let i = 0; i < 42; i++) { const d = new Date(start); d.setDate(start.getDate() + i); cells.push(d); }
+        return (
+          <button key={m} className="cal-ymonth" onClick={() => onPick(m)}>
+            <div className="cal-ymonth-h">{mLabel}</div>
+            <div className="cal-ywd">{WD.map((w) => <span key={w}>{w[0]}</span>)}</div>
+            <div className="cal-ygrid">
+              {cells.map((d, i) => {
+                const k = ymd(d);
+                const inMonth = d.getMonth() === m;
+                const has = !!byDay[k]?.length;
+                const dot = has ? byDay[k][0].color : null;
+                return (
+                  <span key={i} className={"cal-yd" + (inMonth ? "" : " out") + (k === todayKey ? " today" : "")}>
+                    {d.getDate()}
+                    {dot && inMonth && <span className="cal-ydot" style={{ background: dot }} />}
+                  </span>
+                );
+              })}
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function AgendaView({ events, todayKey, loading }: any) {
+  const groups = useMemo(() => {
+    const upcoming = [...events].filter((e: Ev) => evDayKey(e) >= todayKey).sort((a: Ev, b: Ev) => a.start.localeCompare(b.start));
+    const g: { day: string; items: Ev[] }[] = [];
+    for (const e of upcoming) { const k = evDayKey(e); const f = g.find((x) => x.day === k); if (f) f.items.push(e); else g.push({ day: k, items: [e] }); }
+    return g;
+  }, [events, todayKey]);
+  if (loading) return <div className="cal-empty">lädt…</div>;
+  if (groups.length === 0) return <div className="cal-empty">Keine anstehenden Termine in diesem Zeitraum.</div>;
+  return (
+    <div className="cal-agenda">
+      {groups.map((g) => (
+        <div key={g.day} className="cal-agroup">
+          <div className="cal-aday">{new Date(g.day + "T00:00:00").toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "short" })}</div>
+          <div>{g.items.map((e) => <EventRow key={e.id} e={e} />)}</div>
         </div>
-      ) : (
-        <div className="cal-agenda">
-          {loading ? <div className="cal-empty">lädt…</div>
-            : agenda.length === 0 ? <div className="cal-empty">Keine anstehenden Termine in diesem Zeitraum.</div>
-            : agenda.map((g) => (
-              <div key={g.day} className="cal-agroup">
-                <div className="cal-aday">{new Date(g.day + "T00:00:00").toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "short" })}</div>
-                <div>{g.items.map((e) => <EventRow key={e.id} e={e} />)}</div>
-              </div>
-            ))}
-        </div>
-      )}
+      ))}
     </div>
   );
 }
@@ -170,6 +277,7 @@ export default function CalendarView({ initialEmail }: { initialEmail?: string |
 function EventRow({ e }: { e: Ev }) {
   const body = (
     <>
+      <span className="cal-ev-bar" style={{ background: e.color }} />
       <span className="cal-ev-time">{timeLabel(e)}</span>
       <span className="cal-ev-main">
         <span className="cal-ev-title">{e.title}</span>
