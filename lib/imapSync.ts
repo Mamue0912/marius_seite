@@ -21,8 +21,8 @@ function parseHeaders(raw: any): Record<string, string> {
   return out;
 }
 
-const SEED_COUNT = 40;       // Erstsync Posteingang
-const SENT_SEED = 25;        // Gesendet je Lauf (idempotent per Message-ID)
+const SEED_COUNT = 150;      // Erstsync / Neu-Einlesen Posteingang (mehr Verlauf)
+const SENT_SEED = 40;        // Gesendet je Lauf (idempotent per Message-ID)
 const CLASSIFY_CAP = 12;     // max. KI-Klassifizierungen pro Lauf
 
 function makeClient(acc: MailAccount): ImapFlow {
