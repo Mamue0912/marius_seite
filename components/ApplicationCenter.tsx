@@ -463,8 +463,12 @@ function DocumentsChat({ onDiag }: any) {
   const [error, setError] = useState<string | null>(null);
   const ctrlRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const initScrolled = useRef(false);
   useEffect(() => { aj("/api/documents/chat", { timeoutMs: 15000 }).then((r) => { if (r.ok) setMsgs(r.data.messages || []); }); }, []);
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs, busy]);
+  // Beim ersten Anzeigen sofort ganz nach unten springen (ohne Animation),
+  // danach neue Nachrichten sanft einscrollen. Der erste Sprung zählt erst,
+  // wenn tatsächlich Nachrichten geladen sind (sonst animiert das Nachladen).
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: initScrolled.current ? "smooth" : "auto" }); if (msgs.length) initScrolled.current = true; }, [msgs, busy]);
 
   async function send(text: string) {
     if (!text.trim() || busy) return;
@@ -742,8 +746,12 @@ function ChatPanel({ app, messages, onReload, onDiag }: any) {
   const [error, setError] = useState<string | null>(null);
   const ctrlRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const initScrolled = useRef(false);
   useEffect(() => { setMsgs(messages || []); }, [messages]);
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs, busy]);
+  // Beim ersten Anzeigen sofort ganz nach unten springen (ohne Animation),
+  // danach neue Nachrichten sanft einscrollen. Der erste Sprung zählt erst,
+  // wenn tatsächlich Nachrichten geladen sind (sonst animiert das Nachladen).
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: initScrolled.current ? "smooth" : "auto" }); if (msgs.length) initScrolled.current = true; }, [msgs, busy]);
 
   async function send(text: string) {
     if (!text.trim() || busy) return;
