@@ -94,8 +94,10 @@ export async function GET(req: NextRequest) {
   const { data: msg } = await admin.from("messages").select("*").eq("id", id).eq("user_id", user.id).maybeSingle();
   if (!msg) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
-  // Als gelesen markieren (nur lokal; IMAP-Flag bleibt unangetastet).
-  if (!msg.is_read) admin.from("messages").update({ is_read: true }).eq("id", msg.id).then(() => {});
+  // Lokal als gelesen markieren; das IMAP-\Seen-Flag wird unten beim Abruf
+  // mitgesetzt, damit die Mail auch in anderen Mail-Apps als gelesen gilt.
+  const wasUnread = !msg.is_read;
+  if (wasUnread) admin.from("messages").update({ is_read: true }).eq("id", msg.id).then(() => {});
 
   // Thread (frühere Nachrichten derselben Unterhaltung).
   let thread: any[] = [];
@@ -115,7 +117,7 @@ export async function GET(req: NextRequest) {
   let hasImages = false;
   if (account && uid) {
     try {
-      const full = await fetchMessageFull(account as MailAccount, uid, msg.original_folder_name || "INBOX");
+      const full = await fetchMessageFull(account as MailAccount, uid, msg.original_folder_name || "INBOX", wasUnread);
       text = full.text;
       if (full.html) {
         hasImages = /<img[\s>]/i.test(full.html);
