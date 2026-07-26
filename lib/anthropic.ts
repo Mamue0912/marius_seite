@@ -310,6 +310,56 @@ Aufgabe: Analysiere die folgende Stellenanzeige und erkläre sie verständlich.
   return rawJson<JobAnalysis>(system, content, schema, 2600);
 }
 
+// Unternehmenswebsite analysieren (für Initiativbewerbung ohne ausgeschriebene
+// Stelle). Liefert dieselbe JobAnalysis-Struktur, damit Arbeitsbereich, Chat,
+// Unterlagen und Dokumenterstellung identisch funktionieren.
+export async function analyzeCompanyWebsite(input: {
+  content: string; siteUrl: string; confirmedFactsText?: string;
+}): Promise<JobAnalysis> {
+  const schema = {
+    type: "object", additionalProperties: false,
+    required: ["job_type", "company", "position", "summary", "tasks", "requirements_must", "requirements_nice", "documents_required", "deadline", "contact", "application_tips", "matches_strong", "matches_partial", "open_points", "language"],
+    properties: {
+      job_type: { type: "string", enum: ["praktikum", "nebenjob", "ausbildung", "stelle", "unbekannt"] },
+      company: { type: ["string", "null"] },
+      position: { type: ["string", "null"] },
+      summary: { type: "string" },
+      tasks: { type: "array", items: { type: "string" } },
+      requirements_must: { type: "array", items: { type: "string" } },
+      requirements_nice: { type: "array", items: { type: "string" } },
+      documents_required: { type: "array", items: { type: "string" } },
+      deadline: { type: ["string", "null"] },
+      contact: { type: ["string", "null"] },
+      application_tips: { type: "array", items: { type: "string" } },
+      matches_strong: { type: "array", items: { type: "string" } },
+      matches_partial: { type: "array", items: { type: "string" } },
+      open_points: { type: "array", items: { type: "string" } },
+      language: { type: "string" }
+    }
+  };
+  const facts = input.confirmedFactsText?.trim();
+  const system = `${APPLICATION_RULES}
+
+Aufgabe: Analysiere die folgende UNTERNEHMENSWEBSITE für eine INITIATIVBEWERBUNG (es gibt keine konkrete Stellenausschreibung). Nutze ausschließlich die Website-Inhalte – erfinde KEINE Unternehmensinformationen.
+- company: Name des Unternehmens (aus der Website).
+- position: die wahrscheinlich sinnvollste Einstiegs-/Praktikumsmöglichkeit bzw. der passende Bereich (als kurzer Vorschlag). Wenn unklar, "Initiativbewerbung".
+- job_type: "praktikum", wenn ein Praktikum am wahrscheinlichsten sinnvoll ist, sonst "stelle" oder "unbekannt".
+- summary: kurze, sachliche Unternehmensanalyse – was das Unternehmen macht (Leistungen, Bereiche, Standorte, aktuelle Projekte), nur aus der Website.
+- tasks: Geschäftsbereiche/Tätigkeitsfelder, die zum Profil des Nutzers passen könnten, sowie wahrscheinlich sinnvolle Praktikums-/Einstiegsmöglichkeiten.
+- requirements_must: Werte, Themen und Anforderungen des Unternehmens, die in der Bewerbung angesprochen werden sollten (aus der Website erkennbar).
+- requirements_nice: weitere relevante Themen/Schwerpunkte.
+- application_tips: konkrete Bewerbungsargumente – warum der Nutzer (anhand seiner bestätigten Fakten) zu diesem Unternehmen passt.
+- matches_strong / matches_partial: NUR anhand der unten bestätigten Fakten (starke bzw. teilweise Passung zu den Bereichen/Werten des Unternehmens). ${facts ? "" : "Wenn keine bestätigten Fakten vorliegen, lasse diese leer."}
+- open_points: fehlende Informationen sowie GEZIELTE RÜCKFRAGEN an den Nutzer, u. a.: Für welchen Zeitraum bewirbst du dich? Welcher Unternehmensbereich interessiert dich? Praktikum, Werkstudentenstelle oder Initiativbewerbung? Gibt es einen Ansprechpartner? Was weißt du bereits über das Unternehmen? Warum möchtest du genau dort arbeiten? – erfinde nichts, frage nach.
+- documents_required: übliche Unterlagen für eine Initiativbewerbung (z. B. Anschreiben, Lebenslauf), sonst leer.
+- contact: Ansprechpartner/Kontakt, falls auf der Website genannt, sonst null.
+- deadline: null (Initiativbewerbung).
+- language: Sprache der Bewerbung (i. d. R. Deutsch).`;
+  const factLine = facts ? `\n\nBestätigte Fakten des Nutzers (nur diese für Passung/Argumente nutzen):\n${facts}` : "\n\n(Es liegen noch keine bestätigten Fakten vor.)";
+  const content = `Unternehmenswebsite: ${input.siteUrl}\n\nGesammelte Website-Inhalte (mehrere Unterseiten):\n\n${input.content}${factLine}`;
+  return rawJson<JobAnalysis>(system, content, schema, 2600);
+}
+
 // Fakten aus einem hochgeladenen Dokument extrahieren (Text oder Bild).
 export async function extractDocumentFacts(input: { content: string | Block[] }): Promise<{ facts: { category: string; value: string }[] }> {
   const schema = {

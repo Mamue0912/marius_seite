@@ -1238,6 +1238,15 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--mat); }
 .folder-edit .fe-name { flex: 1; min-width: 0; }
 .folder-edit .fe-type { width: 130px; }
 
+/* Neue Bewerbung: Modus-Umschalter (Stelle vs. Unternehmenswebsite) */
+.ac-modeswitch { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+.ac-modebtn { text-align: left; display: flex; flex-direction: column; gap: 3px; padding: 14px 16px; border-radius: var(--r); border: 1px solid var(--line); background: var(--mat); backdrop-filter: var(--blur-sm); -webkit-backdrop-filter: var(--blur-sm); cursor: pointer; box-shadow: inset 0 1px 0 var(--mat-hi); transition: border-color var(--t-fast), transform var(--t-fast), background var(--t-fast); }
+.ac-modebtn:hover { transform: translateY(-1px); border-color: var(--line-strong); }
+.ac-modebtn.on { border-color: var(--accent-line); background: linear-gradient(135deg, rgba(124,122,242,.14), var(--mat-thick)); box-shadow: inset 0 0 0 1px var(--accent-line); }
+.ac-modebtn-t { font-size: 14px; font-weight: 640; color: var(--ink); }
+.ac-modebtn-s { font-size: 12px; color: var(--muted); }
+@media (max-width: 640px) { .ac-modeswitch { grid-template-columns: 1fr; } }
+
 /* Stellensuche */
 .ac-search-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .ac-search-bar .ac-input { flex: 1 1 200px; min-width: 140px; }

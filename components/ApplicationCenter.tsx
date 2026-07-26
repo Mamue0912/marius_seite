@@ -216,14 +216,26 @@ function Overview({ apps, onOpen, onNav, onNew }: any) {
 
 // ============================ Neue Stelle ============================
 function NewJob({ onCreated, accounts }: any) {
+  const [mode, setMode] = useState<"stelle" | "website">("stelle");
   const [tab, setTab] = useState<"url" | "text" | "datei" | "email">("url");
   const [url, setUrl] = useState("");
+  const [siteUrl, setSiteUrl] = useState("");
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showFallback, setShowFallback] = useState(false);
   const ctrlRef = useRef<AbortController | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  async function analyzeWebsite() {
+    if (!siteUrl.trim() || busy) return;
+    setBusy(true); setError(null);
+    const ctrl = new AbortController(); ctrlRef.current = ctrl;
+    const r = await aj("/api/applications/analyze-website", { json: { url: siteUrl.trim() }, timeoutMs: 90000, signal: ctrl.signal });
+    setBusy(false);
+    if (r.ok) { onCreated(r.data.applicationId); return; }
+    setError(errText(r, "Die Website konnte nicht analysiert werden."));
+  }
 
   async function analyzeJson(payload: any) {
     setBusy(true); setError(null);
@@ -246,7 +258,34 @@ function NewJob({ onCreated, accounts }: any) {
 
   return (
     <div className="ac-view">
-      <div className="ac-view-head"><h1>Neue Stelle</h1></div>
+      <div className="ac-view-head"><h1>Neue Bewerbung</h1></div>
+      <div className="ac-modeswitch">
+        <button className={"ac-modebtn" + (mode === "stelle" ? " on" : "")} onClick={() => { setMode("stelle"); setError(null); }}>
+          <span className="ac-modebtn-t">Stellenangebot hinzufügen</span>
+          <span className="ac-modebtn-s">Link, Text, PDF/Screenshot oder E-Mail</span>
+        </button>
+        <button className={"ac-modebtn" + (mode === "website" ? " on" : "")} onClick={() => { setMode("website"); setError(null); }}>
+          <span className="ac-modebtn-t">Unternehmenswebsite analysieren</span>
+          <span className="ac-modebtn-s">Initiativbewerbung ohne ausgeschriebene Stelle</span>
+        </button>
+      </div>
+
+      {mode === "website" ? (
+        <div className="ac-card ac-import">
+          <label className="ac-label">Link zur Unternehmenswebsite</label>
+          <div className="ac-import-row">
+            <input className="ac-input" placeholder="z. B. www.unternehmen.de" value={siteUrl}
+              onChange={(e) => setSiteUrl(e.target.value)} disabled={busy} onKeyDown={(e) => { if (e.key === "Enter" && siteUrl.trim()) analyzeWebsite(); }} />
+            <button className="ac-btn primary" disabled={busy || !siteUrl.trim()} onClick={analyzeWebsite}>
+              {busy ? <><span className="spin" /> Analysiere…</> : "Analysieren"}
+            </button>
+            {busy && <button className="ac-btn" onClick={() => ctrlRef.current?.abort()}>Abbrechen</button>}
+          </div>
+          <div className="ac-hint">Ich sehe mir die Startseite und relevante Unterseiten an (Über uns, Leistungen, Karriere, Team, Werte, Standorte, Projekte), erstelle eine kurze Unternehmensanalyse und passende Bewerbungsargumente – und stelle dir im Chat gezielte Rückfragen. Danach kannst du wie gewohnt eine Initiativbewerbung erstellen. Es werden nur bestätigte Profil-Fakten und echte Website-Inhalte genutzt – nichts erfunden.</div>
+          {busy && <div className="ac-hint" style={{ marginTop: 8 }}>Das kann bei mehreren Unterseiten einen Moment dauern…</div>}
+          {error && <div className="ac-note bad">{error}</div>}
+        </div>
+      ) : (
       <div className="ac-card ac-import">
         <label className="ac-label">Link zur Stellenanzeige einfügen</label>
         <div className="ac-import-row">
@@ -290,6 +329,7 @@ function NewJob({ onCreated, accounts }: any) {
 
         {error && <div className="ac-note bad">{error}</div>}
       </div>
+      )}
     </div>
   );
 }
