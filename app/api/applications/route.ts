@@ -18,12 +18,18 @@ export async function POST(req: NextRequest) {
   const user = await requireUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const body = await req.json().catch(() => ({}));
-  const { data, error } = await supabaseAdmin().from("applications").insert({
+  const insert: any = {
     user_id: user.id,
     company: body.company || null,
     position: body.position || null,
     status: body.status || "interessant"
-  }).select("*").single();
+  };
+  // Optionale Vorbelegung (z. B. aus der Stellensuche übernommen).
+  if (body.job_url) insert.job_url = String(body.job_url).slice(0, 2000);
+  if (body.job_type) insert.job_type = String(body.job_type);
+  if (body.job_source) insert.job_source = String(body.job_source);
+  if (body.contact) insert.contact = String(body.contact);
+  const { data, error } = await supabaseAdmin().from("applications").insert(insert).select("*").single();
   if (error) return NextResponse.json({ error: "db_error", message: error.message }, { status: 500 });
   return NextResponse.json({ application: data });
 }

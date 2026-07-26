@@ -1238,6 +1238,21 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--mat); }
 .folder-edit .fe-name { flex: 1; min-width: 0; }
 .folder-edit .fe-type { width: 130px; }
 
+/* Stellensuche */
+.ac-search-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.ac-search-bar .ac-input { flex: 1 1 200px; min-width: 140px; }
+.ac-search-bar .ac-select { flex: 0 0 auto; width: auto; }
+.ac-search-tailor { display: inline-flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 13px; color: var(--ink-2); cursor: pointer; }
+.ac-search-tailor input { width: auto; }
+.ac-search-meta { margin: 14px 0 4px; font-size: 12.5px; color: var(--muted); }
+.ac-jobresult { display: flex; align-items: center; gap: 14px; padding: 13px 15px; border-radius: var(--r); background: var(--mat); border: 1px solid var(--line); backdrop-filter: var(--blur-sm); -webkit-backdrop-filter: var(--blur-sm); box-shadow: inset 0 1px 0 var(--mat-hi); transition: border-color var(--t-fast), transform var(--t-fast); }
+.ac-jobresult:hover { border-color: var(--line-strong); transform: translateY(-1px); }
+.ac-jobfit { margin-left: 10px; font-size: 11.5px; font-weight: 600; color: var(--low); background: var(--low-soft); border-radius: var(--r-pill); padding: 2px 9px; vertical-align: middle; }
+@media (max-width: 640px) {
+  .ac-search-bar .ac-input { flex-basis: 100%; }
+  .ac-jobresult { flex-direction: column; align-items: stretch; gap: 10px; }
+}
+
 /* Meine Fakten (zentrale, bearbeitbare Übersicht mit ausklappbaren Bereichen) */
 .ac-myfacts { margin-bottom: 16px; }
 .ac-facts-summary { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 10px 12px; margin-bottom: 12px; border-radius: var(--r-sm); background: var(--sunken); border: 1px solid var(--line-2); font-size: 12.5px; color: var(--muted); }

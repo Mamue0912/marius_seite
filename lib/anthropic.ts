@@ -448,6 +448,32 @@ ${params.factsText ? `\nBestätigte Fakten:\n${params.factsText}` : ""}`;
   return rawJson(system, `Anweisung: ${params.command}\n\nText:\n${params.body}`, schema, 2200);
 }
 
+// Stellen aus einer Trefferliste auf das Profil zuschneiden: wählt die am
+// besten passenden aus (mit kurzer Begründung), erfindet nichts.
+export async function matchJobsToProfile(params: {
+  factsText: string; wishes?: string;
+  jobs: { title: string; employer: string; location: string; type: string }[];
+}): Promise<{ picks: { index: number; reason: string }[] }> {
+  const schema = {
+    type: "object", additionalProperties: false, required: ["picks"],
+    properties: {
+      picks: {
+        type: "array",
+        items: {
+          type: "object", additionalProperties: false, required: ["index", "reason"],
+          properties: { index: { type: "integer" }, reason: { type: "string" } }
+        }
+      }
+    }
+  };
+  const list = params.jobs.map((j, i) => `${i}. ${j.title} — ${j.employer} (${j.location}) [${j.type}]`).join("\n");
+  const system = `${APPLICATION_RULES}
+
+Aufgabe: Wähle aus der nummerierten Stellenliste die am besten zum Profil passenden aus – höchstens 8, sortiert nach Passung (beste zuerst). Berücksichtige die bestätigten Fakten UND die Wünsche des Nutzers (Ort, Art, Interessen). Gib je Treffer den Listenindex und eine SEHR kurze Begründung (max. 12 Wörter, konkret warum es passt). Erfinde nichts. Passt kaum etwas wirklich, gib nur wenige oder gar keine zurück.`;
+  const user = `Bestätigte Fakten des Nutzers:\n${params.factsText || "(keine)"}\n\nWünsche/Suchtext:\n${params.wishes || "(keine besonderen)"}\n\nGefundene Stellen:\n${list}`;
+  return rawJson<{ picks: { index: number; reason: string }[] }>(system, user, schema, 1200);
+}
+
 // ---- Semantische Kategorien (getrennt von Ordnern & Priorität) ----
 export const SEMANTIC_CATEGORIES = [
   "Wichtig", "Antwort erforderlich", "Schule", "Bewerbungen und Karriere",

@@ -60,8 +60,8 @@ type Account = { id: string; email: string; provider: string };
 
 // ============================ Hauptkomponente ============================
 export default function ApplicationCenter({ accounts, sendEnabled, initialSection, initialOpenId }: { accounts: Account[]; sendEnabled: boolean; initialSection?: string; initialOpenId?: string | null }) {
-  const validSection = ["uebersicht", "neu", "aktiv", "unterlagen", "dokumente"].includes(initialSection || "") ? (initialSection as any) : "uebersicht";
-  const [section, setSection] = useState<"uebersicht" | "neu" | "aktiv" | "unterlagen" | "dokumente">(validSection);
+  const validSection = ["uebersicht", "suche", "neu", "aktiv", "unterlagen", "dokumente"].includes(initialSection || "") ? (initialSection as any) : "uebersicht";
+  const [section, setSection] = useState<"uebersicht" | "suche" | "neu" | "aktiv" | "unterlagen" | "dokumente">(validSection);
   // Aus dem seitenübergreifenden Cache initialisieren → sofortige Anzeige, wenn
   // beim Hovern über „Bewerbungen" bereits vorgeladen wurde.
   const [apps, setApps] = useState<any[]>(() => getAppsCache() || []);
@@ -78,6 +78,7 @@ export default function ApplicationCenter({ accounts, sendEnabled, initialSectio
 
   const NAV: { key: any; label: string; ic: string }[] = [
     { key: "uebersicht", label: "Übersicht", ic: "◉" },
+    { key: "suche", label: "Stellensuche", ic: "🔎" },
     { key: "neu", label: "Neue Stelle", ic: "＋" },
     { key: "aktiv", label: "Aktive Bewerbungen", ic: "▤" },
     { key: "chat", label: "Bewerbungs-Chat", ic: "💬" } as any,
@@ -123,6 +124,7 @@ export default function ApplicationCenter({ accounts, sendEnabled, initialSectio
         {loading ? <div className="ac-empty"><span className="spin" /></div>
           : openId ? <Workspace id={openId} apps={apps} onOpen={openApp} accounts={accounts} sendEnabled={sendEnabled} docs={docs} onBack={() => nav("uebersicht")} onChanged={loadApps} onDeleted={async () => { nav("uebersicht"); await loadApps(); }} onDiag={() => setDiag(true)} />
           : section === "uebersicht" ? <Overview apps={apps} onOpen={openApp} onNav={nav} onNew={() => nav("neu")} />
+          : section === "suche" ? <JobSearch onOpenApp={async (id: string) => { await loadApps(); setOpenId(id); }} />
           : section === "neu" ? <NewJob onCreated={async (id: string) => { await loadApps(); setOpenId(id); }} accounts={accounts} />
           : section === "aktiv" ? <AppList apps={apps} filter={listFilter} onFilter={setListFilter} onOpen={openApp} onNew={() => setSection("neu")} onReload={loadApps} />
           : section === "unterlagen" ? <Documents docs={docs} reload={loadDocs} onDiag={() => setDiag(true)} />
@@ -390,6 +392,87 @@ function GeneratedDocsAll({ apps, onOpen }: any) {
               </div>
             ))}
           </div>}
+    </div>
+  );
+}
+
+// Stellensuche: echte Jobs/Praktika/Ausbildung (Bundesagentur für Arbeit),
+// optional per KI auf die bestätigten Profil-Fakten zugeschnitten.
+function JobSearch({ onOpenApp }: any) {
+  const [was, setWas] = useState("");
+  const [wo, setWo] = useState("");
+  const [umkreis, setUmkreis] = useState("25");
+  const [art, setArt] = useState("");
+  const [tailor, setTailor] = useState(true);
+  const [jobs, setJobs] = useState<any[] | null>(null);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [tailored, setTailored] = useState(false);
+  const [creating, setCreating] = useState<string | null>(null);
+
+  const ART_ENUM: Record<string, string> = { "1": "stelle", "4": "ausbildung", "34": "praktikum" };
+
+  async function search() {
+    if (loading) return;
+    setLoading(true); setError(null);
+    const r = await aj("/api/applications/job-search", { json: { was, wo, umkreis, angebotsart: art, page: 1, tailor }, timeoutMs: 60000 });
+    setLoading(false);
+    if (r.ok) { setJobs(r.data.jobs || []); setTotal(r.data.total || 0); setTailored(!!r.data.tailored); }
+    else { setJobs([]); setError(errText(r, "Suche fehlgeschlagen.")); }
+  }
+
+  async function take(job: any) {
+    if (creating) return;
+    setCreating(job.id);
+    const r = await aj("/api/applications", { json: {
+      company: job.employer, position: job.title, status: "interessant",
+      job_url: job.url, job_source: "url", job_type: ART_ENUM[art] || "unbekannt"
+    }, timeoutMs: 20000 });
+    setCreating(null);
+    if (r.ok && r.data.application) onOpenApp(r.data.application.id);
+    else setError(errText(r, "Konnte nicht übernommen werden."));
+  }
+
+  return (
+    <div className="ac-view">
+      <div className="ac-view-head"><h1>Stellensuche</h1></div>
+      <div className="ac-hint" style={{ marginBottom: 14 }}>Echte Stellen, Praktika und Ausbildungsplätze (Quelle: Bundesagentur für Arbeit). Mit „Auf mein Profil zuschneiden" nutze ich deine <b>bestätigten</b> Fakten, um die passendsten Treffer nach oben zu sortieren.</div>
+      <div className="ac-search-bar">
+        <input className="ac-input" placeholder="Beruf / Suchbegriff (z. B. Praktikum Informatik)" value={was} onChange={(e) => setWas(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") search(); }} />
+        <input className="ac-input" placeholder="Ort (z. B. Hamburg)" value={wo} onChange={(e) => setWo(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") search(); }} />
+        <select className="ac-select" value={art} onChange={(e) => setArt(e.target.value)}>
+          <option value="">Alle Arten</option>
+          <option value="34">Praktikum</option>
+          <option value="4">Ausbildung</option>
+          <option value="1">Stelle / Job</option>
+        </select>
+        <select className="ac-select" value={umkreis} onChange={(e) => setUmkreis(e.target.value)}>
+          {["10", "25", "50", "100", "200"].map((u) => <option key={u} value={u}>+{u} km</option>)}
+        </select>
+        <button className="ac-btn primary" disabled={loading} onClick={search}>{loading ? <><span className="spin" /> Suche…</> : "Suchen"}</button>
+      </div>
+      <label className="ac-search-tailor"><input type="checkbox" checked={tailor} onChange={(e) => setTailor(e.target.checked)} /> Auf mein Profil zuschneiden</label>
+
+      {error && <div className="ac-note bad" style={{ marginTop: 12 }}>{error}</div>}
+      {jobs !== null && !loading && <div className="ac-search-meta">{total > 0 ? `${total} Treffer` : "Keine passenden Stellen gefunden – Suchbegriff/Ort anpassen."}{tailored ? " · nach Passung zu deinem Profil sortiert" : ""}</div>}
+
+      {loading && jobs === null ? <div className="ac-empty"><span className="spin" /></div> : jobs && jobs.length > 0 && (
+        <div className="ac-list" style={{ marginTop: 6 }}>
+          {jobs.map((j) => (
+            <div key={j.id} className="ac-jobresult">
+              <div className="ac-row-main">
+                <div className="ac-row-title">{j.title}{j.reason && <span className="ac-jobfit">✓ {j.reason}</span>}</div>
+                <div className="ac-row-sub">{j.employer} · {j.location}{j.date ? ` · ${new Date(j.date).toLocaleDateString("de-DE")}` : ""} · {j.type}</div>
+              </div>
+              <div className="ac-row-actions">
+                <a className="ac-btn sm" href={j.url} target="_blank" rel="noreferrer">Ansehen ↗</a>
+                <button className="ac-btn sm primary" disabled={creating === j.id} onClick={() => take(j)}>{creating === j.id ? "…" : "Übernehmen"}</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
