@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/supabaseServer";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { analyzeJobPosting, aiConfigured, aiErrorInfo, Block } from "@/lib/anthropic";
 import { confirmedFactsText } from "@/lib/applicationContext";
+import { findDuplicateApplication } from "@/lib/appDuplicate";
 import { imageBlock, isImageMime } from "@/lib/docExtract";
 import { recordAiEvent } from "@/lib/aiDiagnostics";
 import { env } from "@/lib/env";
@@ -121,8 +122,14 @@ export async function POST(req: NextRequest) {
       appId = created.id;
     }
 
+    // Dublette? Nur bei neu angelegten Bewerbungen prüfen (nicht beim Aktualisieren).
+    let duplicate = null;
+    if (!applicationId) {
+      duplicate = await findDuplicateApplication(user.id, { id: appId!, company: analysis.company, position: analysis.position, job_url: jobUrl });
+    }
+
     await recordAiEvent({ userId: user.id, kind: "compose", ok: true, durationMs: Date.now() - started, model: env.anthropicModel(), subjectHint: "stelle:" + (analysis.position || "") });
-    return NextResponse.json({ applicationId: appId, analysis });
+    return NextResponse.json({ applicationId: appId, analysis, duplicate });
   } catch (e) {
     const info = aiErrorInfo(e);
     console.error("analyze failed:", info.category, (e as Error).message);

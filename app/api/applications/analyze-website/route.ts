@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/supabaseServer";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { analyzeCompanyWebsite, aiConfigured, aiErrorInfo } from "@/lib/anthropic";
 import { confirmedFactsText } from "@/lib/applicationContext";
+import { findDuplicateApplication } from "@/lib/appDuplicate";
 import { recordAiEvent } from "@/lib/aiDiagnostics";
 import { env } from "@/lib/env";
 
@@ -114,8 +115,13 @@ export async function POST(req: NextRequest) {
       appId = created.id;
     }
 
+    let duplicate = null;
+    if (!body.applicationId) {
+      duplicate = await findDuplicateApplication(user.id, { id: appId!, company: analysis.company, position: analysis.position, job_url: url });
+    }
+
     await recordAiEvent({ userId: user.id, kind: "compose", ok: true, durationMs: Date.now() - started, model: env.anthropicModel(), subjectHint: "website:" + (analysis.company || "") });
-    return NextResponse.json({ applicationId: appId, analysis, pages: [url, ...subUrls] });
+    return NextResponse.json({ applicationId: appId, analysis, pages: [url, ...subUrls], duplicate });
   } catch (e) {
     const info = aiErrorInfo(e);
     await recordAiEvent({ userId: user.id, kind: "compose", ok: false, durationMs: Date.now() - started, model: env.anthropicModel(), errorCategory: info.category, subjectHint: "website" });

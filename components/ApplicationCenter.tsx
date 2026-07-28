@@ -70,6 +70,7 @@ export default function ApplicationCenter({ accounts, sendEnabled, initialSectio
   const [listFilter, setListFilter] = useState<string>("all");
   const [loading, setLoading] = useState(() => getAppsCache() === null || getDocsCache() === null);
   const [diag, setDiag] = useState(false);
+  const [mergePrompt, setMergePrompt] = useState<{ newId: string; existing: any } | null>(null);
 
   const loadApps = useCallback(async () => { setApps(await fetchApps()); }, []);
   const loadDocs = useCallback(async () => { setDocs(await fetchDocs()); }, []);
@@ -98,6 +99,20 @@ export default function ApplicationCenter({ accounts, sendEnabled, initialSectio
   // Direkte Navigation aus der Mitte (Kachel-Klick).
   function nav(sec: any, filter = "all") { setSection(sec); setListFilter(filter); setOpenId(null); }
   function openApp(id: string) { setOpenId(id); }
+  // Nach dem Anlegen: bei erkannter Dublette Auswahl anbieten, sonst öffnen.
+  async function handleCreated(id: string, duplicate?: any) {
+    await loadApps();
+    if (duplicate && duplicate.id && duplicate.id !== id) setMergePrompt({ newId: id, existing: duplicate });
+    else setOpenId(id);
+  }
+  async function doMerge() {
+    if (!mergePrompt) return;
+    const { newId, existing } = mergePrompt;
+    setMergePrompt(null);
+    const r = await aj("/api/applications/merge", { json: { targetId: existing.id, sourceId: newId }, timeoutMs: 20000 });
+    await loadApps();
+    setOpenId(r.ok && r.data.applicationId ? r.data.applicationId : existing.id);
+  }
 
   return (
     <div className={"ac" + (openId ? " ac-workspace-open" : "")}>
@@ -125,13 +140,36 @@ export default function ApplicationCenter({ accounts, sendEnabled, initialSectio
           : openId ? <Workspace id={openId} apps={apps} onOpen={openApp} accounts={accounts} sendEnabled={sendEnabled} docs={docs} onBack={() => nav("uebersicht")} onChanged={loadApps} onDeleted={async () => { nav("uebersicht"); await loadApps(); }} onDiag={() => setDiag(true)} />
           : section === "uebersicht" ? <Overview apps={apps} onOpen={openApp} onNav={nav} onNew={() => nav("neu")} />
           : section === "suche" ? <JobSearch onOpenApp={async (id: string) => { await loadApps(); setOpenId(id); }} />
-          : section === "neu" ? <NewJob onCreated={async (id: string) => { await loadApps(); setOpenId(id); }} accounts={accounts} />
+          : section === "neu" ? <NewJob onCreated={handleCreated} accounts={accounts} />
           : section === "aktiv" ? <AppList apps={apps} filter={listFilter} onFilter={setListFilter} onOpen={openApp} onNew={() => setSection("neu")} onReload={loadApps} />
           : section === "unterlagen" ? <Documents docs={docs} reload={loadDocs} onDiag={() => setDiag(true)} />
           : <GeneratedDocsAll apps={apps} onOpen={openApp} onReloadApps={loadApps} />}
       </main>
 
       {diag && <DiagModal onClose={() => setDiag(false)} />}
+      {mergePrompt && (
+        <div className="ac-modal-scrim" onClick={() => { const id = mergePrompt.newId; setMergePrompt(null); setOpenId(id); }}>
+          <div className="ac-modal" style={{ width: 480 }} onClick={(e) => e.stopPropagation()}>
+            <div className="ac-modal-h"><h3>Gleiche Stelle erkannt</h3></div>
+            <div className="ac-modal-b">
+              <p style={{ margin: "0 0 10px", fontSize: 14, lineHeight: 1.55 }}>
+                Diese Stelle sieht aus wie eine bereits vorhandene Bewerbung:
+              </p>
+              <div className="ac-note" style={{ marginTop: 0 }}>
+                <b>{mergePrompt.existing.position || "Bewerbung"}</b>{mergePrompt.existing.company ? ` · ${mergePrompt.existing.company}` : ""}
+              </div>
+              <p style={{ margin: "12px 0 0", fontSize: 13, color: "var(--muted)", lineHeight: 1.55 }}>
+                <b>Zusammenführen:</b> behält die vorhandene Bewerbung (inkl. Chat &amp; Dokumenten) und verwirft das Duplikat.<br />
+                <b>Beide behalten:</b> legt die neue als eigene Bewerbung an.
+              </p>
+            </div>
+            <div className="ac-modal-f">
+              <button className="ac-btn primary" onClick={doMerge}>Zusammenführen</button>
+              <button className="ac-btn" onClick={() => { const id = mergePrompt.newId; setMergePrompt(null); setOpenId(id); }}>Beide behalten</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -233,7 +271,7 @@ function NewJob({ onCreated, accounts }: any) {
     const ctrl = new AbortController(); ctrlRef.current = ctrl;
     const r = await aj("/api/applications/analyze-website", { json: { url: siteUrl.trim() }, timeoutMs: 90000, signal: ctrl.signal });
     setBusy(false);
-    if (r.ok) { onCreated(r.data.applicationId); return; }
+    if (r.ok) { onCreated(r.data.applicationId, r.data.duplicate); return; }
     setError(errText(r, "Die Website konnte nicht analysiert werden."));
   }
 
@@ -242,7 +280,7 @@ function NewJob({ onCreated, accounts }: any) {
     const ctrl = new AbortController(); ctrlRef.current = ctrl;
     const r = await aj("/api/applications/analyze", { json: payload, timeoutMs: 60000, signal: ctrl.signal });
     setBusy(false);
-    if (r.ok) { onCreated(r.data.applicationId); return; }
+    if (r.ok) { onCreated(r.data.applicationId, r.data.duplicate); return; }
     if (r.data?.error === "fetch_failed") setShowFallback(true);
     setError(errText(r, "Die Stellenanzeige konnte nicht verarbeitet werden."));
   }
@@ -252,7 +290,7 @@ function NewJob({ onCreated, accounts }: any) {
     const fd = new FormData(); fd.append("file", file); fd.append("mode", "datei");
     const r = await aj("/api/applications/analyze", { method: "POST", body: fd, timeoutMs: 60000, signal: ctrl.signal });
     setBusy(false);
-    if (r.ok) { onCreated(r.data.applicationId); return; }
+    if (r.ok) { onCreated(r.data.applicationId, r.data.duplicate); return; }
     setError(errText(r, "Die Datei konnte nicht verarbeitet werden."));
   }
 
