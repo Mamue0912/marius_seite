@@ -105,6 +105,18 @@ export default function ApplicationCenter({ accounts, sendEnabled, initialSectio
     if (duplicate && duplicate.id && duplicate.id !== id) setMergePrompt({ newId: id, existing: duplicate });
     else setOpenId(id);
   }
+  // Fällt der Client in ein Zeitlimit, hat der Server die Bewerbung oft trotzdem
+  // angelegt. Dann die Liste neu laden und die gerade erstellte öffnen, statt
+  // fälschlich „abgebrochen" zu zeigen.
+  async function recoverRecent(): Promise<boolean> {
+    const list = await fetchApps(); setApps(list);
+    const now = Date.now();
+    const recent = list
+      .filter((a: any) => a.created_at && now - new Date(a.created_at).getTime() < 120000)
+      .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    if (recent[0]) { setOpenId(recent[0].id); return true; }
+    return false;
+  }
   async function doMerge() {
     if (!mergePrompt) return;
     const { newId, existing } = mergePrompt;
@@ -140,7 +152,7 @@ export default function ApplicationCenter({ accounts, sendEnabled, initialSectio
           : openId ? <Workspace id={openId} apps={apps} onOpen={openApp} accounts={accounts} sendEnabled={sendEnabled} docs={docs} onBack={() => nav("uebersicht")} onChanged={loadApps} onDeleted={async () => { nav("uebersicht"); await loadApps(); }} onDiag={() => setDiag(true)} />
           : section === "uebersicht" ? <Overview apps={apps} onOpen={openApp} onNav={nav} onNew={() => nav("neu")} />
           : section === "suche" ? <JobSearch onOpenApp={async (id: string) => { await loadApps(); setOpenId(id); }} />
-          : section === "neu" ? <NewJob onCreated={handleCreated} accounts={accounts} />
+          : section === "neu" ? <NewJob onCreated={handleCreated} onAnalyzeTimeout={recoverRecent} accounts={accounts} />
           : section === "aktiv" ? <AppList apps={apps} filter={listFilter} onFilter={setListFilter} onOpen={openApp} onNew={() => setSection("neu")} onReload={loadApps} />
           : section === "unterlagen" ? <Documents docs={docs} reload={loadDocs} onDiag={() => setDiag(true)} />
           : <GeneratedDocsAll apps={apps} onOpen={openApp} onReloadApps={loadApps} />}
@@ -253,7 +265,7 @@ function Overview({ apps, onOpen, onNav, onNew }: any) {
 }
 
 // ============================ Neue Stelle ============================
-function NewJob({ onCreated, accounts }: any) {
+function NewJob({ onCreated, onAnalyzeTimeout, accounts }: any) {
   const [mode, setMode] = useState<"stelle" | "website">("stelle");
   const [tab, setTab] = useState<"url" | "text" | "datei" | "email">("url");
   const [url, setUrl] = useState("");
@@ -269,18 +281,20 @@ function NewJob({ onCreated, accounts }: any) {
     if (!siteUrl.trim() || busy) return;
     setBusy(true); setError(null);
     const ctrl = new AbortController(); ctrlRef.current = ctrl;
-    const r = await aj("/api/applications/analyze-website", { json: { url: siteUrl.trim() }, timeoutMs: 90000, signal: ctrl.signal });
+    const r = await aj("/api/applications/analyze-website", { json: { url: siteUrl.trim() }, timeoutMs: 100000, signal: ctrl.signal });
     setBusy(false);
     if (r.ok) { onCreated(r.data.applicationId, r.data.duplicate); return; }
+    if (r.timedOut && onAnalyzeTimeout && await onAnalyzeTimeout()) return;
     setError(errText(r, "Die Website konnte nicht analysiert werden."));
   }
 
   async function analyzeJson(payload: any) {
     setBusy(true); setError(null);
     const ctrl = new AbortController(); ctrlRef.current = ctrl;
-    const r = await aj("/api/applications/analyze", { json: payload, timeoutMs: 60000, signal: ctrl.signal });
+    const r = await aj("/api/applications/analyze", { json: payload, timeoutMs: 100000, signal: ctrl.signal });
     setBusy(false);
     if (r.ok) { onCreated(r.data.applicationId, r.data.duplicate); return; }
+    if (r.timedOut && onAnalyzeTimeout && await onAnalyzeTimeout()) return;
     if (r.data?.error === "fetch_failed") setShowFallback(true);
     setError(errText(r, "Die Stellenanzeige konnte nicht verarbeitet werden."));
   }
@@ -288,9 +302,10 @@ function NewJob({ onCreated, accounts }: any) {
     setBusy(true); setError(null);
     const ctrl = new AbortController(); ctrlRef.current = ctrl;
     const fd = new FormData(); fd.append("file", file); fd.append("mode", "datei");
-    const r = await aj("/api/applications/analyze", { method: "POST", body: fd, timeoutMs: 60000, signal: ctrl.signal });
+    const r = await aj("/api/applications/analyze", { method: "POST", body: fd, timeoutMs: 100000, signal: ctrl.signal });
     setBusy(false);
     if (r.ok) { onCreated(r.data.applicationId, r.data.duplicate); return; }
+    if (r.timedOut && onAnalyzeTimeout && await onAnalyzeTimeout()) return;
     setError(errText(r, "Die Datei konnte nicht verarbeitet werden."));
   }
 
