@@ -150,6 +150,9 @@ export default function Cockpit({
   const [backfill, setBackfill] = useState<any>(null);
   const [rules, setRules] = useState<any[]>([]);
   const [listLimit, setListLimit] = useState(50);
+  // Listenfilter: alle Mails oder nur aktuell ungelesene. Kombinierbar mit
+  // Suche, Konto/Ordner-Auswahl und intelligenten Ansichten.
+  const [unreadOnly, setUnreadOnly] = useState(false);
   const accById: Record<string, Account> = Object.fromEntries(accounts.map((a) => [a.id, a]));
   const filter = { account: sel.account, folder: sel.ftype, cat: "all", unread: false, needs: false, q };
   const [drawer, setDrawer] = useState<any>(null); // { msg, mode, loading, draft, body, tone, customInstruction, confirmBinding, sending }
@@ -264,6 +267,13 @@ export default function Cockpit({
   // Zähler IMMER aus derselben Quelle wie die Liste (messages), nie aus IMAP-STATUS.
   const unreadInbox = (accId?: string) => msgs.filter((m: any) => !m.is_deleted && (m.folder_type || "inbox") === "inbox" && !m.is_read && (!accId || m.mail_account_id === accId)).length;
 
+  // Ungelesene im AKTUELLEN Kontext (Konto/Ordner/Ansicht + Suche), für das
+  // Zähler-Abzeichen am „Ungelesen"-Filter. Berücksichtigt On-Demand-Ordner.
+  function unreadFilterCount(): number {
+    if (folderItems !== null) return folderItems.filter((it) => !it.is_read).length;
+    return msgs.filter((m: any) => !m.is_read && visible(m)).length;
+  }
+
   // Gespeicherte Klassifizierung – Nutzer-Overrides haben immer Vorrang.
   const labelsOf = (m: Msg): string[] => (m.user_labels && m.user_labels.length ? m.user_labels : (m.labels || []));
   const relevanceOf = (m: any): string => m.user_relevance || m.relevance || "normal";
@@ -273,6 +283,9 @@ export default function Cockpit({
 
   function visible(m: Msg) {
     if (m.is_deleted) return false;
+    // Ungelesen-Filter: greift kombinierbar über Konten, Ordner, Ansichten und
+    // Suche. Reagiert sofort, sobald is_read (lokal oder per Sync) wechselt.
+    if (unreadOnly && (m as any).is_read) return false;
     if (q) {
       const hay = `${m.from_name || ""} ${m.from_address || ""} ${m.subject || ""} ${m.preview || ""}`.toLowerCase();
       if (!hay.includes(q.toLowerCase())) return false;
@@ -710,6 +723,13 @@ export default function Cockpit({
               <input className="f-search" placeholder="Suchen…" value={q} onChange={(e) => setQ(e.target.value)} />
               <button className="btn small ghost" onClick={() => manualSync()} title="Aktualisieren">↻</button>
             </div>
+            {/* Filter: Alle / Ungelesen – kombinierbar mit Suche & Auswahl. */}
+            <div className="mlist-filter" role="group" aria-label="Filter">
+              <button className={"mfilter" + (!unreadOnly ? " active" : "")} onClick={() => setUnreadOnly(false)} aria-pressed={!unreadOnly}>Alle</button>
+              <button className={"mfilter" + (unreadOnly ? " active" : "")} onClick={() => setUnreadOnly(true)} aria-pressed={unreadOnly}>
+                Ungelesen{unreadFilterCount() > 0 && <span className="mfilter-count">{unreadFilterCount()}</span>}
+              </button>
+            </div>
             {classify && (
               <div className="classify-banner">
                 <span className="spin" />
@@ -740,16 +760,19 @@ export default function Cockpit({
             <OverlayScroll className="mlist-scroll" onScroll={(el) => {
               if (el.scrollTop + el.clientHeight > el.scrollHeight - 400) setListLimit((n) => n + 40);
             }}>
-              {folderItems !== null ? (
-                folderLoading ? [0, 1, 2, 3].map((i) => <div className="sk-card" key={i} />)
-                  : folderItems.length ? folderItems.map((it) => (
-                    <MailRow key={it.uid} m={it} account={accById[it.account_id]} onOpen={() => openFolderItem(it)} selected={reading?.msg?.uid === it.uid} labelsOf={labelsOf} />
-                  )) : <div className="empty" style={{ padding: 40 }}>Keine Nachrichten in diesem Ordner.</div>
-              ) : (() => {
+              {folderItems !== null ? (() => {
+                if (folderLoading) return [0, 1, 2, 3].map((i) => <div className="sk-card" key={i} />);
+                // Ungelesen-Filter auch in On-Demand-Ordnern (Archiv/Junk/…).
+                const fitems = unreadOnly ? folderItems.filter((it) => !it.is_read) : folderItems;
+                if (!fitems.length) return <div className="empty" style={{ padding: 40 }}>{unreadOnly ? "Keine ungelesenen Nachrichten in diesem Ordner." : "Keine Nachrichten in diesem Ordner."}</div>;
+                return fitems.map((it) => (
+                  <MailRow key={it.uid} m={it} account={accById[it.account_id]} onOpen={() => openFolderItem(it)} selected={reading?.msg?.uid === it.uid} labelsOf={labelsOf} />
+                ));
+              })() : (() => {
                 // Nur sichtbare Nachrichten, sortiert; für Performance gefenstert.
                 const all = msgs.filter(visible).sort((a, b) => new Date(b.received_at || 0).getTime() - new Date(a.received_at || 0).getTime());
                 if (msgs.length === 0 && status?.syncing) return [0, 1, 2, 3].map((i) => <div className="sk-card" key={i} />);
-                if (!all.length) return <div className="empty" style={{ padding: 40 }}><div className="ic">✦</div>Keine Nachrichten.</div>;
+                if (!all.length) return <div className="empty" style={{ padding: 40 }}><div className="ic">✦</div>{unreadOnly ? "Keine ungelesenen Nachrichten." : "Keine Nachrichten."}</div>;
                 const shown = all.slice(0, listLimit);
                 return <>
                   {shown.map((m) => (

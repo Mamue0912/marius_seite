@@ -616,6 +616,13 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--mat); }
 .mlist { width: 360px; flex: 0 0 360px; display: flex; flex-direction: column; border-right: 1px solid var(--line-2); min-width: 0; background: var(--mat-thin); backdrop-filter: var(--blur-sm); -webkit-backdrop-filter: var(--blur-sm); }
 .mlist-top { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line-2); }
 .mlist-top .f-search { flex: 1; padding: 8px 12px; }
+/* Filter „Alle / Ungelesen" – deutlich sichtbarer aktiver Zustand. */
+.mlist-filter { display: flex; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--line-2); }
+.mfilter { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line-2); background: var(--surface-2); color: var(--muted); font-size: 12.5px; font-weight: 600; padding: 6px 14px; border-radius: var(--r-pill); cursor: pointer; transition: background-color var(--t-fast), color var(--t-fast), border-color var(--t-fast); }
+.mfilter:hover { color: var(--ink); }
+.mfilter.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.mfilter-count { font-size: 11px; font-weight: 700; line-height: 1; padding: 2px 6px; border-radius: var(--r-pill); background: var(--accent-line); color: #fff; font-variant-numeric: tabular-nums; }
+.mfilter.active .mfilter-count { background: rgba(255,255,255,.28); }
 .mback { display: none; border: 0; background: var(--surface-2); color: var(--ink-2); width: 34px; height: 34px; border-radius: var(--r-xs); cursor: pointer; flex: 0 0 auto; }
 .mlist-scroll { flex: 1; min-height: 0; }
 .mlist-scroll > .oscroll-view { padding: 6px; }
