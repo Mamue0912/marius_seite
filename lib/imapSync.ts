@@ -24,6 +24,7 @@ function parseHeaders(raw: any): Record<string, string> {
 const SEED_COUNT = 150;      // Erstsync / Neu-Einlesen Posteingang (mehr Verlauf)
 const SENT_SEED = 40;        // Gesendet je Lauf (idempotent per Message-ID)
 const CLASSIFY_CAP = 12;     // max. KI-Klassifizierungen pro Lauf
+const SEEN_WINDOW = 500;     // Gelesen-Status: letzte N Posteingangs-Mails je Lauf abgleichen
 
 function makeClient(acc: MailAccount): ImapFlow {
   return new ImapFlow({
@@ -153,6 +154,20 @@ export async function syncInbox(acc: MailAccount): Promise<SyncResult> {
           }
         }
       }
+
+      // ----- Gelesen-Status (\Seen) externer Apps übernehmen -----
+      // Wird eine Mail außerhalb des Cockpits (z. B. iPhone-Mail, WEB.DE- oder
+      // iCloud-Weboberfläche) gelesen oder wieder auf ungelesen gesetzt, so
+      // ändert sich das IMAP-Flag \Seen. Der inkrementelle Abruf oben sieht nur
+      // NEUE UIDs, daher gleichen wir hier zusätzlich die Flags der letzten
+      // ~500 Posteingangs-Mails ab und schreiben Abweichungen nach Supabase.
+      // Beidseitig: gelesen -> is_read=true, ungelesen -> is_read=false.
+      try {
+        await reconcileSeenFlags(acc, client, exists);
+      } catch (e) {
+        console.error("Gelesen-Abgleich übersprungen:", (e as Error).message);
+      }
+
       await admin.from("mail_accounts").update({
         inbox_uidvalidity: uidValidity, inbox_last_uid: advanceUid,
         last_synced_at: new Date().toISOString(),
@@ -224,6 +239,41 @@ async function syncFolders(acc: MailAccount, client: ImapFlow): Promise<void> {
     rows.push({ user_id: acc.user_id, account_id: acc.id, path: box.path, folder_type: ftype, unread, total, updated_at: new Date().toISOString() });
   }
   if (rows.length) await admin.from("mail_folders").upsert(rows, { onConflict: "account_id,path" });
+}
+
+// Gleicht den \Seen-Status der letzten SEEN_WINDOW Posteingangs-Mails mit
+// Supabase ab. Erwartet, dass INBOX bereits (per Lock) ausgewählt ist.
+// Schreibt NUR echte Abweichungen (minimale Realtime-Änderungen), damit
+// Ungelesen-Punkt, Ordnerzähler, Dashboard-Badge, intelligente Ansichten und
+// „Alle Postfächer" sofort und einheitlich aktualisiert werden.
+async function reconcileSeenFlags(acc: MailAccount, client: ImapFlow, exists: number): Promise<void> {
+  if (!exists || exists <= 0) return;
+  const admin = supabaseAdmin();
+  const start = Math.max(1, exists - SEEN_WINDOW + 1);
+  const seenLinks: string[] = [];
+  const unseenLinks: string[] = [];
+  for await (const msg of client.fetch(`${start}:*`, { uid: true, flags: true })) {
+    if (!msg.uid) continue;
+    const flags: Set<string> = msg.flags instanceof Set ? msg.flags : new Set(msg.flags || []);
+    (flags.has("\\Seen") ? seenLinks : unseenLinks).push(`imap-uid:${msg.uid}`);
+  }
+  const chunk = <T,>(arr: T[], size: number): T[][] => {
+    const out: T[][] = [];
+    for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+    return out;
+  };
+  // Extern gelesen -> is_read = true (nur bisher ungelesene Datensätze).
+  for (const part of chunk(seenLinks, 150)) {
+    await admin.from("messages").update({ is_read: true })
+      .eq("mail_account_id", acc.id).eq("folder_type", "inbox").eq("is_read", false)
+      .in("web_link", part);
+  }
+  // Extern auf ungelesen gesetzt -> is_read = false (nur bisher gelesene).
+  for (const part of chunk(unseenLinks, 150)) {
+    await admin.from("messages").update({ is_read: false })
+      .eq("mail_account_id", acc.id).eq("folder_type", "inbox").eq("is_read", true)
+      .in("web_link", part);
+  }
 }
 
 function hasAttachments(bodyStructure: any): boolean {
