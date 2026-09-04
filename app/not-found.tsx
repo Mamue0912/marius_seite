@@ -1,0 +1,1 @@
+export default function NotFound() { return <main className="error-page"><h1>Seite nicht gefunden</h1><p>Die gewünschte Ansicht ist nicht verfügbar.</p><a className="btn btn-primary" href="/">Zur Übersicht</a></main>; }

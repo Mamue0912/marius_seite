@@ -97,7 +97,7 @@ export async function GET(req: NextRequest) {
   // Lokal als gelesen markieren; das IMAP-\Seen-Flag wird unten beim Abruf
   // mitgesetzt, damit die Mail auch in anderen Mail-Apps als gelesen gilt.
   const wasUnread = !msg.is_read;
-  if (wasUnread) admin.from("messages").update({ is_read: true }).eq("id", msg.id).then(() => {});
+
 
   // Thread (frühere Nachrichten derselben Unterhaltung).
   let thread: any[] = [];
@@ -115,16 +115,21 @@ export async function GET(req: NextRequest) {
   let text = "";
   let html: string | null = null;
   let hasImages = false;
+  if (!account || !uid || account.user_id !== user.id) return NextResponse.json({error:"Die Originalnachricht ist derzeit nicht verfügbar."},{status:404});
   if (account && uid) {
     try {
       const full = await fetchMessageFull(account as MailAccount, uid, msg.original_folder_name || "INBOX", wasUnread);
+      if (wasUnread) {
+        const {error} = await admin.from("messages").update({is_read:true}).eq("id",msg.id).eq("user_id",user.id);
+        if (error) return NextResponse.json({error:"Gelesen-Status konnte lokal nicht gespeichert werden."},{status:502});
+      }
       text = full.text;
       if (full.html) {
         hasImages = /<img[\s>]/i.test(full.html);
         html = safeHtml(full.html, withImages);
       }
     } catch (e) {
-      console.error("fetchMessageFull:", (e as Error).message);
+      return NextResponse.json({error:"Nachricht konnte nicht vollständig geladen werden. Bitte erneut versuchen."},{status:502});
     }
   }
 

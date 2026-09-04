@@ -28,8 +28,9 @@ export async function GET(req: NextRequest) {
   if (oauthErr) return NextResponse.redirect(home("error", url.searchParams.get("error_description") || oauthErr));
   if (!code || !state) return NextResponse.redirect(home("error"));
 
-  const raw = cookies().get("ms_oauth")?.value;
-  cookies().delete("ms_oauth");
+  const cookieStore = await cookies();
+  const raw = cookieStore.get("ms_oauth")?.value;
+  cookieStore.delete("ms_oauth");
   if (!raw) return NextResponse.redirect(home("state"));
 
   let stored: { state: string; verifier: string; uid: string };

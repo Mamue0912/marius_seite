@@ -45,7 +45,7 @@ export async function fetchMessageFull(acc: MailAccount, uid: number, mailbox = 
       if (!msg?.source) return { text: "", html: null };
       const parsed = await simpleParser(msg.source);
       // Beim Öffnen als gelesen markieren (auch in Archiv/Junk-Ordnern).
-      if (markRead) { try { await c.messageFlagsAdd(String(uid), ["\\Seen"], { uid: true }); } catch {} }
+      if (markRead && !await c.messageFlagsAdd(String(uid), ["\\Seen"], { uid: true })) throw new Error("Gelesen-Status konnte nicht bestätigt werden.");
       return { text: (parsed.text || "").toString(), html: parsed.html ? String(parsed.html) : null };
     } finally {
       lock.release();

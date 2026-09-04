@@ -112,7 +112,7 @@ export async function backfillBatch(acc: MailAccount, ftype: "inbox" | "sent", s
 }
 
 // Hauptsync: Posteingang (inkrementell) + Gesendet (Seed), dann KI-Kategorien.
-export async function syncInbox(acc: MailAccount): Promise<SyncResult> {
+export async function syncInbox(acc: MailAccount, options: {classify?:boolean} = {}): Promise<SyncResult> {
   const admin = supabaseAdmin();
   const client = makeClient(acc);
   const result: SyncResult = { processed: 0, saved: 0, skipped: 0, newUids: [], skippedUids: [] };
@@ -162,11 +162,7 @@ export async function syncInbox(acc: MailAccount): Promise<SyncResult> {
       // NEUE UIDs, daher gleichen wir hier zusätzlich die Flags der letzten
       // ~500 Posteingangs-Mails ab und schreiben Abweichungen nach Supabase.
       // Beidseitig: gelesen -> is_read=true, ungelesen -> is_read=false.
-      try {
-        await reconcileSeenFlags(acc, client, exists);
-      } catch (e) {
-        console.error("Gelesen-Abgleich übersprungen:", (e as Error).message);
-      }
+      await reconcileSeenFlags(acc, client, exists);
 
       await admin.from("mail_accounts").update({
         inbox_uidvalidity: uidValidity, inbox_last_uid: advanceUid,
@@ -214,7 +210,7 @@ export async function syncInbox(acc: MailAccount): Promise<SyncResult> {
 
   // ----- KI-Kategorien + Regeln (getrennt, gedeckelt) -----
   try {
-    await classifyNew(acc);
+    if (options.classify !== false) await classifyNew(acc);
   } catch (e) {
     console.error("Klassifizierung übersprungen:", (e as Error).message);
   }
@@ -249,13 +245,26 @@ async function syncFolders(acc: MailAccount, client: ImapFlow): Promise<void> {
 async function reconcileSeenFlags(acc: MailAccount, client: ImapFlow, exists: number): Promise<void> {
   if (!exists || exists <= 0) return;
   const admin = supabaseAdmin();
-  const start = Math.max(1, exists - SEEN_WINDOW + 1);
+  // Reconcile every persisted inbox UID, including old unread mail. Only flags
+  // cross the IMAP connection; bodies are never downloaded here.
+  const stored: string[] = [];
+  for (let offset=0;;offset+=1000) {
+    const {data,error}=await admin.from("messages").select("web_link")
+      .eq("user_id",acc.user_id).eq("mail_account_id",acc.id).eq("folder_type","inbox").eq("is_deleted",false).order("id").range(offset,offset+999);
+    if(error) throw new Error("Gelesen-Abgleich konnte nicht geladen werden.");
+    stored.push(...(data||[]).map(row=>row.web_link||"").filter(link=>/^imap-uid:\\d+$/.test(link)));
+    if(!data||data.length<1000) break;
+  }
+  const uids=Array.from(new Set(stored.map(link=>link.slice(9))));
+  if(!uids.length) return;
   const seenLinks: string[] = [];
   const unseenLinks: string[] = [];
-  for await (const msg of client.fetch(`${start}:*`, { uid: true, flags: true })) {
+  for (let offset=0;offset<uids.length;offset+=250) {
+  for await (const msg of client.fetch(uids.slice(offset,offset+250).join(","), { uid: true, flags: true }, {uid:true})) {
     if (!msg.uid) continue;
     const flags: Set<string> = msg.flags instanceof Set ? msg.flags : new Set(msg.flags || []);
     (flags.has("\\Seen") ? seenLinks : unseenLinks).push(`imap-uid:${msg.uid}`);
+  }
   }
   const chunk = <T,>(arr: T[], size: number): T[][] => {
     const out: T[][] = [];
@@ -264,15 +273,17 @@ async function reconcileSeenFlags(acc: MailAccount, client: ImapFlow, exists: nu
   };
   // Extern gelesen -> is_read = true (nur bisher ungelesene Datensätze).
   for (const part of chunk(seenLinks, 150)) {
-    await admin.from("messages").update({ is_read: true })
+    const {error} = await admin.from("messages").update({ is_read: true })
       .eq("mail_account_id", acc.id).eq("folder_type", "inbox").eq("is_read", false)
-      .in("web_link", part);
+      .eq("user_id",acc.user_id).in("web_link", part);
+    if(error) throw new Error("Gelesen-Status konnte nicht gespeichert werden.");
   }
   // Extern auf ungelesen gesetzt -> is_read = false (nur bisher gelesene).
   for (const part of chunk(unseenLinks, 150)) {
-    await admin.from("messages").update({ is_read: false })
+    const {error} = await admin.from("messages").update({ is_read: false })
       .eq("mail_account_id", acc.id).eq("folder_type", "inbox").eq("is_read", true)
-      .in("web_link", part);
+      .eq("user_id",acc.user_id).in("web_link", part);
+    if(error) throw new Error("Gelesen-Status konnte nicht gespeichert werden.");
   }
 }
 

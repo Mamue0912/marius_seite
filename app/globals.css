@@ -4,86 +4,7 @@
    Zentrale Design-Tokens – keine Einzelwerte in Komponenten.
    ========================================================================= */
 
-:root {
-  color-scheme: dark;
 
-  /* ---- Hintergrund: cleanes Tiefschwarz ---- */
-  --bg-0: #050506;                 /* fast reines Schwarz */
-  --bg-1: #08080a;
-  /* Fast schwarz mit hauchzarten Licht-Höfen, damit die transluzenten
-     Glas-Oberflächen Tiefe zeigen (wie Apples dunkle Materials über dunklem
-     Grund). Bewusst sehr dezent – der Grund bleibt klar schwarz. */
-  --bg-grad:
-    radial-gradient(1200px 820px at 12% -12%, rgba(150,146,255,0.11) 0%, transparent 56%),
-    radial-gradient(1000px 720px at 100% 4%, rgba(120,170,255,0.07) 0%, transparent 52%),
-    radial-gradient(1100px 1000px at 50% 120%, rgba(255,255,255,0.045) 0%, transparent 56%),
-    #050506;
-
-  /* ---- Oberflächen (solide Basis, wo Glas nicht passt) ---- */
-  --surface: #17171b;
-  --surface-2: #1e1e23;
-  --raised: #26262c;
-  --sunken: #0e0e11;
-
-  /* ---- Glas-Materialien (Apple-artig transluzent, deutlich sichtbar) ---- */
-  --mat-thin: rgba(44,44,53,0.40);
-  --mat: rgba(46,46,55,0.52);
-  --mat-thick: rgba(30,30,38,0.70);
-  --mat-hi: rgba(255,255,255,0.13);   /* oberer Lichtsaum (Glas-Kante) */
-
-  /* ---- Konturen (hauchfeine helle Glaskanten) ---- */
-  --line: rgba(255,255,255,0.09);
-  --line-2: rgba(255,255,255,0.055);
-  --line-strong: rgba(255,255,255,0.15);
-
-  /* ---- Text (auf dunkel getunt: klare Hierarchie) ---- */
-  --ink: rgba(255,255,255,0.94);
-  --ink-2: rgba(235,235,245,0.70);
-  --muted: rgba(235,235,245,0.50);
-  --faint: rgba(235,235,245,0.32);
-
-  /* ---- Akzent (Apple-inspiriertes Indigo) ---- */
-  --accent: #5E5CE6;
-  --accent-2: #7D7BF4;
-  --accent-ink: #C3C2FF;
-  --accent-soft: rgba(94,92,230,0.16);
-  --accent-line: rgba(124,122,242,0.32);
-
-  /* ---- Status (gedämpft) ---- */
-  --urgent: #FF6961; --urgent-soft: rgba(255,105,97,0.14);
-  --high: #FFB340;   --high-soft: rgba(255,179,64,0.14);
-  --mid: #4AA3FF;    --mid-soft: rgba(74,163,255,0.14);
-  --low: #4ADE80;    --low-soft: rgba(74,222,128,0.13);
-  --ok: #4ADE80;
-
-  /* ---- Scrollbar ---- */
-  --scroll: rgba(235,235,245,0.14);
-  --scroll-h: rgba(235,235,245,0.30);
-
-  /* ---- Schatten (weich, diffus – Tiefe statt harter Kanten) ---- */
-  --shadow-sm: 0 1px 2px rgba(0,0,0,0.34);
-  --shadow: 0 8px 26px -8px rgba(0,0,0,0.46), 0 2px 6px -3px rgba(0,0,0,0.36);
-  --shadow-lg: 0 34px 80px -14px rgba(0,0,0,0.62), 0 8px 24px -8px rgba(0,0,0,0.42);
-
-  /* ---- Blur (Apple-Frosted-Glass) ---- */
-  --blur: saturate(185%) blur(30px);
-  --blur-sm: saturate(175%) blur(20px);
-
-  /* ---- Radien (weich, modern; --r-md ergänzt) ---- */
-  --r-xs: 8px; --r-sm: 11px; --r-md: 13px; --r: 14px; --r-lg: 18px; --r-xl: 24px; --r-pill: 999px;
-
-  /* ---- Abstände ---- */
-  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 22px; --s-6: 32px; --s-7: 48px;
-
-  /* ---- Bewegung ---- */
-  --ease: cubic-bezier(.32,.72,0,1);
-  --t-fast: .16s; --t: .24s; --t-slow: .34s;
-
-  /* ---- Z-Ebenen ---- */
-  --z-bar: 30; --z-scrim: 50; --z-drawer: 60;
-
-  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", system-ui, "Segoe UI", Roboto, sans-serif;
-}
 
 * { box-sizing: border-box; }
 html, body { margin: 0; min-height: 100%; }
@@ -162,7 +83,7 @@ html.scrolling ::-webkit-scrollbar-thumb:hover,
 .status {
   display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 560;
   padding: 6px 11px; border-radius: var(--r-pill); border: 1px solid var(--line);
-  background: var(--mat-thin); backdrop-filter: var(--blur-sm); -webkit-backdrop-filter: var(--blur-sm);
+  background: var(--mat-thin);
   color: var(--ink-2); white-space: nowrap;
 }
 .sdot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); flex: 0 0 auto; }
@@ -180,7 +101,7 @@ html.scrolling ::-webkit-scrollbar-thumb:hover,
 
 .mail {
   position: relative; background: var(--mat); border: 1px solid var(--line);
-  backdrop-filter: var(--blur-sm); -webkit-backdrop-filter: var(--blur-sm);
+
   border-radius: var(--r-lg); padding: 14px 16px; margin-bottom: 10px;
   box-shadow: var(--shadow-sm), inset 0 1px 0 var(--mat-hi);
   transition: border-color var(--t-fast), background-color var(--t-fast), transform var(--t-fast);
@@ -386,7 +307,7 @@ textarea { resize: vertical; line-height: 1.55; }
 .ov-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
 .tile {
   position: relative; display: block; color: inherit;
-  background: var(--mat); backdrop-filter: var(--blur-sm);
+  background: var(--mat);
   border: 1px solid var(--line); border-radius: var(--r-lg);
   padding: 18px; box-shadow: var(--shadow-sm), inset 0 1px 0 var(--mat-hi);
   transition: transform var(--t) var(--ease), border-color var(--t), background-color var(--t), box-shadow var(--t);
@@ -475,7 +396,7 @@ textarea { resize: vertical; line-height: 1.55; }
 .task-add { display: flex; gap: 8px; margin-bottom: 18px; flex-wrap: wrap; }
 .task-add input[type="text"], .task-add > input:first-child { flex: 1 1 220px; }
 .task-add input[type="date"], .task-add select { width: auto; }
-.task { display: flex; align-items: center; gap: 12px; background: var(--mat); backdrop-filter: var(--blur-sm); -webkit-backdrop-filter: var(--blur-sm); border: 1px solid var(--line); border-radius: var(--r-md); padding: 11px 14px; margin-bottom: 8px; box-shadow: inset 0 1px 0 var(--mat-hi); transition: border-color var(--t-fast), transform var(--t-fast); }
+.task { display: flex; align-items: center; gap: 12px; background: var(--mat);   border: 1px solid var(--line); border-radius: var(--r-md); padding: 11px 14px; margin-bottom: 8px; box-shadow: inset 0 1px 0 var(--mat-hi); transition: border-color var(--t-fast), transform var(--t-fast); }
 .task:hover { border-color: var(--line-strong); }
 .task.done { opacity: .55; }
 .task.done .task-title { text-decoration: line-through; }
@@ -532,7 +453,7 @@ textarea { resize: vertical; line-height: 1.55; }
 .cal-dots { display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
 .cal-chip { font-size: 10.5px; line-height: 1.4; padding: 1px 6px; border-radius: 5px; background: var(--accent); color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
 .cal-more { font-size: 10px; color: var(--muted); }
-.cal-day { margin-top: 4px; padding: 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--mat); backdrop-filter: var(--blur-sm); -webkit-backdrop-filter: var(--blur-sm); box-shadow: inset 0 1px 0 var(--mat-hi); }
+.cal-day { margin-top: 4px; padding: 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--mat);   box-shadow: inset 0 1px 0 var(--mat-hi); }
 .cal-day-h { font-size: 14px; font-weight: 600; margin-bottom: 8px; text-transform: capitalize; }
 .cal-empty { color: var(--muted); font-size: 13px; padding: 6px 0; }
 .cal-empty.sm { font-size: 11px; padding: 2px 0; text-align: center; }
@@ -561,7 +482,7 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--mat); }
 
 /* Jahresansicht: 12 Mini-Monate */
 .cal-year { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
-.cal-ymonth { text-align: left; padding: 10px; border: 1px solid var(--line-2); border-radius: 12px; background: var(--mat-thin); backdrop-filter: var(--blur-sm); -webkit-backdrop-filter: var(--blur-sm); }
+.cal-ymonth { text-align: left; padding: 10px; border: 1px solid var(--line-2); border-radius: 12px; background: var(--mat-thin);   }
 .cal-ymonth:hover { border-color: var(--accent-line); background: var(--surface-2); }
 .cal-ymonth-h { font-size: 13px; font-weight: 700; margin-bottom: 6px; color: var(--ink); }
 .cal-ywd { display: grid; grid-template-columns: repeat(7, 1fr); gap: 0; margin-bottom: 3px; }
@@ -586,14 +507,14 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--mat); }
 
 /* =========================== Statistik-Reihe =========================== */
 .stat-row { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
-.stat-tile { flex: 1 1 140px; background: var(--mat); backdrop-filter: var(--blur-sm); -webkit-backdrop-filter: var(--blur-sm); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 16px; box-shadow: var(--shadow-sm), inset 0 1px 0 var(--mat-hi); }
+.stat-tile { flex: 1 1 140px; background: var(--mat);   border: 1px solid var(--line); border-radius: var(--r-lg); padding: 16px; box-shadow: var(--shadow-sm), inset 0 1px 0 var(--mat-hi); }
 .stat-tile .stat-n { font-size: 26px; font-weight: 700; }
 .stat-tile .stat-l { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
 
 /* =========================== 3-Bereiche-Mailansicht =========================== */
 .mail3 { display: flex; height: calc(100dvh - 55px); overflow: hidden; }
 
-.msidebar { width: 232px; flex: 0 0 232px; display: flex; flex-direction: column; overflow: hidden; border-right: 1px solid var(--line-2); background: var(--mat-thin); backdrop-filter: var(--blur-sm); -webkit-backdrop-filter: var(--blur-sm); }
+.msidebar { width: 232px; flex: 0 0 232px; display: flex; flex-direction: column; overflow: hidden; border-right: 1px solid var(--line-2); background: var(--mat-thin);   }
 .msidebar-scroll { flex: 1; min-height: 0; }
 .msidebar-scroll > .oscroll-view { padding: 10px 8px; }
 .mfolder { position: relative; display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; border: 0; background: transparent; color: var(--ink-2); font-size: 13px; font-weight: 480; padding: 7px 9px; border-radius: var(--r-xs); cursor: pointer; transition: background-color var(--t-fast), color var(--t-fast); }
@@ -613,7 +534,7 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--mat); }
 .macct-folders { padding-left: 6px; }
 .msmart-h { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); padding: 16px 9px 6px; margin-top: 8px; border-top: 1px solid var(--line-2); }
 
-.mlist { width: 360px; flex: 0 0 360px; display: flex; flex-direction: column; border-right: 1px solid var(--line-2); min-width: 0; background: var(--mat-thin); backdrop-filter: var(--blur-sm); -webkit-backdrop-filter: var(--blur-sm); }
+.mlist { width: 360px; flex: 0 0 360px; display: flex; flex-direction: column; border-right: 1px solid var(--line-2); min-width: 0; background: var(--mat-thin);   }
 .mlist-top { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line-2); }
 .mlist-top .f-search { flex: 1; padding: 8px 12px; }
 /* Filter „Alle / Ungelesen" – deutlich sichtbarer aktiver Zustand. */
@@ -649,7 +570,7 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--mat); }
 .lbl-x { border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 12px; padding: 0; line-height: 1; opacity: .7; }
 .lbl-add { width: auto; font-size: 11px; padding: 3px 22px 3px 8px; background: var(--surface-2); border-radius: var(--r-pill); }
 
-.mread { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--mat-thin); backdrop-filter: var(--blur-sm); -webkit-backdrop-filter: var(--blur-sm); }
+.mread { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--mat-thin);   }
 .mread-back { display: none; }
 .mread-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--faint); }
 .mread-empty .ic { font-size: 34px; opacity: .4; }
@@ -707,7 +628,7 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--mat); }
 /* ---- Seitennavigation des Sub-Cockpits ---- */
 .ac-side {
   flex: 0 0 226px; display: flex; flex-direction: column; gap: 4px;
-  padding: 18px 12px; background: var(--mat-thin); backdrop-filter: var(--blur-sm);
+  padding: 18px 12px; background: var(--mat-thin);
   border-right: 1px solid var(--line-2);
 }
 .ac-side-head { display: flex; align-items: center; gap: 9px; font-weight: 640; font-size: 14.5px; letter-spacing: .2px; padding: 4px 10px 14px; color: var(--ink); }
@@ -742,7 +663,7 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--mat); }
 .ac-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
 .ac-mod {
   position: relative; padding: 18px; border-radius: var(--r-lg); background: var(--mat);
-  backdrop-filter: var(--blur-sm); border: 1px solid var(--line);
+   border: 1px solid var(--line);
   box-shadow: var(--shadow-sm), inset 0 1px 0 var(--mat-hi);
   transition: transform var(--t) var(--ease), box-shadow var(--t), border-color var(--t);
   animation: acRise var(--t) var(--ease) both;
@@ -806,7 +727,7 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--mat); }
 .ac-label { display: block; font-size: 13px; font-weight: 600; color: var(--ink-2); margin-bottom: 8px; }
 .ac-label.sm { font-size: 11.5px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin: 16px 0 8px; }
 .ac-hint { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin-top: 8px; }
-.ac-card { padding: 20px; border-radius: var(--r-lg); background: var(--mat); backdrop-filter: var(--blur-sm); border: 1px solid var(--line); box-shadow: var(--shadow-sm), inset 0 1px 0 var(--mat-hi); }
+.ac-card { padding: 20px; border-radius: var(--r-lg); background: var(--mat);  border: 1px solid var(--line); box-shadow: var(--shadow-sm), inset 0 1px 0 var(--mat-hi); }
 
 /* ---- Notizen / Warnungen ---- */
 .ac-note { margin-top: 12px; padding: 10px 13px; border-radius: var(--r-sm); font-size: 13px; line-height: 1.5; border: 1px solid var(--line); }
@@ -829,7 +750,7 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--mat); }
 .ac-list { display: flex; flex-direction: column; gap: 8px; }
 .ac-row {
   display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: var(--r); cursor: pointer;
-  background: var(--mat); border: 1px solid var(--line); backdrop-filter: var(--blur-sm);
+  background: var(--mat); border: 1px solid var(--line);
   transition: transform var(--t-fast), border-color var(--t-fast), background var(--t-fast);
 }
 .ac-row:hover { transform: translateX(2px); border-color: var(--line-strong); background: var(--mat-thick); }
@@ -866,7 +787,7 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--mat); }
 
 /* ---- Arbeitsbereich (3 Spalten) ---- */
 .ac-ws { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-.ac-ws-top { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line-2); background: var(--mat-thin); backdrop-filter: var(--blur-sm); -webkit-backdrop-filter: var(--blur-sm); }
+.ac-ws-top { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line-2); background: var(--mat-thin);   }
 .ac-ws-title { flex: 1; font-size: 15px; font-weight: 640; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: -.01em; }
 .ac-ws-co { color: var(--muted); font-weight: 500; }
 .ac-ws-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 256px minmax(0, 1fr) 344px; overflow: hidden; }
@@ -963,7 +884,7 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--mat); }
 .ac-msg.user { justify-content: flex-end; }
 .ac-msg-b { max-width: 78%; padding: 11px 14px; border-radius: 17px; font-size: 13.5px; line-height: 1.58; white-space: pre-wrap; word-break: break-word; }
 .ac-msg.user .ac-msg-b { background: linear-gradient(180deg, var(--accent-2), var(--accent)); color: #fff; border-bottom-right-radius: 6px; box-shadow: 0 4px 14px -4px var(--accent-soft); }
-.ac-msg.assistant .ac-msg-b { background: var(--mat); backdrop-filter: var(--blur-sm); -webkit-backdrop-filter: var(--blur-sm); border: 1px solid var(--line); color: var(--ink); border-bottom-left-radius: 6px; box-shadow: var(--shadow-sm), inset 0 1px 0 var(--mat-hi); }
+.ac-msg.assistant .ac-msg-b { background: var(--mat);   border: 1px solid var(--line); color: var(--ink); border-bottom-left-radius: 6px; box-shadow: var(--shadow-sm), inset 0 1px 0 var(--mat-hi); }
 /* Sicher gerendertes Markdown in KI-Chatnachrichten */
 .ac-msg-b .md { white-space: normal; }
 .md > :first-child { margin-top: 0; }
@@ -978,7 +899,7 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--mat); }
 .md-a { color: var(--accent); text-decoration: underline; word-break: break-word; }
 .md-code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.9em; background: var(--sunken); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; }
 .md strong { font-weight: 700; }
-.ac-chat-input { flex: 0 0 auto; display: flex; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--line-2); background: var(--mat-thin); backdrop-filter: var(--blur-sm); -webkit-backdrop-filter: var(--blur-sm); }
+.ac-chat-input { flex: 0 0 auto; display: flex; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--line-2); background: var(--mat-thin);   }
 .ac-chat-ta { flex: 1; min-height: 44px; max-height: 140px; resize: none; padding: 11px 13px; border-radius: var(--r); border: 1px solid var(--line-strong); background: var(--sunken); color: var(--ink); font-family: inherit; font-size: 13.5px; }
 .ac-chat-ta:focus { outline: none; border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-soft); }
 
@@ -1120,7 +1041,7 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--mat); }
 .ac-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
 .ac-stat {
   text-align: left; border: 1px solid var(--line); border-radius: var(--r-lg); padding: 16px 18px; cursor: pointer;
-  background: var(--mat); backdrop-filter: var(--blur-sm); box-shadow: var(--shadow-sm), inset 0 1px 0 var(--mat-hi);
+  background: var(--mat);  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--mat-hi);
   display: flex; flex-direction: column; gap: 5px; transition: transform var(--t-fast), border-color var(--t-fast), background var(--t-fast);
 }
 .ac-stat:hover { transform: translateY(-2px); border-color: var(--line-strong); background: var(--mat-thick); }
@@ -1134,7 +1055,7 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--mat); }
 .ac-quick { display: grid; grid-template-columns: repeat(auto-fill, minmax(196px, 1fr)); gap: 12px; }
 .ac-qtile {
   text-align: left; border: 1px solid var(--line); border-radius: var(--r-lg); padding: 16px; cursor: pointer; min-height: 108px;
-  background: var(--mat); backdrop-filter: var(--blur-sm); box-shadow: var(--shadow-sm), inset 0 1px 0 var(--mat-hi);
+  background: var(--mat);  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--mat-hi);
   display: flex; flex-direction: column; gap: 3px; transition: transform var(--t-fast), border-color var(--t-fast), background var(--t-fast);
 }
 .ac-qtile:hover { transform: translateY(-2px); border-color: var(--line-strong); background: var(--mat-thick); }
@@ -1177,7 +1098,7 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--mat); }
 .ac-back {
   display: inline-flex; align-items: center; gap: 5px; padding: 7px 13px 7px 10px;
   border: 1px solid var(--line); border-radius: var(--r-pill);
-  background: var(--mat); backdrop-filter: var(--blur-sm); color: var(--ink-2);
+  background: var(--mat);  color: var(--ink-2);
   font-size: 13px; font-weight: 560; cursor: pointer;
   box-shadow: var(--shadow-sm), inset 0 1px 0 var(--mat-hi);
   transition: transform var(--t-fast) var(--ease), background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
@@ -1247,7 +1168,7 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--mat); }
 
 /* Neue Bewerbung: Modus-Umschalter (Stelle vs. Unternehmenswebsite) */
 .ac-modeswitch { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
-.ac-modebtn { text-align: left; display: flex; flex-direction: column; gap: 3px; padding: 14px 16px; border-radius: var(--r); border: 1px solid var(--line); background: var(--mat); backdrop-filter: var(--blur-sm); -webkit-backdrop-filter: var(--blur-sm); cursor: pointer; box-shadow: inset 0 1px 0 var(--mat-hi); transition: border-color var(--t-fast), transform var(--t-fast), background var(--t-fast); }
+.ac-modebtn { text-align: left; display: flex; flex-direction: column; gap: 3px; padding: 14px 16px; border-radius: var(--r); border: 1px solid var(--line); background: var(--mat);   cursor: pointer; box-shadow: inset 0 1px 0 var(--mat-hi); transition: border-color var(--t-fast), transform var(--t-fast), background var(--t-fast); }
 .ac-modebtn:hover { transform: translateY(-1px); border-color: var(--line-strong); }
 .ac-modebtn.on { border-color: var(--accent-line); background: linear-gradient(135deg, rgba(124,122,242,.14), var(--mat-thick)); box-shadow: inset 0 0 0 1px var(--accent-line); }
 .ac-modebtn-t { font-size: 14px; font-weight: 640; color: var(--ink); }
@@ -1261,7 +1182,7 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--mat); }
 .ac-search-tailor { display: inline-flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 13px; color: var(--ink-2); cursor: pointer; }
 .ac-search-tailor input { width: auto; }
 .ac-search-meta { margin: 14px 0 4px; font-size: 12.5px; color: var(--muted); }
-.ac-jobresult { display: flex; align-items: center; gap: 14px; padding: 13px 15px; border-radius: var(--r); background: var(--mat); border: 1px solid var(--line); backdrop-filter: var(--blur-sm); -webkit-backdrop-filter: var(--blur-sm); box-shadow: inset 0 1px 0 var(--mat-hi); transition: border-color var(--t-fast), transform var(--t-fast); }
+.ac-jobresult { display: flex; align-items: center; gap: 14px; padding: 13px 15px; border-radius: var(--r); background: var(--mat); border: 1px solid var(--line);   box-shadow: inset 0 1px 0 var(--mat-hi); transition: border-color var(--t-fast), transform var(--t-fast); }
 .ac-jobresult:hover { border-color: var(--line-strong); transform: translateY(-1px); }
 .ac-jobfit { margin-left: 10px; font-size: 11.5px; font-weight: 600; color: var(--low); background: var(--low-soft); border-radius: var(--r-pill); padding: 2px 9px; vertical-align: middle; }
 @media (max-width: 640px) {

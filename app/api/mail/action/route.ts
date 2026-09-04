@@ -23,16 +23,15 @@ export async function POST(req: NextRequest) {
   if (!msg) return NextResponse.json({ error: "not_found" }, { status: 404 });
   const account = msg.mail_account_id ? await loadMailAccount(msg.mail_account_id) : null;
   const uid = extractUid(msg.web_link);
-  if (!account || !uid) return NextResponse.json({ error: "no_source" }, { status: 400 });
+  if (!account || account.user_id !== user.id || !uid) return NextResponse.json({ error: "no_source" }, { status: 400 });
 
   try {
     const res = await imapAction(account as MailAccount, msg.original_folder_name || "INBOX", uid, action);
-    // Lokalen Status erst NACH Erfolg anpassen.
-    if (action === "read") await admin.from("messages").update({ is_read: true }).eq("id", msg.id);
-    else if (action === "unread") await admin.from("messages").update({ is_read: false }).eq("id", msg.id);
-    else if (res.movedTo === "trash") await admin.from("messages").update({ is_deleted: true }).eq("id", msg.id);
-    else if (res.movedTo) await admin.from("messages").update({ folder_type: res.movedTo, original_folder_name: null }).eq("id", msg.id);
-    return NextResponse.json({ ok: true, movedTo: res.movedTo });
+    const patch: any = action === "read" ? {is_read:true} : action === "unread" ? {is_read:false}
+      : res.movedTo === "trash" ? {is_deleted:true}
+      : {folder_type:res.movedTo,original_folder_name:res.path,web_link:res.uid ? "imap-uid:"+res.uid : null};
+    const {error} = await admin.from("messages").update(patch).eq("id",msg.id).eq("user_id",user.id);
+    return NextResponse.json({ok:true,movedTo:res.movedTo,warning:error?"Serveraktion ausgeführt. Der lokale Status muss erneut synchronisiert werden.":null});
   } catch (e) {
     return NextResponse.json({ error: "action_failed", message: friendlyMailError(e as Error) }, { status: 502 });
   }

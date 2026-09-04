@@ -14,10 +14,11 @@ async function owned(userId: string, id: string) {
 }
 
 // GET: Detail + kurzlebige Vorschau-URL + Fakten.
-export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const user = await requireUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const doc = await owned(user.id, params.id);
+  const doc = await owned(user.id, id);
   if (!doc) return NextResponse.json({ error: "not_found" }, { status: 404 });
   const url = await signedUrl(doc.storage_path, 300);
   const { data: facts } = await supabaseAdmin().from("app_document_facts").select("*").eq("document_id", doc.id).eq("user_id", user.id).order("created_at", { ascending: true });
@@ -25,10 +26,11 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 }
 
 // PATCH: umbenennen / Typ / Freigabe für Bewerbungen.
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const user = await requireUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const doc = await owned(user.id, params.id);
+  const doc = await owned(user.id, id);
   if (!doc) return NextResponse.json({ error: "not_found" }, { status: 404 });
   const body = await req.json().catch(() => ({}));
   const update: any = { updated_at: new Date().toISOString() };
@@ -40,10 +42,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 }
 
 // PUT (multipart): Datei ersetzen (alte löschen, neue speichern, neu extrahieren).
-export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const user = await requireUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const doc = await owned(user.id, params.id);
+  const doc = await owned(user.id, id);
   if (!doc) return NextResponse.json({ error: "not_found" }, { status: 404 });
   let form: FormData;
   try { form = await req.formData(); } catch { return NextResponse.json({ error: "bad_request" }, { status: 400 }); }
@@ -62,10 +65,11 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 }
 
 // DELETE: Datei + Datensatz + Fakten entfernen.
-export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const user = await requireUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const doc = await owned(user.id, params.id);
+  const doc = await owned(user.id, id);
   if (!doc) return NextResponse.json({ error: "not_found" }, { status: 404 });
   await deleteDocument(doc.storage_path);
   await supabaseAdmin().from("app_documents").delete().eq("id", doc.id).eq("user_id", user.id);

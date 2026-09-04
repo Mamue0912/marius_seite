@@ -20,24 +20,27 @@ async function findPath(c: ImapFlow, type: FolderType): Promise<string | null> {
 
 // Verschiebt/markiert eine Nachricht ECHT über IMAP. Wirft bei Misserfolg,
 // damit die UI zurückrollen kann. Gibt den kanonischen Zielordner zurück.
-export async function imapAction(acc: MailAccount, sourceMailbox: string, uid: number, action: string): Promise<{ movedTo: FolderType | null }> {
+export async function imapAction(acc: MailAccount, sourceMailbox: string, uid: number, action: string): Promise<{ movedTo: FolderType | null; path?: string; uid?: number }> {
+  if (!Number.isSafeInteger(uid) || uid <= 0) throw new Error("Ungültige Nachrichten-ID");
+  if (action === "trash") action = "delete";
   const c = client(acc);
   await c.connect();
   try {
     const lock = await c.getMailboxLock(sourceMailbox || "INBOX");
     try {
-      if (action === "read") { await c.messageFlagsAdd(String(uid), ["\\Seen"], { uid: true }); return { movedTo: null }; }
-      if (action === "unread") { await c.messageFlagsRemove(String(uid), ["\\Seen"], { uid: true }); return { movedTo: null }; }
+      if (action === "read") { if (!await c.messageFlagsAdd(String(uid), ["\\Seen"], { uid: true })) throw new Error("Gelesen-Status nicht bestätigt"); return { movedTo: null }; }
+      if (action === "unread") { if (!await c.messageFlagsRemove(String(uid), ["\\Seen"], { uid: true })) throw new Error("Gelesen-Status nicht bestätigt"); return { movedTo: null }; }
 
       // Zurück in den Posteingang (Entarchivieren / „Kein Spam").
-      if (action === "inbox") { await c.messageMove(String(uid), "INBOX", { uid: true }); return { movedTo: "inbox" }; }
+      if (action === "inbox") { const moved = await c.messageMove(String(uid), "INBOX", { uid: true }); if (!moved) throw new Error("Verschieben nicht bestätigt"); return { movedTo: "inbox", path: "INBOX", uid: moved.uidMap?.get(uid) }; }
 
       const targetType: FolderType | null = action === "delete" ? "trash" : action === "archive" ? "archive" : action === "spam" ? "spam" : null;
       if (!targetType) throw new Error("unknown action");
       const target = await findPath(c, targetType);
       if (!target) throw new Error(`Zielordner (${targetType}) nicht gefunden`);
-      await c.messageMove(String(uid), target, { uid: true });
-      return { movedTo: targetType };
+      const moved = await c.messageMove(String(uid), target, { uid: true });
+      if (!moved) throw new Error("Verschieben nicht bestätigt");
+      return { movedTo: targetType, path: target, uid: moved.uidMap?.get(uid) };
     } finally {
       lock.release();
     }

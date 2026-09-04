@@ -22,10 +22,11 @@ async function owned(userId: string, id: string) {
 //  action = "add"      { category, value }  (manuell, direkt bestätigt)
 //  action = "update"   { factId, value }
 //  action = "delete"   { factId }
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const user = await requireUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const doc = await owned(user.id, params.id);
+  const doc = await owned(user.id, id);
   if (!doc) return NextResponse.json({ error: "not_found" }, { status: 404 });
   const admin = supabaseAdmin();
   const body = await req.json().catch(() => ({}));

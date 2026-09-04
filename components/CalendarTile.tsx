@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import Icon from "@/components/Icon";
 import Link from "next/link";
 import { calStore, calFetchWindow, calDefaultWindow, CalEvent } from "@/lib/calendarStore";
 
@@ -33,7 +34,7 @@ export default function CalendarTile() {
 
   return (
     <Link className="tile" href="/calendar" prefetch>
-      <div className="tile-h"><span className="tile-ic">▦</span><span className="tile-t">Kalender</span><span className="tile-go">→</span></div>
+      <div className="tile-h"><span className="tile-ic"><Icon name="calendar" /></span><span className="tile-t">Kalender</span><span className="tile-go"><Icon name="arrow" size={16} /></span></div>
       {state === "loading" && <div className="tile-empty">lädt…</div>}
       {state === "off" && <div className="tile-empty">Google-Kalender verbinden, um Termine hier zu sehen.</div>}
       {state === "reauth" && <div className="tile-empty">Google-Verbindung abgelaufen – neu verbinden.</div>}

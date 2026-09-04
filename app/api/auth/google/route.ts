@@ -22,7 +22,8 @@ export async function GET() {
   const verifier = randomUrlSafe(48);
   const challenge = pkceChallenge(verifier);
 
-  cookies().set("g_oauth", JSON.stringify({ state, verifier, uid: user.id }), {
+  const cookieStore = await cookies();
+  cookieStore.set("g_oauth", JSON.stringify({ state, verifier, uid: user.id }), {
     httpOnly: true, secure: true, sameSite: "lax", path: "/", maxAge: 600
   });
 

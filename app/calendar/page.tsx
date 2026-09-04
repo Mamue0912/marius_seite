@@ -7,7 +7,8 @@ import { env } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
 
-export default async function CalendarPage({ searchParams }: { searchParams: { google?: string; reason?: string } }) {
+export default async function CalendarPage({ searchParams }: { searchParams: Promise<{ google?: string; reason?: string }> }) {
+  const query = await searchParams;
   const user = await requireUser();
   if (!user) return <LoginForm />;
 
@@ -15,7 +16,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: { g
     .from("google_accounts").select("email,status").eq("user_id", user.id).maybeSingle();
   const connected = !!acc;
   const configured = env.google.configured();
-  const status = searchParams?.google;
+  const status = query?.google;
   let callbackUrl = "[deine-App]/api/auth/google/callback";
   try { callbackUrl = env.appBaseUrl() + "/api/auth/google/callback"; } catch { /* APP_BASE_URL evtl. nicht gesetzt */ }
 
@@ -26,7 +27,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: { g
           <h1>Kalender</h1>
         </div>
         <div className="wrap-inner">
-          {status === "error" && <div className="cal-note bad" style={{ marginBottom: 12 }}>Verbindung fehlgeschlagen{searchParams?.reason ? `: ${searchParams.reason}` : "."}</div>}
+          {status === "error" && <div className="cal-note bad" style={{ marginBottom: 12 }}>Verbindung fehlgeschlagen{query?.reason ? `: ${query.reason}` : "."}</div>}
           {status === "connected" && <div className="cal-note ok" style={{ marginBottom: 12 }}>Google-Kalender verbunden.</div>}
 
           {connected ? (

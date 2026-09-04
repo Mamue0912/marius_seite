@@ -1,8 +1,11 @@
 "use client";
-import { useEffect, useRef, useState, memo } from "react";
+import { useEffect, useRef, useState, memo, useDeferredValue } from "react";
 import { supabaseBrowser } from "@/lib/supabaseBrowser";
+import { Notice, notify } from "./Feedback";
+import { requestJson, jsonRequest } from "@/lib/http";
+import { messageContentKey } from "@/lib/mailKeys";
 import OverlayScroll from "@/components/OverlayScroll";
-import { getMailCache, fetchMessages, setMailCache, getFolderCache, fetchFolder, prefetchFolder, getMsgContent, setMsgContent } from "@/lib/mailStore";
+import { getMailCache, fetchMessages, setMailCache, getFolderCache, fetchFolder, prefetchFolder, getMsgContent, setMsgContent, invalidateFolderCache } from "@/lib/mailStore";
 import { PROVIDERS } from "@/lib/mailProviders";
 import { RELEVANCE_LABEL } from "@/lib/classify2";
 
@@ -81,7 +84,7 @@ async function fetchJson(
   let timedOut = false;
   const timer = setTimeout(() => { timedOut = true; ctrl.abort(new DOMException("timeout", "TimeoutError")); }, timeoutMs);
   const onExt = () => ctrl.abort(new DOMException("cancel", "AbortError"));
-  if (extSignal) extSignal.addEventListener("abort", onExt, { once: true });
+  if (extSignal?.aborted) onExt(); else if (extSignal) extSignal.addEventListener("abort", onExt, { once: true });
   try {
     const r = await fetch(url, { ...rest, signal: ctrl.signal });
     let data: any = {};
@@ -136,6 +139,11 @@ export default function Cockpit({
   const [compose, setCompose] = useState<any>(null);
   const [reading, setReading] = useState<any>(null);
   const [q, setQ] = useState("");
+  const searchQuery = useDeferredValue(q);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [listLoading, setListLoading] = useState(() => !getMailCache());
+  const folderSequence = useRef(0);
+  const actionLocks = useRef(new Set<string>());
   // Auswahl: Konto (all|id) + Ordner-Typ + optional Smart-View.
   const [sel, setSel] = useState<{ account: string; ftype: string; path?: string; view?: string }>({ account: "all", ftype: "inbox" });
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -162,14 +170,17 @@ export default function Cockpit({
   useEffect(() => {
     const supabase = supabaseBrowser();
     let channel: any;
+    let disposed = false;
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       uidRef.current = user.id;
       // Sofort aus dem Cache (falls per Hover vorgeladen), dann im Hintergrund
       // aktualisieren – kein Warten mit leerer Liste beim Öffnen.
-      const data = await fetchMessages();
-      setMsgs(data as Msg[]);
+      try { const data = await fetchMessages(); if (!disposed) { setMsgs(data as Msg[]); setLoadError(null); } }
+      catch (e) { if (!disposed) setLoadError((e as Error).message); }
+      finally { if (!disposed) setListLoading(false); }
+      if (disposed) return;
       channel = supabase
         .channel("messages-live")
         .on("postgres_changes", { event: "*", schema: "public", table: "messages", filter: `user_id=eq.${user.id}` }, (payload: any) => {
@@ -184,8 +195,10 @@ export default function Cockpit({
         })
         .subscribe();
     })();
-    return () => { if (channel) channel.unsubscribe(); };
+    return () => { disposed = true; if (channel) channel.unsubscribe(); };
   }, []);
+
+  useEffect(() => { setMailCache(msgs); }, [msgs]);
 
   // ---- Beim Öffnen einmal synchronisieren (holt neue Mails) ----
   useEffect(() => {
@@ -288,7 +301,7 @@ export default function Cockpit({
     if (unreadOnly && (m as any).is_read) return false;
     if (q) {
       const hay = `${m.from_name || ""} ${m.from_address || ""} ${m.subject || ""} ${m.preview || ""}`.toLowerCase();
-      if (!hay.includes(q.toLowerCase())) return false;
+      if (!hay.includes(searchQuery.toLowerCase())) return false;
     }
     if (sel.view) {
       // Intelligente Ansicht: kontenübergreifend, ordnerunabhängig, aus gespeicherten Daten.
@@ -338,6 +351,7 @@ export default function Cockpit({
     return FOLDER_LABELS[type] || type;
   }
   async function selectFolder(account: string, ftype: string, path?: string) {
+    const sequence = ++folderSequence.current; setLoadError(null);
     setSel({ account, ftype, path, view: undefined });
     setReading(null); setMobilePane("list");
     if (ftype === "inbox" || ftype === "sent" || !path) { setFolderItems(null); return; }
@@ -345,45 +359,58 @@ export default function Cockpit({
     const cached = getFolderCache(account, path);
     if (cached) { setFolderItems(cached); setFolderLoading(false); }
     else { setFolderLoading(true); setFolderItems([]); }
-    const items = await fetchFolder(account, path);
-    setFolderItems(items); setFolderLoading(false);
+    try { const items = await fetchFolder(account, path); if (sequence === folderSequence.current) setFolderItems(items); }
+    catch (e) { if (sequence === folderSequence.current) setLoadError((e as Error).message); }
+    finally { if (sequence === folderSequence.current) setFolderLoading(false); }
   }
   function selectView(view: string) {
+    ++folderSequence.current; setLoadError(null);
     setSel({ account: "all", ftype: "inbox", view }); setFolderItems(null); setReading(null); setMobilePane("list");
   }
   async function openFolderItem(it: any, images?: boolean) {
     if (images === undefined) images = autoImages(it);
-    const synthetic = { id: `imap:${it.account_id}:${it.uid}`, ...it, folder_type: sel.ftype, folder_path: it.path, mail_account_id: it.account_id, readonly: true };
+    const account = it.account_id || it.mail_account_id;
+    const path = it.path || it.folder_path;
+    const synthetic = { ...it, id: messageContentKey(account,path,it.uid,false), folder_type: sel.ftype, folder_path: path, mail_account_id: account, readonly: true };
     setMobilePane("read");
-    // Als gelesen markieren (der Server setzt \Seen beim Öffnen) – auch in der Liste.
-    setFolderItems((prev) => prev ? prev.map((x) => x.uid === it.uid && x.path === it.path ? { ...x, is_read: true } : x) : prev);
-    // Schon geöffnet? Sofort aus dem Cache.
-    const ckey = `uid:${it.account_id}:${it.uid}:${images ? 1 : 0}`;
-    const cachedContent = getMsgContent(ckey);
-    if (cachedContent) { setReading({ msg: synthetic, loading: false, ...cachedContent }); return; }
-    setReading({ msg: synthetic, loading: true });
+    const ckey = messageContentKey(account,path,it.uid,images);
+    const cached = getMsgContent(ckey);
+    setReading({msg:synthetic, loading:!cached, ...cached});
     try {
-      const r = await fetch(`/api/mail/message?uid=${it.uid}&account=${it.account_id}&path=${encodeURIComponent(it.path)}${images ? "&images=1" : ""}`);
-      const j = await r.json();
-      setMsgContent(ckey, j);
-      setReading((s: any) => s && s.msg.id === synthetic.id ? { ...s, loading: false, ...j } : s);
-    } catch { setReading((s: any) => s ? { ...s, loading: false, error: true } : s); }
+      if (cached) {
+        if (!it.is_read) await requestJson("/api/mail/folder-action",jsonRequest("POST",{account,path,uid:it.uid,action:"read"}));
+      } else {
+        const data = await requestJson("/api/mail/message?uid="+it.uid+"&account="+encodeURIComponent(account)+"&path="+encodeURIComponent(path)+(images?"&images=1":""));
+        setMsgContent(ckey,data);
+        setReading((r:any)=>r?.msg.id===synthetic.id?{...r,...data,loading:false}:r);
+      }
+      setFolderItems(rows=>rows?.map(row=>row.uid===it.uid&&row.path===path?{...row,is_read:true}:row)||rows);
+      setReading((r:any)=>r?.msg.id===synthetic.id?{...r,msg:{...r.msg,is_read:true}}:r);
+    } catch(e) {
+      setReading((r:any)=>r?.msg.id===synthetic.id?{...r,loading:false,error:(e as Error).message}:r);
+    }
   }
 
-  // Aktion auf ein on-demand-Ordner-Element (Archiv/Junk): verschieben etc.
   async function folderItemAction(m: any, action: string) {
-    setFolderItems((prev) => prev ? prev.filter((x) => !(x.uid === m.uid && x.path === m.folder_path)) : prev);
-    setReading(null); setMobilePane("list");
-    const r = await fetch("/api/mail/folder-action", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ account: m.mail_account_id, path: m.folder_path, uid: m.uid, action }) });
-    if (!r.ok) { const j = await r.json().catch(() => ({})); alert(j.message || "Aktion fehlgeschlagen."); }
+    const key = messageContentKey(m.mail_account_id,m.folder_path,m.uid,false);
+    if (actionLocks.current.has(key)) return;
+    actionLocks.current.add(key);
+    const removes = !["read","unread"].includes(action);
+    try {
+      await requestJson("/api/mail/folder-action",jsonRequest("POST",{account:m.mail_account_id,path:m.folder_path,uid:m.uid,action}));
+      invalidateFolderCache(m.mail_account_id,m.folder_path);
+      setFolderItems(rows=>rows?.flatMap(row=>row.uid===m.uid&&row.path===m.folder_path?(removes?[]:[{...row,is_read:action==="read"}]):[row])||rows);
+      if(removes){setReading(null);setMobilePane("list");}
+      else setReading((r:any)=>r?.msg.id===m.id?{...r,msg:{...r.msg,is_read:action==="read"}}:r);
+      notify("Nachricht aktualisiert.");
+    } catch(e) { notify((e as Error).message,true); }
+    finally { actionLocks.current.delete(key); }
   }
 
   async function reloadMessages() {
-    try {
-      const supabase = supabaseBrowser();
-      const { data } = await supabase.from("messages").select("*").eq("is_deleted", false).order("received_at", { ascending: false }).limit(600);
-      if (data) { setMsgs(data); setMailCache(data); }
-    } catch {}
+    try { const data = await fetchMessages(); setMsgs(data); setLoadError(null); }
+    catch(e) { setLoadError((e as Error).message); }
+    finally { setListLoading(false); }
   }
 
   const syncingRef = useRef(false);
@@ -405,7 +432,8 @@ export default function Cockpit({
     } catch { errors = ["Netzwerkfehler beim Synchronisieren"]; }
     // Nach dem Sync alle Queries neu laden (Badge + Liste + Übersicht aus einer Quelle).
     await reloadMessages();
-    setStatus({ syncing: false, errors, report, syncedAt: new Date().toISOString() });
+    setStatus((s:any) => ({ syncing: false, errors, report, syncedAt: errors.length ? s?.syncedAt : new Date().toISOString() }));
+    window.dispatchEvent(new Event("cockpit:mail-changed"));
     syncingRef.current = false;
     if (reseed || clean) runClassify();
   }
@@ -479,7 +507,7 @@ export default function Cockpit({
       timeoutMs: 45000, signal: ctrl.signal
     });
     if (ok) {
-      setDrawer((d: any) => d ? ({
+      setDrawer((d: any) => d?.msg.id === m.id ? ({
         ...d, mode: "generated", loading: false, error: null, abort: null,
         draft: data.draft, body: data.draft.body, tone: data.draft.tone,
         fromAccountId: d.fromAccountId || m.mail_account_id,
@@ -491,7 +519,7 @@ export default function Cockpit({
       : timedOut ? "Die KI hat zu lange gebraucht. Bitte erneut versuchen."
       : status === 0 ? "Keine Verbindung zum Server. Bitte Internet/Deployment prüfen."
       : data.message || "Die KI-Antwort konnte nicht erstellt werden.";
-    setDrawer((d: any) => d ? ({ ...d, loading: false, abort: null, error }) : d);
+    setDrawer((d: any) => d?.msg.id === m.id ? ({ ...d, loading: false, abort: null, error }) : d);
   }
 
   async function refine(command: string) {
@@ -501,8 +529,8 @@ export default function Cockpit({
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ messageId: drawer.msg.id, command }), timeoutMs: 45000
     });
-    if (ok) setDrawer((d: any) => d ? ({ ...d, body: data.body, refining: false }) : d);
-    else setDrawer((d: any) => d ? ({ ...d, refining: false, refineError: aborted ? "Abgebrochen." : timedOut ? "Zu lange gebraucht." : (data.message || "Bearbeitung fehlgeschlagen.") }) : d);
+    if (ok) setDrawer((d: any) => d?.msg.id === drawer.msg.id ? ({ ...d, body: data.body, refining: false }) : d);
+    else setDrawer((d: any) => d?.msg.id === drawer.msg.id ? ({ ...d, refining: false, refineError: aborted ? "Abgebrochen." : timedOut ? "Zu lange gebraucht." : (data.message || "Bearbeitung fehlgeschlagen.") }) : d);
   }
 
   async function changeTone(tone: string) {
@@ -513,60 +541,59 @@ export default function Cockpit({
 
   async function saveEdited() {
     if (!drawer) return;
-    await fetch("/api/reply/refine", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messageId: drawer.msg.id, editedBody: drawer.body }) });
+    await requestJson("/api/reply/refine",jsonRequest("POST",{messageId:drawer.msg.id,editedBody:drawer.body}));
   }
 
   async function send() {
-    if (!drawer) return;
-    setDrawer((d: any) => ({ ...d, sending: true, error: null }));
-    await saveEdited(); // aktuellen (ggf. bearbeiteten) Text sichern
-    const { ok, data, timedOut } = await fetchJson("/api/reply/send", {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ messageId: drawer.msg.id, confirm: true, fromAccountId: drawer.fromAccountId }),
-      timeoutMs: 45000
-    });
-    if (ok) { setDrawer(null); return; }
-    setDrawer((d: any) => d ? ({ ...d, sending: false, error: timedOut ? "Der Versand hat zu lange gebraucht. Bitte Status prüfen." : (data.message || data.error || "Versand fehlgeschlagen.") }) : d);
+    if (!drawer || actionLocks.current.has("send")) return;
+    actionLocks.current.add("send");
+    setDrawer((d:any)=>({...d,sending:true,error:null}));
+    try {
+      await saveEdited();
+      await requestJson("/api/reply/send",jsonRequest("POST",{messageId:drawer.msg.id,confirm:true,fromAccountId:drawer.fromAccountId}));
+      setDrawer(null); notify("Antwort versendet."); await reloadMessages();
+    } catch(e) { setDrawer((d:any)=>d?{...d,sending:false,error:(e as Error).message}:d); }
+    finally { actionLocks.current.delete("send"); }
   }
 
   async function openReader(m: Msg, images = false) {
-    // Externe Bilder je nach Einstellung automatisch laden (Standard: immer).
     if (!images) images = autoImages(m);
-    if (images) rememberImageSender(m); // "bekannt" für den Modus „bekannte Absender"
+    if (images) rememberImageSender(m);
     setMobilePane("read");
-    if (!m.is_read) setMsgs((prev) => prev.map((x) => x.id === m.id ? { ...x, is_read: true } : x));
-    // Bereits geöffnete Mail sofort aus dem Cache anzeigen (kein erneutes IMAP-Laden).
-    const ckey = `id:${m.id}:${images ? 1 : 0}`;
-    const cachedContent = getMsgContent(ckey);
-    if (cachedContent) { setReading({ msg: m, loading: false, ...cachedContent }); return; }
-    setReading({ msg: m, loading: true });
+    const ckey = "id:"+m.id+":"+(images?1:0);
+    const cached = getMsgContent(ckey);
+    setReading({msg:m,loading:!cached,...cached});
     try {
-      const r = await fetch(`/api/mail/message?id=${m.id}${images ? "&images=1" : ""}`);
-      const j = await r.json();
-      setMsgContent(ckey, j);
-      setReading((s: any) => s && s.msg.id === m.id ? { ...s, loading: false, ...j } : s);
-    } catch {
-      setReading((s: any) => s ? { ...s, loading: false, error: true } : s);
-    }
+      if (cached) {
+        if(!m.is_read) await requestJson("/api/mail/action",jsonRequest("POST",{messageId:m.id,action:"read"}));
+      } else {
+        const data=await requestJson("/api/mail/message?id="+m.id+(images?"&images=1":""));
+        setMsgContent(ckey,data);
+        setReading((r:any)=>r?.msg.id===m.id?{...r,...data,loading:false}:r);
+      }
+      setMsgs(rows=>rows.map(row=>row.id===m.id?{...row,is_read:true}:row));
+      setReading((r:any)=>r?.msg.id===m.id?{...r,msg:{...r.msg,is_read:true}}:r);
+      window.dispatchEvent(new Event("cockpit:mail-changed"));
+    } catch(e) { setReading((r:any)=>r?.msg.id===m.id?{...r,loading:false,error:(e as Error).message}:r); }
   }
 
   async function mailAction(m: Msg, action: string) {
-    // On-demand-Ordner (Archiv/Junk): über die Ordner-Aktion (IMAP-Move).
-    if ((m as any).readonly) {
-      const map: Record<string, string> = { delete: "trash", archive: "archive", spam: "spam", inbox: "inbox" };
-      return folderItemAction(m, map[action] || action);
-    }
-    // Optimistisch aus der Liste entfernen (bei move/delete) bzw. Status setzen.
-    const removes = ["delete", "archive", "spam"].includes(action);
-    const before = msgs;
-    if (removes) { setMsgs((prev) => prev.filter((x) => x.id !== m.id)); setReading(null); }
+    if (m.readonly) return folderItemAction(m,action);
+    if (actionLocks.current.has(m.id)) return;
+    actionLocks.current.add(m.id);
+    const removes=["delete","archive","spam"].includes(action);
+    const before=m;
+    if(removes){setMsgs(rows=>rows.filter(row=>row.id!==m.id));setReading(null);setMobilePane("list");}
+    else setMsgs(rows=>rows.map(row=>row.id===m.id?{...row,is_read:action==="read"}:row));
     try {
-      const r = await fetch("/api/mail/action", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messageId: m.id, action }) });
-      if (!r.ok) throw new Error();
-    } catch {
-      if (removes) setMsgs(before); // Rollback bei IMAP-Fehler
-      alert("Aktion fehlgeschlagen – die Nachricht wurde auf dem Server nicht verschoben.");
-    }
+      const data=await requestJson("/api/mail/action",jsonRequest("POST",{messageId:m.id,action}));
+      if(!removes) setReading((r:any)=>r?.msg.id===m.id?{...r,msg:{...r.msg,is_read:action==="read"}}:r);
+      notify(data.warning || "Nachricht aktualisiert.",!!data.warning);
+      window.dispatchEvent(new Event("cockpit:mail-changed"));
+    } catch(e) {
+      setMsgs(rows=>[...rows.filter(row=>row.id!==m.id),before].sort((a,b)=>Date.parse(b.received_at||0)-Date.parse(a.received_at||0)));
+      notify((e as Error).message,true);
+    } finally { actionLocks.current.delete(m.id); }
   }
 
   async function setReplyFlag(m: Msg, needs: boolean) {
@@ -730,6 +757,7 @@ export default function Cockpit({
                 Ungelesen{unreadFilterCount() > 0 && <span className="mfilter-count">{unreadFilterCount()}</span>}
               </button>
             </div>
+            {loadError && <Notice retry={reloadMessages}>{loadError}</Notice>}
             {classify && (
               <div className="classify-banner">
                 <span className="spin" />
@@ -763,7 +791,7 @@ export default function Cockpit({
               {folderItems !== null ? (() => {
                 if (folderLoading) return [0, 1, 2, 3].map((i) => <div className="sk-card" key={i} />);
                 // Ungelesen-Filter auch in On-Demand-Ordnern (Archiv/Junk/…).
-                const fitems = unreadOnly ? folderItems.filter((it) => !it.is_read) : folderItems;
+                const fitems = folderItems.filter(it => (!unreadOnly || !it.is_read) && ((it.subject || "")+" "+(it.from_name || "")+" "+(it.from_address || "")).toLowerCase().includes(searchQuery.toLowerCase()));
                 if (!fitems.length) return <div className="empty" style={{ padding: 40 }}>{unreadOnly ? "Keine ungelesenen Nachrichten in diesem Ordner." : "Keine Nachrichten in diesem Ordner."}</div>;
                 return fitems.map((it) => (
                   <MailRow key={it.uid} m={it} account={accById[it.account_id]} onOpen={() => openFolderItem(it)} selected={reading?.msg?.uid === it.uid} labelsOf={labelsOf} />
@@ -771,7 +799,7 @@ export default function Cockpit({
               })() : (() => {
                 // Nur sichtbare Nachrichten, sortiert; für Performance gefenstert.
                 const all = msgs.filter(visible).sort((a, b) => new Date(b.received_at || 0).getTime() - new Date(a.received_at || 0).getTime());
-                if (msgs.length === 0 && status?.syncing) return [0, 1, 2, 3].map((i) => <div className="sk-card" key={i} />);
+                if (listLoading || (msgs.length === 0 && status?.syncing)) return [0, 1, 2, 3].map((i) => <div className="sk-card" key={i} />);
                 if (!all.length) return <div className="empty" style={{ padding: 40 }}><div className="ic">✦</div>{unreadOnly ? "Keine ungelesenen Nachrichten." : "Keine Nachrichten."}</div>;
                 const shown = all.slice(0, listLimit);
                 return <>

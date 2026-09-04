@@ -4,8 +4,8 @@ import { env } from "./env";
 
 // Auth-gebundener Server-Client (liest die Nutzer-Session aus Cookies).
 // Für Route Handler / Server Components, um auth.uid() zu bestimmen.
-export function supabaseServer() {
-  const cookieStore = cookies();
+export async function supabaseServer() {
+  const cookieStore = await cookies();
   return createServerClient(env.supabase.url(), env.supabase.anonKey(), {
     cookies: {
       getAll() {
@@ -23,7 +23,7 @@ export function supabaseServer() {
 }
 
 export async function requireUser() {
-  const supabase = supabaseServer();
+  const supabase = await supabaseServer();
   const {
     data: { user }
   } = await supabase.auth.getUser();

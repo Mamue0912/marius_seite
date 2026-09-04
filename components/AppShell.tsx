@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import Icon from "./Icon";
 import { supabaseBrowser } from "@/lib/supabaseBrowser";
 import { calPrefetchDefault } from "@/lib/calendarStore";
 import { prefetchApplications } from "@/lib/appsStore";
@@ -14,13 +15,10 @@ function prefetchData(href: string) {
 }
 
 const NAV = [
-  { href: "/", label: "Übersicht", icon: "◉" },
-  { href: "/mail", label: "E-Mails", icon: "✉" },
-  { href: "/applications", label: "Bewerbungen", icon: "💼" },
-  { href: "/calendar", label: "Kalender", icon: "▦" },
-  { href: "/tasks", label: "Aufgaben", icon: "☑" },
-  { href: "/deadlines", label: "Fristen", icon: "◎" },
-  { href: "/settings", label: "Einstellungen", icon: "⚙" }
+ {href:"/",label:"Übersicht",icon:"overview"}, {href:"/mail",label:"E-Mails",icon:"mail"},
+ {href:"/applications",label:"Bewerbungen",icon:"briefcase"}, {href:"/calendar",label:"Kalender",icon:"calendar"},
+ {href:"/tasks",label:"Aufgaben",icon:"tasks"}, {href:"/deadlines",label:"Fristen",icon:"clock"},
+ {href:"/settings",label:"Einstellungen",icon:"settings"}
 ];
 
 // Dauerhafte App-Navigation. `active` = aktueller Pfad. `topbar` = globale Leiste.
@@ -40,7 +38,7 @@ export default function AppShell({ active, topbar, children }: { active: string;
           .from("messages")
           .select("id", { count: "exact", head: true })
           .eq("folder_type", "inbox").eq("is_read", false).eq("is_deleted", false);
-        setUnread(count || 0);
+        if (count !== null) setUnread(count);
       } catch { /* still ignorieren */ }
     }
     load();
@@ -56,45 +54,46 @@ export default function AppShell({ active, topbar, children }: { active: string;
     })();
     const onFocus = () => { if (document.visibilityState === "visible") load(); };
     window.addEventListener("focus", onFocus);
+    window.addEventListener("cockpit:mail-changed", load);
     const iv = setInterval(load, 60000);
-    return () => { if (channel) channel.unsubscribe(); window.removeEventListener("focus", onFocus); clearInterval(iv); clearTimeout(timer); };
+    return () => { if (channel) channel.unsubscribe(); window.removeEventListener("focus", onFocus); window.removeEventListener("cockpit:mail-changed", load); clearInterval(iv); clearTimeout(timer); };
   }, []);
 
   const badgeFor = (href: string) => (href === "/mail" && unread > 0 ? unread : 0);
 
   return (
     <div className={"shell" + (collapsed ? " collapsed" : "")}>
-      <aside className="sidebar">
+      <a className="skip-link" href="#main-content">Zum Inhalt</a><aside className="sidebar" aria-label="Hauptnavigation">
         <div className="side-top">
           <span className="mark" />
           {!collapsed && <span className="side-title">Cockpit</span>}
-          <button className="side-toggle" onClick={() => setCollapsed((v) => !v)} title={collapsed ? "Ausklappen" : "Einklappen"} aria-label="Navigation ein-/ausklappen">‹</button>
+          <button className="side-toggle" onClick={() => setCollapsed((v) => !v)} title={collapsed ? "Ausklappen" : "Einklappen"} aria-label="Navigation ein-/ausklappen" aria-expanded={!collapsed}><Icon name="chevron" /></button>
         </div>
-        <nav className="side-nav">
+        <nav className="side-nav" aria-label="Bereiche">
           {NAV.map((n) => {
             const b = badgeFor(n.href);
             return (
-              <Link key={n.href} href={n.href} prefetch onMouseEnter={() => prefetchData(n.href)} onTouchStart={() => prefetchData(n.href)} onFocus={() => prefetchData(n.href)} className={"nav-item" + (active === n.href ? " active" : "")} title={b ? `${n.label} · ${b} ungelesen` : n.label}>
-                <span className="nav-ic">{n.icon}</span>
+              <Link key={n.href} href={n.href} aria-current={active === n.href ? "page" : undefined} prefetch onMouseEnter={() => prefetchData(n.href)} onTouchStart={() => prefetchData(n.href)} onFocus={() => prefetchData(n.href)} className={"nav-item" + (active === n.href ? " active" : "")} title={b ? `${n.label} · ${b} ungelesen` : n.label}>
+                <span className="nav-ic"><Icon name={n.icon} /></span>
                 {!collapsed && <span className="nav-lbl">{n.label}</span>}
                 {b > 0 && <span className={"nav-badge" + (collapsed ? " dot" : "")}>{collapsed ? "" : b}</span>}
               </Link>
             );
           })}
-        </nav>
+        </nav><div className="side-bottom"><div className="side-caption">Dein persönlicher Arbeitsbereich</div></div>
       </aside>
 
       <div className="main">
         {topbar && <div className="topbar">{topbar}</div>}
-        <div className="content">{children}</div>
+        <div className="content" id="main-content" tabIndex={-1}>{children}</div>
       </div>
 
       <nav className="bottomnav">
-        {NAV.filter((n) => !["/settings", "/deadlines"].includes(n.href)).map((n) => {
+        {NAV.map((n) => {
           const b = badgeFor(n.href);
           return (
-            <Link key={n.href} href={n.href} prefetch onTouchStart={() => prefetchData(n.href)} className={"bn-item" + (active === n.href ? " active" : "")}>
-              <span className="bn-ic">{n.icon}{b > 0 && <span className="bn-badge">{b > 99 ? "99+" : b}</span>}</span>
+            <Link key={n.href} href={n.href} aria-current={active === n.href ? "page" : undefined} prefetch onTouchStart={() => prefetchData(n.href)} className={"bn-item" + (active === n.href ? " active" : "")}>
+              <span className="bn-ic"><Icon name={n.icon} />{b > 0 && <span className="bn-badge">{b > 99 ? "99+" : b}</span>}</span>
               <span className="bn-lbl">{n.label}</span>
             </Link>
           );

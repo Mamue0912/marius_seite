@@ -12,10 +12,11 @@ async function owned(userId: string, id: string) {
 }
 
 // GET ?format=docx → DOCX-Download. Sonst JSON.
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const user = await requireUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const doc = await owned(user.id, params.id);
+  const doc = await owned(user.id, id);
   if (!doc) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
   if (new URL(req.url).searchParams.get("format") === "docx") {
@@ -33,10 +34,11 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 }
 
 // PATCH: Titel/Text im Cockpit bearbeiten.
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const user = await requireUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const doc = await owned(user.id, params.id);
+  const doc = await owned(user.id, id);
   if (!doc) return NextResponse.json({ error: "not_found" }, { status: 404 });
   const body = await req.json().catch(() => ({}));
   const update: any = { updated_at: new Date().toISOString() };
@@ -46,10 +48,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   return NextResponse.json({ ok: true });
 }
 
-export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const user = await requireUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const doc = await owned(user.id, params.id);
+  const doc = await owned(user.id, id);
   if (!doc) return NextResponse.json({ error: "not_found" }, { status: 404 });
   await supabaseAdmin().from("application_docs").delete().eq("id", doc.id);
   return NextResponse.json({ ok: true });

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabaseServer";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { loadMailAccounts } from "@/lib/mailAccounts";
+import { mapLimit } from "@/lib/concurrency";
 import { syncInbox } from "@/lib/imapSync";
 
 export const runtime = "nodejs";
@@ -35,7 +36,7 @@ export async function POST(req: NextRequest) {
   let processed = 0;
   const errors: string[] = [];
   const report: any[] = [];
-  for (const acc of accounts) {
+  await mapLimit(accounts, 2, async (acc) => {
     try {
       const r = await syncInbox(acc);
       processed += r.processed;
@@ -46,7 +47,7 @@ export async function POST(req: NextRequest) {
       report.push({ email: acc.email, error: msg });
       await admin.from("mail_accounts").update({ status: "error", last_error: msg }).eq("id", acc.id);
     }
-  }
+  });
 
   return NextResponse.json({ connected: true, processed, errors, report, at: new Date().toISOString() });
 }

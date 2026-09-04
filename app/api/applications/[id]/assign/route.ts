@@ -7,11 +7,12 @@ export const dynamic = "force-dynamic";
 
 // Unterlagen einer Bewerbung zuordnen / entfernen.
 // POST { documentId, action: "add" | "remove" }
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const user = await requireUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const admin = supabaseAdmin();
-  const { data: app } = await admin.from("applications").select("id").eq("id", params.id).eq("user_id", user.id).maybeSingle();
+  const { data: app } = await admin.from("applications").select("id").eq("id", id).eq("user_id", user.id).maybeSingle();
   if (!app) return NextResponse.json({ error: "not_found" }, { status: 404 });
   const { documentId, action } = await req.json().catch(() => ({}));
   if (!documentId) return NextResponse.json({ error: "bad_request" }, { status: 400 });

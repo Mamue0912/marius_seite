@@ -17,7 +17,8 @@ export async function GET() {
   const challenge = pkceChallenge(verifier);
 
   // CSRF/State + PKCE-Verifier sicher (httpOnly) im Cookie ablegen.
-  cookies().set("ms_oauth", JSON.stringify({ state, verifier, uid: user.id }), {
+  const cookieStore = await cookies();
+  cookieStore.set("ms_oauth", JSON.stringify({ state, verifier, uid: user.id }), {
     httpOnly: true,
     secure: true,
     sameSite: "lax",

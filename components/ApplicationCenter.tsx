@@ -1,5 +1,7 @@
 "use client";
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import Icon from "@/components/Icon";
+import { Notice, notify } from "@/components/Feedback";
 import Markdown from "@/components/Markdown";
 import OverlayScroll from "@/components/OverlayScroll";
 import { getAppsCache, getDocsCache, fetchApps, fetchDocs, getAppDetail, fetchAppDetail, prefetchAppDetail, getFactsCache, setFactsCache, fetchFacts, getGenDocsCache, setGenDocsCache } from "@/lib/appsStore";
@@ -602,10 +604,13 @@ function MyFacts() {
     if (r.ok && r.data.fact) { setFacts((fs) => [...(fs || []), r.data.fact]); setAddVal(""); setOpen((o) => ({ ...o, [addCat]: true })); }
   }
 
-  const cats = Object.keys(FACT_CAT_LABEL);
-  const byCat: Record<string, any[]> = {};
-  for (const f of facts || []) (byCat[f.category] ||= []).push(f);
-  const shownCats = cats.filter((c) => byCat[c]?.length);
+  const cats = useMemo(() => Object.keys(FACT_CAT_LABEL), []);
+  const byCat = useMemo(() => {
+    const grouped: Record<string, any[]> = {};
+    for (const fact of facts || []) (grouped[fact.category] ||= []).push(fact);
+    return grouped;
+  }, [facts]);
+  const shownCats = useMemo(() => cats.filter((category) => byCat[category]?.length), [byCat, cats]);
   const total = facts?.length || 0;
   const confirmed = (facts || []).filter((f) => f.status === "bestaetigt").length;
   const openCount = total - confirmed;
@@ -878,7 +883,7 @@ function Workspace({ id, apps, onOpen, accounts, sendEnabled, docs, onBack, onCh
 
   const load = useCallback(async () => {
     const data = await fetchAppDetail(id);
-    if (data) setD(data); else setError("Bewerbung konnte nicht geladen werden.");
+    if (data) { setD(data); setError(null); } else setError("Bewerbung konnte nicht geladen werden.");
   }, [id]);
   // Beim Wechsel der Bewerbung sofort Cache zeigen (kein Leerblitzen), dann laden.
   useEffect(() => { setD(getAppDetail(id)); load(); }, [id, load]);
@@ -887,7 +892,14 @@ function Workspace({ id, apps, onOpen, accounts, sendEnabled, docs, onBack, onCh
   if (!d) return <div className="ac-empty"><span className="spin" /></div>;
   const app = d.application;
 
-  async function patch(update: any) { await aj(`/api/applications/${id}`, { method: "PATCH", json: update }); await load(); await onChanged(); }
+  async function patch(update: any) {
+    const previous = d;
+    setD((current: any) => current ? { ...current, application: { ...current.application, ...update } } : current);
+    const result = await aj(`/api/applications/${id}`, { method: "PATCH", json: update });
+    if (!result.ok) { setD(previous); setError(errText(result, "Änderung konnte nicht gespeichert werden.")); return; }
+    await Promise.all([load(), onChanged()]);
+    notify("Bewerbung aktualisiert.");
+  }
   async function clearJob() {
     setMenu(false);
     if (!confirm("Die eingefügte Stellenanzeige samt Link und Analyse entfernen? Chat, Unterlagen und erstellte Dokumente bleiben erhalten.")) return;
@@ -923,6 +935,8 @@ function Workspace({ id, apps, onOpen, accounts, sendEnabled, docs, onBack, onCh
           </>}
         </div>
       </div>
+      <ApplicationProgress app={app} data={d} />
+      {error && <Notice retry={load}>{error}</Notice>}
       <div className="ac-ws-body">
         <aside className={"ac-ws-col ac-col-list" + (pane === "liste" ? " show" : "")}>
           <WorkspaceList apps={apps} currentId={id} onOpen={(x: string) => { onOpen(x); setPane("chat"); }} onNew={onBack} />
@@ -943,6 +957,17 @@ function Workspace({ id, apps, onOpen, accounts, sendEnabled, docs, onBack, onCh
       </nav>
     </div>
   );
+}
+
+function ApplicationProgress({ app, data }: any) {
+  const complete = [!!(app.analysis || app.job_text), !!(data.assignedDocuments || []).length, !!(data.generatedDocs || []).length, ["bereit", "beworben", "rueckmeldung", "gespraech", "zusage", "absage"].includes(app.status)];
+  const labels = ["Stelle analysiert", "Unterlagen gewählt", "Text erstellt", "Versand vorbereitet"];
+  const next = Math.min(complete.filter(Boolean).length, 3);
+  return <div className="ac-stepper" aria-label={`Bewerbungsfortschritt: ${complete.filter(Boolean).length} von 4 Schritten`}>
+    {labels.map((label, index) => <span className={`ac-step ${complete[index] ? "complete" : index === next ? "current" : ""}`} key={label}>
+      {complete[index] ? <Icon name="check" size={14} /> : <span>{index + 1}</span>}{label}
+    </span>)}
+  </div>;
 }
 
 // Kompakte Bewerbungsliste in der linken Spalte des Arbeitsbereichs.

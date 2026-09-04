@@ -1,0 +1,1 @@
+export default function Loading() { return <div className="route-loading" role="status" aria-label="Ansicht wird geladen"><div className="skeleton skeleton-title" />{[0,1,2,3].map(i=><div className="sk-card" key={i} />)}<span className="sr-only">Ansicht wird geladen</span></div>; }

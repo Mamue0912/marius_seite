@@ -1,0 +1,3 @@
+"use client";
+import Icon from "@/components/Icon";
+export default function ErrorPage({reset}: {reset: () => void}) { return <main className="error-page"><Icon name="info" size={32} /><h1>Diese Ansicht konnte nicht geladen werden.</h1><p>Bitte prüfe die Verbindung und versuche es erneut.</p><button className="btn btn-primary" onClick={reset}>Erneut laden</button><a href="/">Zur Übersicht</a></main>; }

@@ -1,3 +1,4 @@
+import { requestJson } from "./http";
 // Seitenübergreifender Cache für die Mail-Liste (Client). Bleibt dank
 // Client-Navigation über Seitenwechsel erhalten. Vorladen beim Hovern über
 // „E-Mails" und sofortige Anzeige beim Öffnen (stale-while-revalidate).
@@ -14,16 +15,17 @@ export function fetchMessages(): Promise<any[]> {
   inflight = (async () => {
     try {
       const supabase = supabaseBrowser();
-      const { data } = await supabase.from("messages").select("*").eq("is_deleted", false).order("received_at", { ascending: false }).limit(600);
+      const { data, error } = await supabase.from("messages").select("*").eq("is_deleted", false).order("received_at", { ascending: false }).limit(600);
+      if (error) throw new Error("Nachrichten konnten nicht geladen werden.");
       cache = data || [];
       return cache!;
-    } catch { return cache || []; }
+    }
     finally { inflight = null; }
   })();
   return inflight;
 }
 
-export function prefetchMail() { if (cache === null) fetchMessages(); }
+export function prefetchMail() { if (cache === null) void fetchMessages().catch(() => {}); }
 
 // ---- Ordner-Inhalte (Junk/Archiv/…): live vom Server, aber zwischengespeichert ----
 const folderCache = new Map<string, any[]>();
@@ -37,20 +39,25 @@ export function fetchFolder(account: string, path: string): Promise<any[]> {
   if (running) return running;
   const p = (async () => {
     try {
-      const r = await fetch(`/api/mail/folder?account=${account}&path=${encodeURIComponent(path)}`);
-      const j = await r.json();
-      const items = r.ok ? (j.items || []) : [];
+      const j = await requestJson("/api/mail/folder?account=" + encodeURIComponent(account) + "&path=" + encodeURIComponent(path));
+      const items = j.items || [];
       folderCache.set(k, items);
       return items;
-    } catch { return folderCache.get(k) || []; }
+    }
     finally { folderInflight.delete(k); }
   })();
   folderInflight.set(k, p);
   return p;
 }
-export function prefetchFolder(account: string, path: string) { const k = fkey(account, path); if (!folderCache.has(k)) fetchFolder(account, path); }
+export function prefetchFolder(account: string, path: string) { const k = fkey(account, path); if (!folderCache.has(k)) void fetchFolder(account, path).catch(() => {}); }
 
 // ---- Geöffnete Mail-Inhalte zwischenspeichern (sofortiges Wiederöffnen) ----
 const contentCache = new Map<string, any>();
 export function getMsgContent(key: string) { return contentCache.get(key) || null; }
-export function setMsgContent(key: string, val: any) { contentCache.set(key, val); }
+export function setMsgContent(key: string, val: any) {
+ if (val?.error) return;
+ if (contentCache.size >= 80) contentCache.delete(contentCache.keys().next().value!);
+ contentCache.set(key, val);
+}
+export function invalidateFolderCache(account: string, path: string) { folderCache.delete(fkey(account, path)); }
+export function clearMailCache() { cache = null; folderCache.clear(); contentCache.clear(); }

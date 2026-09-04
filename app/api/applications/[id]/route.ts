@@ -6,11 +6,12 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // GET: vollständiges Bewerbungsprojekt (Bewerbung + Chat + Entwürfe + zugeordnete Unterlagen).
-export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const user = await requireUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const admin = supabaseAdmin();
-  const { data: app } = await admin.from("applications").select("*").eq("id", params.id).eq("user_id", user.id).maybeSingle();
+  const { data: app } = await admin.from("applications").select("*").eq("id", id).eq("user_id", user.id).maybeSingle();
   if (!app) return NextResponse.json({ error: "not_found" }, { status: 404 });
   const [{ data: messages }, { data: docs }, { data: links }] = await Promise.all([
     admin.from("application_messages").select("*").eq("application_id", app.id).order("created_at", { ascending: true }),
@@ -27,11 +28,12 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 }
 
 // PATCH: Felder aktualisieren (Status, Firma, Position, Frist, Kontakt).
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const user = await requireUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const admin = supabaseAdmin();
-  const { data: app } = await admin.from("applications").select("id").eq("id", params.id).eq("user_id", user.id).maybeSingle();
+  const { data: app } = await admin.from("applications").select("id").eq("id", id).eq("user_id", user.id).maybeSingle();
   if (!app) return NextResponse.json({ error: "not_found" }, { status: 404 });
   const body = await req.json().catch(() => ({}));
   const update: any = { updated_at: new Date().toISOString(), last_activity_at: new Date().toISOString() };
@@ -49,11 +51,12 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 }
 
 // DELETE: Bewerbungsprojekt entfernen (Chat/Entwürfe/Zuordnungen via FK-Cascade).
-export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const user = await requireUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const admin = supabaseAdmin();
-  const { data: app } = await admin.from("applications").select("id").eq("id", params.id).eq("user_id", user.id).maybeSingle();
+  const { data: app } = await admin.from("applications").select("id").eq("id", id).eq("user_id", user.id).maybeSingle();
   if (!app) return NextResponse.json({ error: "not_found" }, { status: 404 });
   await admin.from("applications").delete().eq("id", app.id).eq("user_id", user.id);
   return NextResponse.json({ ok: true });

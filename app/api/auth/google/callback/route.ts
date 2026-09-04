@@ -23,8 +23,9 @@ export async function GET(req: NextRequest) {
   if (oauthErr) return NextResponse.redirect(back("error", url.searchParams.get("error_description") || oauthErr));
   if (!code || !state) return NextResponse.redirect(back("error"));
 
-  const raw = cookies().get("g_oauth")?.value;
-  cookies().delete("g_oauth");
+  const cookieStore = await cookies();
+  const raw = cookieStore.get("g_oauth")?.value;
+  cookieStore.delete("g_oauth");
   if (!raw) return NextResponse.redirect(back("state"));
 
   let stored: { state: string; verifier: string; uid: string };

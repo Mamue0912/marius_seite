@@ -2,39 +2,50 @@
   "name": "cockpit-outlook-live",
   "version": "1.0.0",
   "private": true,
-  "description": "Cockpit mit Live-Outlook-Synchronisierung (Microsoft Graph + Supabase Realtime)",
+  "description": "Persönliches Cockpit für E-Mail, Aufgaben, Termine und Bewerbungen",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "lint": "eslint . --ext .ts,.tsx",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "verify": "npm run typecheck && npm run lint && npm test && npm run build",
+    "test:visual": "node tests/visual-qa.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.68.0",
     "@supabase/ssr": "^0.5.2",
-    "@supabase/supabase-js": "^2.45.4",
+    "@supabase/supabase-js": "^2.115.0",
     "docx": "^9.7.1",
-    "imapflow": "^1.4.8",
-    "mailparser": "^3.9.14",
-    "mammoth": "^1.12.0",
-    "next": "^14.2.35",
-    "nodemailer": "^6.10.1",
+    "imapflow": "^1.7.8",
+    "mailparser": "^3.9.20",
+    "mammoth": "^1.12.2",
+    "next": "^15.5.25",
+    "nodemailer": "^10.0.0",
     "pdf-parse": "^2.4.5",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "sanitize-html": "^2.17.6"
+    "sanitize-html": "^2.17.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/mailparser": "^3.4.6",
     "@types/node": "^20.14.0",
-    "@types/nodemailer": "^6.4.24",
+    "@types/nodemailer": "^8.0.1",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@types/sanitize-html": "^2.16.1",
+    "esbuild": "^0.25.12",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "^15.5.25",
+    "tsx": "^4.23.13",
     "typescript": "^5.5.4"
   },
+  "overrides": {
+    "postcss": "8.5.28"
+  },
   "engines": {
-    "node": ">=18.18.0"
+    "node": ">=20.0.0"
   }
 }

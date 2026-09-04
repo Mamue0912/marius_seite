@@ -1,6 +1,7 @@
 "use client";
 import { PROVIDERS } from "@/lib/mailProviders";
 import CalendarTile from "@/components/CalendarTile";
+import Icon from "@/components/Icon";
 
 function greeting() {
   const h = new Date().getHours();
@@ -29,7 +30,7 @@ export default function Overview({ accounts, summary, newest, newestUnread = [],
 
       <div className="ov-grid">
         <a className="tile" href="/mail">
-          <div className="tile-h"><span className="tile-ic">✉</span><span className="tile-t">E-Mails</span><span className="tile-go">→</span></div>
+          <div className="tile-h"><span className="tile-ic"><Icon name="mail" /></span><span className="tile-t">E-Mails</span><span className="tile-go"><Icon name="arrow" size={16} /></span></div>
           <div className="tile-stats">
             <div className="stat"><span className="stat-n">{summary.totalUnread}</span><span className="stat-l">neu / ungelesen</span></div>
             <div className="stat"><span className="stat-n">{summary.unreadImportant}</span><span className="stat-l">wichtig / persönlich</span></div>
@@ -49,7 +50,7 @@ export default function Overview({ accounts, summary, newest, newestUnread = [],
         </a>
 
         <a className="tile tile-primary" href="/applications">
-          <div className="tile-h"><span className="tile-ic">💼</span><span className="tile-t">Bewerbungen</span><span className="tile-go">→</span></div>
+          <div className="tile-h"><span className="tile-ic"><Icon name="briefcase" /></span><span className="tile-t">Bewerbungen</span><span className="tile-go"><Icon name="arrow" size={16} /></span></div>
           <div className="tile-stats">
             <div className="stat"><span className="stat-n">{appStats?.active || 0}</span><span className="stat-l">aktiv</span></div>
             <div className="stat"><span className="stat-n">{appStats?.prep || 0}</span><span className="stat-l">in Vorbereitung</span></div>
@@ -79,7 +80,7 @@ export default function Overview({ accounts, summary, newest, newestUnread = [],
         </a>
 
         <a className="tile" href="/deadlines">
-          <div className="tile-h"><span className="tile-ic">◎</span><span className="tile-t">Termine & Fristen</span><span className="tile-go">→</span></div>
+          <div className="tile-h"><span className="tile-ic"><Icon name="clock" /></span><span className="tile-t">Termine & Fristen</span><span className="tile-go"><Icon name="arrow" size={16} /></span></div>
           <div className="tile-stats">
             <div className="stat"><span className="stat-n">{summary.deadlines}</span><span className="stat-l">erkannte Fristen</span></div>
           </div>
@@ -91,7 +92,7 @@ export default function Overview({ accounts, summary, newest, newestUnread = [],
         <CalendarTile />
 
         <a className="tile" href="/tasks">
-          <div className="tile-h"><span className="tile-ic">☑</span><span className="tile-t">Aufgaben</span><span className="tile-go">→</span></div>
+          <div className="tile-h"><span className="tile-ic"><Icon name="tasks" /></span><span className="tile-t">Aufgaben</span><span className="tile-go"><Icon name="arrow" size={16} /></span></div>
           <div className="tile-empty">Aufgaben verwalten – auch ohne Fälligkeitsdatum.</div>
         </a>
 
@@ -102,7 +103,7 @@ export default function Overview({ accounts, summary, newest, newestUnread = [],
               <span className="il"><b>{m.from_name || m.from_address}</b><br /><span style={{ color: "var(--muted)" }}>{m.subject || "(kein Betreff)"}</span></span>
               <span className="iv">→</span>
             </a>
-          )) : <div className="tile-empty">Keine offenen Antworten. 🎉</div>}
+          )) : <div className="tile-empty">Keine offenen Antworten.</div>}
         </div>
       </div>
     </div>

@@ -1,0 +1,19 @@
+:root {
+  color-scheme: dark;
+  --bg-0: #101216; --bg-1: #14161b; --bg-grad: #101216;
+  --surface: #1a1d23; --surface-2: #22262e; --raised: #2b3039; --sunken: #14171c;
+  --mat-thin: rgba(29,33,40,.74); --mat: #1a1d23; --mat-thick: rgba(24,27,33,.96); --mat-hi: rgba(255,255,255,.035);
+  --line: #323741; --line-2: #272c34; --line-strong: #505865;
+  --ink: #f1f3f7; --ink-2: #c5cbd6; --muted: #a0a9b9; --faint: #8b95a6;
+  --accent: #8aaff5; --accent-2: #a8c5fc; --accent-ink: #b4ceff; --accent-soft: rgba(138,175,245,.12); --accent-line: rgba(138,175,245,.35); --on-accent: #111b2f;
+  --urgent: #f39393; --urgent-soft: rgba(243,147,147,.1); --high: #e3bb7d; --high-soft: rgba(227,187,125,.1);
+  --mid: #9dbaf2; --mid-soft: rgba(157,186,242,.1); --low: #91c6ae; --low-soft: rgba(145,198,174,.1); --ok: #91c6ae; --bad: #f39393; --bad-soft: var(--urgent-soft);
+  --scroll: #414855; --scroll-h: #657083;
+  --shadow-sm: 0 1px 2px #0002; --shadow: 0 8px 24px #0002; --shadow-lg: 0 24px 64px #0007;
+  --blur: blur(16px); --blur-sm: blur(10px);
+  --r-xs: 6px; --r-sm: 8px; --r-md: 10px; --r: 12px; --r-lg: 14px; --r-xl: 20px; --r-pill: 999px;
+  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 24px; --s-6: 32px; --s-7: 48px;
+  --ease: cubic-bezier(.2,.7,.2,1); --t-fast: .12s; --t: .18s; --t-slow: .24s;
+  --z-bar: 30; --z-scrim: 50; --z-drawer: 60;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}

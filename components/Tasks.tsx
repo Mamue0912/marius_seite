@@ -1,79 +1,51 @@
 "use client";
-import { useState } from "react";
-
-type Task = { id: string; title: string; note: string | null; priority: string; due_at: string | null; status: string; source: string };
-
-function bucketOf(t: Task): string {
-  if (t.status === "erledigt") return "Erledigt";
-  if (t.status === "warten") return "Warten auf Rückmeldung";
-  if (!t.due_at) return "Ohne Frist";
-  const d = new Date(t.due_at); const now = new Date();
-  const days = Math.floor((d.getTime() - new Date(now.toDateString()).getTime()) / 864e5);
-  if (days < 0) return "Überfällig";
-  if (days === 0) return "Heute";
-  if (days <= 7) return "Diese Woche";
-  return "Später";
-}
-const ORDER = ["Überfällig", "Heute", "Diese Woche", "Später", "Ohne Frist", "Warten auf Rückmeldung", "Erledigt"];
-
-export default function Tasks({ initial }: { initial: Task[] }) {
-  const [tasks, setTasks] = useState<Task[]>(initial);
-  const [title, setTitle] = useState("");
-  const [due, setDue] = useState("");
-  const [prio, setPrio] = useState("normal");
-
-  async function add() {
-    if (!title.trim()) return;
-    const r = await fetch("/api/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title, due_at: due || null, priority: prio }) });
-    const j = await r.json();
-    if (j.task) { setTasks((t) => [j.task, ...t]); setTitle(""); setDue(""); }
-  }
-  async function patch(id: string, p: any) {
-    setTasks((t) => t.map((x) => x.id === id ? { ...x, ...p } : x));
-    await fetch("/api/tasks", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, ...p }) });
-  }
-  async function del(id: string) {
-    setTasks((t) => t.filter((x) => x.id !== id));
-    await fetch("/api/tasks", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ id }) });
-  }
-
-  return (
-    <div className="page">
-      <div className="page-head"><h1>Aufgaben</h1></div>
-      <div className="wrap-inner">
-        <div className="task-add">
-          <input placeholder="Neue Aufgabe…" value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} />
-          <input type="date" value={due} onChange={(e) => setDue(e.target.value)} title="Fälligkeit (optional)" />
-          <select value={prio} onChange={(e) => setPrio(e.target.value)}><option value="niedrig">Niedrig</option><option value="normal">Normal</option><option value="hoch">Hoch</option></select>
-          <button className="btn btn-primary" onClick={add} disabled={!title.trim()}>Hinzufügen</button>
-        </div>
-
-        {ORDER.map((b) => {
-          const list = tasks.filter((t) => bucketOf(t) === b);
-          if (!list.length) return null;
-          return (
-            <div className="bucket" key={b}>
-              <div className="bh"><span className="bt">{b}</span><span className="bc">{list.length}</span></div>
-              {list.map((t) => (
-                <div className={"task" + (t.status === "erledigt" ? " done" : "")} key={t.id}>
-                  <button className="task-check" onClick={() => patch(t.id, { status: t.status === "erledigt" ? "offen" : "erledigt" })} aria-label="Erledigt">{t.status === "erledigt" ? "✓" : ""}</button>
-                  <div className="task-body">
-                    <div className="task-title">{t.title}</div>
-                    <div className="task-meta">
-                      {t.due_at ? new Date(t.due_at).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" }) : "Ohne Frist"}
-                      {t.priority === "hoch" && <span className="cat-chip" style={{ marginLeft: 8 }}>Hoch</span>}
-                      <span style={{ opacity: 0.5, marginLeft: 8 }}>{t.source}</span>
-                    </div>
-                  </div>
-                  {t.status !== "erledigt" && <button className="btn small ghost" onClick={() => patch(t.id, { status: "warten" })} title="Warten">⏳</button>}
-                  <button className="btn small ghost btn-danger" onClick={() => del(t.id)} title="Löschen">✕</button>
-                </div>
-              ))}
-            </div>
-          );
-        })}
-        {tasks.length === 0 && <div className="empty"><div className="ic">☑</div>Noch keine Aufgaben.<div className="sub">Aufgaben ohne Datum sind völlig in Ordnung.</div></div>}
-      </div>
-    </div>
-  );
+import { useRef, useState } from "react";
+import Icon from "./Icon";
+import { Notice, notify } from "./Feedback";
+import { requestJson, jsonRequest } from "@/lib/http";
+import { taskBucket, TASK_BUCKETS } from "@/lib/taskDates";
+type Task = {id:string;title:string;note:string|null;priority:string;due_at:string|null;status:string;source:string};
+export default function Tasks({initial}: {initial:Task[]}) {
+ const [tasks,setTasks]=useState(initial), [title,setTitle]=useState(""), [due,setDue]=useState(""), [prio,setPrio]=useState("normal");
+ const [error,setError]=useState<string|null>(null), [adding,setAdding]=useState(false), [pending,setPending]=useState<Set<string>>(new Set());
+ const [query,setQuery]=useState(""), [showDone,setShowDone]=useState(false);
+ const [undo,setUndo]=useState<{id:string;status:string}|null>(null);
+ const locks=useRef(new Set<string>());
+ async function add(e:React.FormEvent) {
+  e.preventDefault(); if(!title.trim() || locks.current.has("add")) return;
+  locks.current.add("add");setAdding(true);setError(null);
+  try { const data=await requestJson("/api/tasks",jsonRequest("POST",{title:title.trim(),due_at:due?new Date(due+"T00:00:00").toISOString():null,priority:prio})); if(!data.task) throw new Error("Aufgabe konnte nicht gespeichert werden."); setTasks(t=>[data.task,...t]);setTitle("");setDue("");notify("Aufgabe hinzugefügt."); }
+  catch(e){setError((e as Error).message);} finally{locks.current.delete("add");setAdding(false);}
+ }
+ async function patch(task:Task, update:Partial<Task>) {
+  if(locks.current.has(task.id)) return;
+  locks.current.add(task.id);setPending(new Set(locks.current));setError(null);
+  setTasks(ts=>ts.map(t=>t.id===task.id?{...t,...update}:t));
+  try { const data=await requestJson("/api/tasks",jsonRequest("PATCH",{id:task.id,...update})); if(!data.task) throw new Error("Änderung konnte nicht gespeichert werden."); setTasks(ts=>ts.map(t=>t.id===task.id?data.task:t)); if(update.status) setUndo({id:task.id,status:task.status}); }
+  catch(e){setTasks(ts=>ts.map(t=>t.id===task.id?task:t));setError((e as Error).message);}
+  finally{locks.current.delete(task.id);setPending(new Set(locks.current));}
+ }
+ async function remove(task:Task) {
+  if(locks.current.has(task.id)||!confirm("Aufgabe „"+task.title+"“ löschen?")) return;
+  locks.current.add(task.id);setPending(new Set(locks.current));setError(null);
+  try{await requestJson("/api/tasks",jsonRequest("DELETE",{id:task.id}));setTasks(ts=>ts.filter(t=>t.id!==task.id));notify("Aufgabe gelöscht.");}
+  catch(e){setError((e as Error).message);} finally{locks.current.delete(task.id);setPending(new Set(locks.current));}
+ }
+ const visible=tasks.filter(t=>(showDone||t.status!=="erledigt")&&(t.title+" "+(t.note||"")).toLocaleLowerCase("de").includes(query.toLocaleLowerCase("de")));
+ return <div className="page"><div className="page-head"><h1>Aufgaben</h1></div><div className="wrap-inner">
+ <form className="task-add" onSubmit={add}>
+ <label className="field">Aufgabe<input value={title} onChange={e=>setTitle(e.target.value)} placeholder="Was steht an?" required maxLength={500}/></label>
+ <label className="field">Fällig am · optional<input type="date" value={due} onChange={e=>setDue(e.target.value)}/></label>
+ <label className="field">Priorität<select value={prio} onChange={e=>setPrio(e.target.value)}><option value="niedrig">Niedrig</option><option value="normal">Normal</option><option value="hoch">Hoch</option></select></label>
+ <button className="btn btn-primary" disabled={adding||!title.trim()}>{adding?"Speichert…":"Hinzufügen"}</button></form>
+ {error&&<Notice>{error}</Notice>}
+ {undo&&<div className="feedback" role="status"><span>Status gespeichert.</span><button className="btn small" onClick={()=>{const t=tasks.find(x=>x.id===undo.id);if(t)void patch(t,{status:undo.status});setUndo(null);}}>Rückgängig</button><button className="icon-button" aria-label="Meldung schließen" onClick={()=>setUndo(null)}><Icon name="close"/></button></div>}
+ <div className="task-filter"><input type="search" aria-label="Aufgaben durchsuchen" placeholder="Aufgaben durchsuchen" value={query} onChange={e=>setQuery(e.target.value)}/><label className="chip"><input type="checkbox" checked={showDone} onChange={e=>setShowDone(e.target.checked)}/> Erledigte anzeigen</label></div>
+ {TASK_BUCKETS.map(bucket=>{const list=visible.filter(t=>taskBucket(t)===bucket).sort((a,b)=>Number(b.priority==="hoch")-Number(a.priority==="hoch"));return list.length?<section className="bucket" key={bucket}><div className="bh"><h2 className="bt">{bucket}</h2><span className="bc">{list.length}</span></div>{list.map(t=><article className={"task"+(t.status==="erledigt"?" done":"")} key={t.id} aria-busy={pending.has(t.id)}>
+ <button className="task-check" disabled={pending.has(t.id)} aria-label={t.status==="erledigt"?"Aufgabe wieder öffnen":"Aufgabe erledigen"} onClick={()=>patch(t,{status:t.status==="erledigt"?"offen":"erledigt"})}>{t.status==="erledigt"&&<Icon name="check" size={14}/>}</button>
+ <div className="task-body"><div className="task-title">{t.title}</div>{t.note&&<div className="task-note">{t.note}</div>}<div className="task-meta">{t.due_at?new Date(t.due_at).toLocaleDateString("de-DE"):"Ohne Frist"} · {t.priority==="hoch"?"Hohe Priorität · ":""}{t.source==="manuell"?"Manuell":t.source}</div></div>
+ <div className="task-actions">{t.status!=="erledigt"&&<button className="icon-button" disabled={pending.has(t.id)} title={t.status==="warten"?"Wieder aufnehmen":"Auf Rückmeldung warten"} aria-label={t.status==="warten"?"Wieder aufnehmen":"Auf Rückmeldung warten"} onClick={()=>patch(t,{status:t.status==="warten"?"offen":"warten"})}><Icon name={t.status==="warten"?"refresh":"clock"}/></button>}<button className="icon-button" aria-label="Aufgabe löschen" disabled={pending.has(t.id)} onClick={()=>remove(t)}><Icon name="trash"/></button></div>
+ </article>)}</section>:null;})}
+ {!visible.length&&<div className="empty"><Icon name="tasks" size={30}/><p>{query?"Keine passenden Aufgaben.":"Hier ist alles erledigt."}</p><div className="sub">Neue Aufgaben können auch ohne Datum angelegt werden.</div></div>}
+ </div></div>;
 }

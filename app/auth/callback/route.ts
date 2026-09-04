@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
   }
 
   if (code) {
-    const supabase = supabaseServer();
+    const supabase = await supabaseServer();
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (error) {
       return NextResponse.redirect(new URL(`/?auth_error=${encodeURIComponent(error.message)}`, url.origin));

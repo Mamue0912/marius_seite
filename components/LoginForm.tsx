@@ -1,4 +1,5 @@
 "use client";
+import Icon from "./Icon";
 import { useState } from "react";
 import { supabaseBrowser } from "@/lib/supabaseBrowser";
 
@@ -13,6 +14,7 @@ export default function LoginForm() {
     e.preventDefault();
     setBusy(true);
     setErr(null);
+    try {
     const supabase = supabaseBrowser();
     const { error } = await supabase.auth.signInWithOtp({
       email,
@@ -24,19 +26,21 @@ export default function LoginForm() {
     setBusy(false);
     if (error) setErr(error.message);
     else setSent(true);
+    } catch { setErr("Anmeldung derzeit nicht möglich. Bitte erneut versuchen."); }
+    finally { setBusy(false); }
   }
 
   return (
     <div className="login">
-      <h1>Cockpit</h1>
-      <p>Melde dich an, um dein Live-Outlook-Postfach und den Antwort-Assistenten zu nutzen.</p>
+      <Icon name="overview" size={28} /><h1>Willkommen im Cockpit</h1>
+      <p>E-Mails, Bewerbungen und Aufgaben an einem Ort. Melde dich mit deinem persönlichen Link an.</p>
       {sent ? (
         <div className="note">Wir haben dir einen Anmelde-Link an <b>{email}</b> geschickt. Öffne ihn auf diesem Gerät.</div>
       ) : (
         <form onSubmit={submit}>
-          <input type="email" required placeholder="deine@mail.de" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <label htmlFor="login-email">E-Mail-Adresse</label><input id="login-email" autoComplete="email" type="email" required placeholder="deine@mail.de" value={email} onChange={(e) => setEmail(e.target.value)} />
           <button className="btn btn-primary" disabled={busy}>{busy ? "Sende…" : "Anmelde-Link senden"}</button>
-          {err && <div className="note binding-warn" style={{ marginTop: 12 }}>{err}</div>}
+          {err && <div role="alert" className="note binding-warn" style={{ marginTop: 12 }}>{err}</div>}
         </form>
       )}
     </div>
