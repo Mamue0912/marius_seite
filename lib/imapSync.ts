@@ -7,6 +7,7 @@ import { loadRules, applyRules } from "./rules";
 import { classifyEmail } from "./anthropic";
 import { detectType } from "./messageType";
 import { classifyMessage } from "./classify2";
+import { resolvePublicNetworkEndpoint } from "./safeRemote";
 
 const HEADER_FIELDS = ["list-unsubscribe", "list-id", "precedence", "auto-submitted", "feedback-id", "x-feedback-id", "reply-to", "return-path"];
 
@@ -24,11 +25,12 @@ function parseHeaders(raw: any): Record<string, string> {
 const SEED_COUNT = 150;      // Erstsync / Neu-Einlesen Posteingang (mehr Verlauf)
 const SENT_SEED = 40;        // Gesendet je Lauf (idempotent per Message-ID)
 const CLASSIFY_CAP = 12;     // max. KI-Klassifizierungen pro Lauf
-const SEEN_WINDOW = 500;     // Gelesen-Status: letzte N Posteingangs-Mails je Lauf abgleichen
 
-function makeClient(acc: MailAccount): ImapFlow {
+async function makeClient(acc: MailAccount): Promise<ImapFlow> {
+  const endpoint = await resolvePublicNetworkEndpoint(acc.imap_host);
   return new ImapFlow({
-    host: acc.imap_host,
+    host: endpoint.address,
+    servername: endpoint.servername,
     port: acc.imap_port,
     secure: (acc as any).imap_secure !== false,
     auth: { user: acc.username, pass: accountPassword(acc) },
@@ -38,7 +40,7 @@ function makeClient(acc: MailAccount): ImapFlow {
 }
 
 export async function verifyLogin(acc: MailAccount): Promise<void> {
-  const client = makeClient(acc);
+  const client = await makeClient(acc);
   await client.connect();
   await client.logout();
 }
@@ -68,7 +70,7 @@ export interface BackfillBatch {
 // vorhandener, ohne Nutzer-Klassifizierungen zu überschreiben.
 export async function backfillBatch(acc: MailAccount, ftype: "inbox" | "sent", startSeq: number, batch: number): Promise<BackfillBatch> {
   const admin = supabaseAdmin();
-  const client = makeClient(acc);
+  const client = await makeClient(acc);
   const rules = await loadRules(acc.user_id).catch(() => []);
   const res: BackfillBatch = { total: 0, processed: 0, saved: 0, updated: 0, skipped: 0, failed: 0, next: null };
   await client.connect();
@@ -88,8 +90,9 @@ export async function backfillBatch(acc: MailAccount, ftype: "inbox" | "sent", s
       }
       const gidOf = (m: any) => `${acc.id}:${m.envelope?.messageId || `uid-${ftype}-${m.uid}`}`;
       const gids = msgs.map(gidOf);
-      const { data: existing } = await admin.from("messages").select("graph_id").eq("user_id", acc.user_id).in("graph_id", gids);
-      const existSet = new Set((existing || []).map((x: any) => x.graph_id));
+      const { data: existing, error: existingError } = await admin.from("messages").select("graph_id").eq("user_id", acc.user_id).in("graph_id", gids);
+      if (existingError) throw new Error("Vorhandene Nachrichten konnten nicht geprüft werden.");
+      const existSet = new Set((existing || []).map((item: any) => item.graph_id));
       for (const msg of msgs) {
         res.processed++;
         const gid = gidOf(msg);
@@ -97,7 +100,8 @@ export async function backfillBatch(acc: MailAccount, ftype: "inbox" | "sent", s
           if (existSet.has(gid)) {
             // Nur Gelesen-/Flag-Status auffrischen (keine Reklassifizierung).
             const flags: Set<string> = msg.flags instanceof Set ? msg.flags : new Set(msg.flags || []);
-            await admin.from("messages").update({ is_read: ftype === "sent" ? true : flags.has("\\Seen"), is_flagged: flags.has("\\Flagged") }).eq("user_id", acc.user_id).eq("graph_id", gid);
+            const { error } = await admin.from("messages").update({ is_read: ftype === "sent" ? true : flags.has("\\Seen"), is_flagged: flags.has("\\Flagged") }).eq("user_id", acc.user_id).eq("graph_id", gid);
+            if (error) throw new Error("Nachrichtenstatus konnte nicht gespeichert werden.");
             res.updated++; res.skipped++;
           } else {
             await upsertMessage(acc, msg, ftype, path, rules);
@@ -114,7 +118,7 @@ export async function backfillBatch(acc: MailAccount, ftype: "inbox" | "sent", s
 // Hauptsync: Posteingang (inkrementell) + Gesendet (Seed), dann KI-Kategorien.
 export async function syncInbox(acc: MailAccount, options: {classify?:boolean} = {}): Promise<SyncResult> {
   const admin = supabaseAdmin();
-  const client = makeClient(acc);
+  const client = await makeClient(acc);
   const result: SyncResult = { processed: 0, saved: 0, skipped: 0, newUids: [], skippedUids: [] };
   // Nutzerregeln einmal laden und auf jede neue Mail anwenden (Vorrang vor KI).
   const rules = await loadRules(acc.user_id).catch(() => []);
@@ -159,17 +163,19 @@ export async function syncInbox(acc: MailAccount, options: {classify?:boolean} =
       // Wird eine Mail außerhalb des Cockpits (z. B. iPhone-Mail, WEB.DE- oder
       // iCloud-Weboberfläche) gelesen oder wieder auf ungelesen gesetzt, so
       // ändert sich das IMAP-Flag \Seen. Der inkrementelle Abruf oben sieht nur
-      // NEUE UIDs, daher gleichen wir hier zusätzlich die Flags der letzten
-      // ~500 Posteingangs-Mails ab und schreiben Abweichungen nach Supabase.
+      // NEUE UIDs, daher gleichen wir hier zusätzlich die Flags aller lokal
+      // gespeicherten Posteingangs-Mails ab und schreiben Abweichungen nach Supabase.
       // Beidseitig: gelesen -> is_read=true, ungelesen -> is_read=false.
       await reconcileSeenFlags(acc, client, exists);
 
-      await admin.from("mail_accounts").update({
-        inbox_uidvalidity: uidValidity, inbox_last_uid: advanceUid,
+      const { error: accountUpdateError } = await admin.from("mail_accounts").update({
+        inbox_uidvalidity: uidValidity,
+        inbox_last_uid: advanceUid,
         last_synced_at: new Date().toISOString(),
-        status: result.skipped > 0 ? "connected" : "connected",
+        status: "connected",
         last_error: result.skipped > 0 ? `${result.skipped} Nachricht(en) konnten nicht gespeichert werden` : null
-      }).eq("id", acc.id);
+      }).eq("id", acc.id).eq("user_id", acc.user_id);
+      if (accountUpdateError) throw new Error("Synchronisierungsstand konnte nicht gespeichert werden.");
     } finally {
       lock.release();
     }
@@ -234,10 +240,13 @@ async function syncFolders(acc: MailAccount, client: ImapFlow): Promise<void> {
     } catch { /* Zähler optional */ }
     rows.push({ user_id: acc.user_id, account_id: acc.id, path: box.path, folder_type: ftype, unread, total, updated_at: new Date().toISOString() });
   }
-  if (rows.length) await admin.from("mail_folders").upsert(rows, { onConflict: "account_id,path" });
+  if (rows.length) {
+    const { error } = await admin.from("mail_folders").upsert(rows, { onConflict: "account_id,path" });
+    if (error) throw new Error("Ordnerliste konnte nicht gespeichert werden.");
+  }
 }
 
-// Gleicht den \Seen-Status der letzten SEEN_WINDOW Posteingangs-Mails mit
+// Gleicht den \Seen-Status aller lokal gespeicherten Posteingangs-Mails mit
 // Supabase ab. Erwartet, dass INBOX bereits (per Lock) ausgewählt ist.
 // Schreibt NUR echte Abweichungen (minimale Realtime-Änderungen), damit
 // Ungelesen-Punkt, Ordnerzähler, Dashboard-Badge, intelligente Ansichten und
@@ -403,7 +412,8 @@ async function upsertMessage(acc: MailAccount, msg: any, ftype: FolderType, mail
     }
   }
 
-  await admin.from("messages").upsert(row, { onConflict: "user_id,graph_id" });
+  const { error } = await admin.from("messages").upsert(row, { onConflict: "user_id,graph_id" });
+  if (error) throw new Error("Nachricht konnte nicht gespeichert werden.");
 }
 
 // KI-Kategorien + Regeln für neue Posteingangs-Nachrichten (gedeckelt).
@@ -411,7 +421,7 @@ async function classifyNew(acc: MailAccount): Promise<void> {
   const admin = supabaseAdmin();
   const rules = await loadRules(acc.user_id);
 
-  const { data: pending } = await admin
+  const { data: pending, error: pendingError } = await admin
     .from("messages")
     .select("id,from_name,from_address,to_recipients,subject,preview,mail_account_id,has_attachments,user_category_override")
     .eq("user_id", acc.user_id)
@@ -420,24 +430,27 @@ async function classifyNew(acc: MailAccount): Promise<void> {
     .is("semantic_category", null)
     .order("received_at", { ascending: false })
     .limit(CLASSIFY_CAP);
+  if (pendingError) throw new Error("Zu klassifizierende Nachrichten konnten nicht geladen werden.");
 
   for (const m of pending || []) {
     // 1) Nutzerregeln zuerst (Vorrang).
     const r = applyRules(rules, m);
     if (r.matched) {
-      await admin.from("messages").update({
+      const { error } = await admin.from("messages").update({
         semantic_category: r.category || "Sonstiges",
         classification_source: "rule",
         classification_confidence: 1,
         hidden: r.hidden || undefined
-      }).eq("id", m.id);
+      }).eq("id", m.id).eq("user_id", acc.user_id);
+      if (error) throw new Error("Regel-Klassifizierung konnte nicht gespeichert werden.");
       continue;
     }
     // 2) Nutzer hat manuell überschrieben → übernehmen.
     if (m.user_category_override) {
-      await admin.from("messages").update({
+      const { error } = await admin.from("messages").update({
         semantic_category: m.user_category_override, classification_source: "user", classification_confidence: 1
-      }).eq("id", m.id);
+      }).eq("id", m.id).eq("user_id", acc.user_id);
+      if (error) throw new Error("Nutzer-Klassifizierung konnte nicht gespeichert werden.");
       continue;
     }
     // 3) KI-Klassifizierung.
@@ -448,11 +461,12 @@ async function classifyNew(acc: MailAccount): Promise<void> {
       });
       // Nur die INHALTS-Kategorie von der KI; Antwortbedarf/Priorität bleiben
       // header-basiert (verhindert, dass Umfragen als antwortpflichtig gelten).
-      await admin.from("messages").update({
+      const { error } = await admin.from("messages").update({
         semantic_category: res.category,
         classification_confidence: res.confidence,
         classification_source: "ai"
-      }).eq("id", m.id);
+      }).eq("id", m.id).eq("user_id", acc.user_id);
+      if (error) throw new Error("KI-Klassifizierung konnte nicht gespeichert werden.");
     } catch (e) {
       console.error("classifyEmail:", (e as Error).message);
     }

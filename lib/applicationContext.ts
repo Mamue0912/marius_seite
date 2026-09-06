@@ -5,11 +5,12 @@ import type { JobAnalysis } from "@/lib/anthropic";
 // Nutzt ausschließlich BESTÄTIGTE Fakten des Nutzers.
 
 export async function confirmedFactsText(userId: string): Promise<string> {
-  const { data } = await supabaseAdmin()
+  const { data, error } = await supabaseAdmin()
     .from("app_document_facts")
     .select("category,value")
     .eq("user_id", userId).eq("status", "bestaetigt")
     .order("category", { ascending: true });
+  if (error) throw new Error("Bestätigte Angaben konnten nicht geladen werden.");
   if (!data || !data.length) return "";
   const byCat: Record<string, string[]> = {};
   for (const f of data) (byCat[f.category] ||= []).push(f.value);
@@ -39,21 +40,23 @@ export function jobContextText(app: any): string {
 }
 
 export async function generatedDocsContext(userId: string, applicationId: string): Promise<string> {
-  const { data } = await supabaseAdmin()
+  const { data, error } = await supabaseAdmin()
     .from("application_docs")
     .select("kind,title,body,updated_at")
     .eq("user_id", userId).eq("application_id", applicationId)
     .order("updated_at", { ascending: false }).limit(4);
+  if (error) throw new Error("Erstellte Dokumente konnten nicht geladen werden.");
   if (!data || !data.length) return "";
   return data.map((d) => `[${d.kind}] ${d.title || ""}\n${String(d.body).slice(0, 1200)}`).join("\n\n---\n\n");
 }
 
 export async function chatHistory(userId: string, applicationId: string, limit = 20): Promise<{ role: "user" | "assistant"; content: string }[]> {
-  const { data } = await supabaseAdmin()
+  const { data, error } = await supabaseAdmin()
     .from("application_messages")
     .select("role,content,created_at")
     .eq("user_id", userId).eq("application_id", applicationId)
     .order("created_at", { ascending: true }).limit(limit);
+  if (error) throw new Error("Chatverlauf konnte nicht geladen werden.");
   return (data || []).map((m) => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content }));
 }
 

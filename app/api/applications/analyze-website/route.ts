@@ -6,6 +6,7 @@ import { confirmedFactsText } from "@/lib/applicationContext";
 import { findDuplicateApplication } from "@/lib/appDuplicate";
 import { recordAiEvent } from "@/lib/aiDiagnostics";
 import { env } from "@/lib/env";
+import { fetchPublicResource, readTextLimited } from "@/lib/safeRemote";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,19 +23,24 @@ function htmlToText(html: string): string {
 }
 
 async function fetchHtml(url: string, timeoutMs = 12000): Promise<string | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), timeoutMs);
-    const r = await fetch(url, {
-      signal: ctrl.signal, redirect: "follow",
+    const response = await fetchPublicResource(url, {
+      signal: controller.signal,
       headers: { "user-agent": "Mozilla/5.0 (compatible; CockpitBewerbung/1.0)", accept: "text/html,application/xhtml+xml" }
     });
-    clearTimeout(t);
-    if (!r.ok) return null;
-    const ct = r.headers.get("content-type") || "";
-    if (!ct.includes("html") && !ct.includes("xml") && ct !== "") return null;
-    return await r.text();
-  } catch { return null; }
+    const contentType = (response.headers.get("content-type") || "").toLowerCase();
+    if (!response.ok || (contentType && !contentType.includes("html") && !contentType.includes("xml"))) {
+      await response.body?.cancel();
+      return null;
+    }
+    return await readTextLimited(response, 2 * 1024 * 1024);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // Relevante Unterseiten anhand von Link-Text/URL erkennen (Über uns, Karriere …).
@@ -106,9 +112,11 @@ export async function POST(req: NextRequest) {
     };
     let appId = body.applicationId as string | undefined;
     if (appId) {
-      const { data: exists } = await admin.from("applications").select("id,status").eq("id", appId).eq("user_id", user.id).maybeSingle();
+      const { data: exists, error: lookupError } = await admin.from("applications").select("id,status").eq("id", appId).eq("user_id", user.id).maybeSingle();
+      if (lookupError) return NextResponse.json({ error: "db_error", message: lookupError.message }, { status: 500 });
       if (!exists) return NextResponse.json({ error: "not_found" }, { status: 404 });
-      await admin.from("applications").update(row).eq("id", appId);
+      const { error: updateError } = await admin.from("applications").update(row).eq("id", appId).eq("user_id", user.id);
+      if (updateError) return NextResponse.json({ error: "db_error", message: updateError.message }, { status: 500 });
     } else {
       const { data: created, error } = await admin.from("applications").insert(row).select("id").single();
       if (error) return NextResponse.json({ error: "db_error", message: error.message }, { status: 500 });

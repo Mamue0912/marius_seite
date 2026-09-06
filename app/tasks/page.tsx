@@ -9,10 +9,10 @@ export const dynamic = "force-dynamic";
 export default async function TasksPage() {
   const user = await requireUser();
   if (!user) return <LoginForm />;
-  const { data } = await supabaseAdmin().from("tasks").select("*").eq("user_id", user.id).order("created_at", { ascending: false });
+  const { data, error } = await supabaseAdmin().from("tasks").select("*").eq("user_id", user.id).order("created_at", { ascending: false });
   return (
     <AppShell active="/tasks">
-      <Tasks initial={data || []} />
+      <Tasks initial={data || []} initialError={error ? "Aufgaben konnten nicht geladen werden. Bitte die Seite neu laden." : null} />
     </AppShell>
   );
 }

@@ -6,7 +6,7 @@ import { sendMail } from "@/lib/mailSend";
 import { friendlyMailError } from "@/lib/mailErrors";
 import { downloadDocument } from "@/lib/storage";
 import { buildDocx, safeFileName } from "@/lib/docxBuilder";
-import { loadApplication, touchApplication } from "@/lib/applicationContext";
+import { loadApplication } from "@/lib/applicationContext";
 import { env } from "@/lib/env";
 
 export const runtime = "nodejs";
@@ -47,8 +47,9 @@ export async function POST(req: NextRequest) {
   const docIds: string[] = Array.isArray(attachmentDocIds) ? attachmentDocIds : [];
   let attachedDocs: any[] = [];
   if (docIds.length) {
-    const { data } = await admin.from("app_documents").select("*").eq("user_id", user.id).in("id", docIds);
-    attachedDocs = (data || []).filter((d) => d.allowed_for_applications);
+    const { data, error } = await admin.from("app_documents").select("*").eq("user_id", user.id).in("id", docIds);
+    if (error) return NextResponse.json({ error: "db_error", message: "Die Anhänge konnten nicht geladen werden." }, { status: 500 });
+    attachedDocs = (data || []).filter((document) => document.allowed_for_applications);
   }
   const required: string[] = app.analysis?.documents_required || [];
   const warnings = missingDocWarnings(required, attachedDocs.map((d) => d.doc_type || ""), attachedDocs.map((d) => d.name || ""));
@@ -75,21 +76,25 @@ export async function POST(req: NextRequest) {
     if (dl) attachments.push({ filename: d.name || "Unterlage", content: dl.buffer, contentType: d.mime || undefined });
   }
   if (generatedDocId) {
-    const { data: gd } = await admin.from("application_docs").select("*").eq("id", generatedDocId).eq("user_id", user.id).maybeSingle();
-    if (gd) {
-      const buf = await buildDocx({ title: gd.title || gd.kind, body: gd.body });
-      attachments.push({ filename: safeFileName([app.company, gd.kind], "docx"), content: buf, contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
-    }
+    const { data: generatedDocument, error } = await admin.from("application_docs").select("*").eq("id", generatedDocId).eq("application_id", app.id).eq("user_id", user.id).maybeSingle();
+    if (error) return NextResponse.json({ error: "db_error", message: "Das erzeugte Dokument konnte nicht geladen werden." }, { status: 500 });
+    if (!generatedDocument) return NextResponse.json({ error: "not_found", message: "Das erzeugte Dokument wurde nicht gefunden." }, { status: 404 });
+    const buffer = await buildDocx({ title: generatedDocument.title || generatedDocument.kind, body: generatedDocument.body });
+    attachments.push({ filename: safeFileName([app.company, generatedDocument.kind], "docx"), content: buffer, contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
   }
 
   try {
-    await sendMail(account as MailAccount, {
+    const messageId = await sendMail(account as MailAccount, {
       to: to.trim(), cc: cc?.trim() || undefined, subject: subject.trim(), text,
       fromName: (account as any).display_name || null, attachments
     });
-    await admin.from("applications").update({ status: "beworben", last_activity_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", app.id);
-    await touchApplication(app.id);
-    return NextResponse.json({ ok: true, from: (account as any).email });
+    const { error: statusError } = await admin.from("applications").update({ status: "beworben", last_activity_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", app.id).eq("user_id", user.id);
+    return NextResponse.json({
+      ok: true,
+      from: (account as any).email,
+      messageId,
+      warning: statusError ? "Die E-Mail wurde gesendet, der Bewerbungsstatus konnte aber nicht aktualisiert werden." : undefined
+    });
   } catch (e) {
     return NextResponse.json({ error: "send_failed", message: friendlyMailError(e as Error) }, { status: 502 });
   }

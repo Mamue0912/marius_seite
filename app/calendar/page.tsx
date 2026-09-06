@@ -5,6 +5,7 @@ import AppShell from "@/components/AppShell";
 import CalendarView from "@/components/CalendarView";
 import IcloudConnect from "@/components/IcloudConnect";
 import { env } from "@/lib/env";
+import Icon from "@/components/Icon";
 
 export const dynamic = "force-dynamic";
 
@@ -14,10 +15,13 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
   if (!user) return <LoginForm />;
 
   const admin = supabaseAdmin();
-  const [{ data: gAcc }, { data: iAcc }] = await Promise.all([
+  const [googleResult, icloudResult] = await Promise.all([
     admin.from("google_accounts").select("email,status").eq("user_id", user.id).maybeSingle(),
     admin.from("icloud_accounts").select("apple_id,status").eq("user_id", user.id).maybeSingle()
   ]);
+  const gAcc = googleResult.data;
+  const iAcc = icloudResult.data;
+  const connectionLoadError = googleResult.error || icloudResult.error;
   const gConnected = !!gAcc;
   const iConnected = !!iAcc;
   const anyConnected = gConnected || iConnected;
@@ -33,6 +37,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
           <h1>Kalender</h1>
         </div>
         <div className="wrap-inner">
+          {connectionLoadError && <div className="cal-note bad" style={{ marginBottom: 12 }}>Kalenderverbindungen konnten nicht geladen werden. Bitte die Seite neu laden.</div>}
           {status === "error" && <div className="cal-note bad" style={{ marginBottom: 12 }}>Verbindung fehlgeschlagen{query?.reason ? `: ${query.reason}` : "."}</div>}
           {status === "connected" && <div className="cal-note ok" style={{ marginBottom: 12 }}>Google-Kalender verbunden.</div>}
           {query?.icloud === "connected" && <div className="cal-note ok" style={{ marginBottom: 12 }}>iCloud-Kalender verbunden.</div>}
@@ -54,7 +59,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
           ) : (
             <div style={{ display: "grid", gap: 16 }}>
               <div className="connect-card">
-                <div className="cc-ic">▦</div>
+                <div className="cc-ic"><Icon name="calendar" size={26} /></div>
                 <h2>Google-Kalender verbinden</h2>
                 <p>Verbinde deinen Google-Kalender, um deine Termine (Monat &amp; Agenda) direkt hier im Cockpit zu sehen. Es wird ausschließlich <b>lesend</b> zugegriffen – nichts wird geändert oder gelöscht.</p>
                 {configured ? (

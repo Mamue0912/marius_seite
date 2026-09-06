@@ -160,6 +160,7 @@ export default async function Home() {
         deadlineList={deadlines.slice(0, 5)}
         appStats={appStats}
         tasks={taskRows}
+        initialError={inboxResult.error || applicationResult.error || taskResult.error ? "Einige Cockpit-Daten konnten nicht geladen werden. Bitte die Seite neu laden." : null}
       />
     </AppShell>
   );

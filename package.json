@@ -10,7 +10,8 @@
     "lint": "eslint . --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
-    "verify": "npm run typecheck && npm run lint && npm test && npm run build",
+    "test:api": "node tests/api-smoke.mjs",
+    "verify": "npm run typecheck && npm run lint && npm test && npm run build && npm run test:api",
     "test:visual": "node tests/visual-qa.mjs && node tests/product-visual-qa.mjs"
   },
   "dependencies": {

@@ -1,6 +1,4 @@
-// Seitenübergreifender Cache für den Bewerbungsbereich (Client). Bleibt dank
-// Client-Navigation über Seitenwechsel erhalten. Ermöglicht Vorladen beim
-// Hovern über „Bewerbungen" und sofortige Anzeige beim Öffnen.
+import { requestJson } from "@/lib/http";
 
 let appsCache: any[] | null = null;
 let docsCache: any[] | null = null;
@@ -14,82 +12,82 @@ export function fetchApps(): Promise<any[]> {
   if (appsInflight) return appsInflight;
   appsInflight = (async () => {
     try {
-      const r = await fetch("/api/applications", { cache: "no-store" });
-      const d = await r.json();
-      appsCache = d.applications || [];
-      return appsCache!;
-    } catch { return appsCache || []; }
-    finally { appsInflight = null; }
+      const data = await requestJson("/api/applications", { cache: "no-store" });
+      if (!Array.isArray(data.applications)) throw new Error("Bewerbungen konnten nicht geladen werden.");
+      appsCache = data.applications;
+      return data.applications as any[];
+    } finally {
+      appsInflight = null;
+    }
   })();
-  return appsInflight;
+  return appsInflight!;
 }
 
 export function fetchDocs(): Promise<any[]> {
   if (docsInflight) return docsInflight;
   docsInflight = (async () => {
     try {
-      const r = await fetch("/api/documents", { cache: "no-store" });
-      const d = await r.json();
-      docsCache = d.documents || [];
-      return docsCache!;
-    } catch { return docsCache || []; }
-    finally { docsInflight = null; }
+      const data = await requestJson("/api/documents", { cache: "no-store" });
+      if (!Array.isArray(data.documents)) throw new Error("Unterlagen konnten nicht geladen werden.");
+      docsCache = data.documents;
+      return data.documents as any[];
+    } finally {
+      docsInflight = null;
+    }
   })();
-  return docsInflight;
+  return docsInflight!;
 }
 
-// Beim Hovern über „Bewerbungen": Liste + Unterlagen im Hintergrund vorladen.
 export function prefetchApplications() {
-  if (appsCache === null) fetchApps();
-  if (docsCache === null) fetchDocs();
+  if (appsCache === null) void fetchApps().catch(() => undefined);
+  if (docsCache === null) void fetchDocs().catch(() => undefined);
 }
 
-// ---- Detailansicht einer einzelnen Bewerbung (für den Bewerbungschat) ----
 const detailCache = new Map<string, any>();
 const detailInflight = new Map<string, Promise<any>>();
 
 export function getAppDetail(id: string) { return detailCache.get(id) || null; }
-export function setAppDetail(id: string, d: any) { detailCache.set(id, d); }
+export function setAppDetail(id: string, data: any) { detailCache.set(id, data); }
 
 export function fetchAppDetail(id: string): Promise<any> {
   const running = detailInflight.get(id);
   if (running) return running;
-  const p = (async () => {
+  const promise = (async () => {
     try {
-      const r = await fetch(`/api/applications/${id}`, { cache: "no-store" });
-      const d = await r.json();
-      if (r.ok) detailCache.set(id, d);
-      return r.ok ? d : null;
-    } catch { return detailCache.get(id) || null; }
-    finally { detailInflight.delete(id); }
+      const data = await requestJson("/api/applications/" + encodeURIComponent(id), { cache: "no-store" });
+      detailCache.set(id, data);
+      return data;
+    } finally {
+      detailInflight.delete(id);
+    }
   })();
-  detailInflight.set(id, p);
-  return p;
+  detailInflight.set(id, promise);
+  return promise;
 }
 
-// Beim Hovern über eine Bewerbung deren Detaildaten (inkl. Chat) vorladen.
-export function prefetchAppDetail(id: string) { if (id && !detailCache.has(id)) fetchAppDetail(id); }
+export function prefetchAppDetail(id: string) {
+  if (id && !detailCache.has(id)) void fetchAppDetail(id).catch(() => undefined);
+}
 
-// ---- Profil-Fakten (bleiben über Wechsel erhalten) ----
 let factsCache: any[] | null = null;
 let factsInflight: Promise<any[]> | null = null;
 export function getFactsCache() { return factsCache; }
-export function setFactsCache(d: any[]) { factsCache = d; }
+export function setFactsCache(data: any[]) { factsCache = data; }
 export function fetchFacts(): Promise<any[]> {
   if (factsInflight) return factsInflight;
   factsInflight = (async () => {
     try {
-      const r = await fetch("/api/documents/facts", { cache: "no-store" });
-      const d = await r.json();
-      factsCache = d.facts || [];
-      return factsCache!;
-    } catch { return factsCache || []; }
-    finally { factsInflight = null; }
+      const data = await requestJson("/api/documents/facts", { cache: "no-store" });
+      if (!Array.isArray(data.facts)) throw new Error("Profilfakten konnten nicht geladen werden.");
+      factsCache = data.facts;
+      return data.facts as any[];
+    } finally {
+      factsInflight = null;
+    }
   })();
-  return factsInflight;
+  return factsInflight!;
 }
 
-// ---- Erstellte Dokumente (Aggregat über alle Bewerbungen) ----
 let genDocsCache: any[] | null = null;
 export function getGenDocsCache() { return genDocsCache; }
-export function setGenDocsCache(d: any[]) { genDocsCache = d; }
+export function setGenDocsCache(data: any[]) { genDocsCache = data; }

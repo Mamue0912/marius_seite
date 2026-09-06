@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 // Manuelle Aktualisierung: holt neue Mails aller IMAP-Konten des Nutzers.
-// ?reseed=1 setzt den UID-Zeiger zurück → die letzten ~40 Mails werden neu
+// ?reseed=1 setzt den UID-Zeiger zurück → die letzten ~150 Mails werden neu
 // abgeholt (Rettung, falls der Zeiger fälschlich vorgerückt war).
 export async function POST(req: NextRequest) {
   const user = await requireUser();
@@ -23,15 +23,18 @@ export async function POST(req: NextRequest) {
   const params = new URL(req.url).searchParams;
   const reseed = params.get("reseed") === "1";
   const clean = params.get("clean") === "1";
+  if (clean || reseed) {
+    // Erst den Cursor sicher zurücksetzen. So kann ein nachfolgender Fehler beim
+    // Bereinigen keine Nachrichten dauerhaft aus dem nächsten Abruf ausschließen.
+    const { error: resetError } = await admin.from("mail_accounts").update({ inbox_last_uid: 0, inbox_uidvalidity: null }).eq("user_id", user.id);
+    if (resetError) return NextResponse.json({ error: "db_error", message: "Der Synchronisierungsstand konnte nicht zurückgesetzt werden." }, { status: 500 });
+    for (const account of accounts as any[]) { account.inbox_last_uid = 0; account.inbox_uidvalidity = null; }
+  }
   if (clean) {
     // Bereinigt: alle gespeicherten Mails löschen und komplett neu einlesen –
     // korrigiert falsch zugeordnete Altdatensätze (Konto-Verwechslung).
-    await admin.from("messages").delete().eq("user_id", user.id);
-    await admin.from("mail_accounts").update({ inbox_last_uid: 0, inbox_uidvalidity: null }).eq("user_id", user.id);
-    for (const a of accounts as any[]) { a.inbox_last_uid = 0; a.inbox_uidvalidity = null; }
-  } else if (reseed) {
-    await admin.from("mail_accounts").update({ inbox_last_uid: 0, inbox_uidvalidity: null }).eq("user_id", user.id);
-    for (const a of accounts as any[]) { a.inbox_last_uid = 0; a.inbox_uidvalidity = null; }
+    const { error: deleteError } = await admin.from("messages").delete().eq("user_id", user.id);
+    if (deleteError) return NextResponse.json({ error: "db_error", message: "Gespeicherte Nachrichten konnten nicht bereinigt werden." }, { status: 500 });
   }
   let processed = 0;
   const errors: string[] = [];

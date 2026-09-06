@@ -36,10 +36,11 @@ export async function POST(req: NextRequest) {
   if (!messageId) return NextResponse.json({ error: "bad_request", message: "Keine Mail angegeben." }, { status: 400 });
 
   const admin = supabaseAdmin();
-  const { data: msg } = await admin.from("messages").select("*").eq("id", messageId).eq("user_id", user.id).maybeSingle();
+  const { data: msg, error: messageError } = await admin.from("messages").select("*").eq("id", messageId).eq("user_id", user.id).maybeSingle();
+  if (messageError) return NextResponse.json({ error: "db_error", message: "Die Nachricht konnte nicht geladen werden." }, { status: 500 });
   if (!msg) return NextResponse.json({ error: "not_found", message: "Nachricht nicht gefunden." }, { status: 404 });
   const account = msg.mail_account_id ? await loadMailAccount(msg.mail_account_id) : null;
-  if (!account) return NextResponse.json({ error: "no_account", message: "Zu dieser Nachricht ist kein Konto verknüpft." }, { status: 400 });
+  if (!account || account.user_id !== user.id) return NextResponse.json({ error: "no_account", message: "Zu dieser Nachricht ist kein gültiges Konto verknüpft." }, { status: 400 });
 
   try {
     // Vollständigen Thread serverseitig aufbauen (Absender/Betreff/Verlauf).
@@ -51,7 +52,7 @@ export async function POST(req: NextRequest) {
       accountContext: accountContextLine(account as MailAccount)
     });
 
-    await admin.from("messages").update({
+    const { error: saveError } = await admin.from("messages").update({
       selected_reply_intent: intent || "custom",
       custom_instruction: customInstruction || null,
       draft_body: draft.body,
@@ -63,7 +64,11 @@ export async function POST(req: NextRequest) {
       draft_missing_info: draft.missing_info,
       draft_status: "entwurf",
       last_generated_at: new Date().toISOString()
-    }).eq("id", msg.id);
+    }).eq("id", msg.id).eq("user_id", user.id);
+    if (saveError) {
+      await recordAiEvent({ userId: user.id, kind: "generate", ok: false, durationMs: Date.now() - started, model: env.anthropicModel(), errorCategory: "database", subjectHint: msg.subject });
+      return NextResponse.json({ error: "db_error", message: "Der erzeugte Entwurf konnte nicht gespeichert werden." }, { status: 500 });
+    }
 
     await recordAiEvent({ userId: user.id, kind: "generate", ok: true, durationMs: Date.now() - started, model: env.anthropicModel(), subjectHint: msg.subject });
     return NextResponse.json({ draft, fromAccount: { email: (account as any).email, provider: (account as any).provider } });

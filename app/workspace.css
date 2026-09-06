@@ -97,6 +97,7 @@ input::placeholder, textarea::placeholder { color: var(--faint); }
 .task-add { display: grid; grid-template-columns: minmax(180px,1fr) 170px 120px auto; align-items: end; }
 .field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--ink-2); }
 .task-add input, .task-add select { width: 100%; }
+.task-copy-fields { display: grid; gap: 10px; min-width: 0; }
 .task-actions { display: flex; gap: 4px; }
 .task-note { font-size: 14px; color: var(--ink-2); margin-top: 6px; }
 .task-filter { display: flex; gap: 8px; align-items: center; margin: 20px 0; }
@@ -121,8 +122,9 @@ input::placeholder, textarea::placeholder { color: var(--faint); }
   .ov-grid { grid-template-columns: minmax(0,1fr); }
   .ov-hero h1 { font-size: 26px; }
   .topbar, .page-head { padding: 12px 16px; }
-  .bottomnav { overflow-x: auto; justify-content: flex-start; gap: 0; padding-bottom: env(safe-area-inset-bottom); background: #171b22f5; }
-  .bn-item { min-width: 64px; flex: 1 0 64px; min-height: 58px; }
+  .bottomnav { overflow-x: hidden; justify-content: stretch; gap: 0; padding-bottom: env(safe-area-inset-bottom); background: #171b22f5; }
+  .bn-item { min-width: 0; flex: 1 1 0; min-height: 58px; padding-inline: 2px; }
+  .bn-lbl { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; }
   .bn-lbl { font-size: 11px; }
   .bn-ic { display: inline-flex; justify-content: center; }
   .toast { bottom: 82px; }
@@ -133,7 +135,7 @@ input::placeholder, textarea::placeholder { color: var(--faint); }
   .cal-cell { min-height: 64px; padding: 4px; }
   input:not([type=checkbox]):not([type=radio]), textarea, select { font-size: 16px; }
   .task-add { grid-template-columns: 1fr 1fr; }
-  .task-add .field:first-child { grid-column: 1/-1; }
+  .task-add .task-copy-fields { grid-column: 1/-1; }
   .task-actions { flex-wrap: wrap; max-width: 80px; }
   .task-filter { flex-wrap: wrap; }
   .btn, .ac-btn, .icon-button { min-height: 40px; }
@@ -142,3 +144,5 @@ input::placeholder, textarea::placeholder { color: var(--faint); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
+
+@media (max-width: 760px) { .settings-rule-form { grid-template-columns: 1fr !important; } .folder-edit, .folder-create { flex-wrap: wrap; } .folder-edit .fe-name, .folder-create .fe-name { flex: 1 1 100%; } }

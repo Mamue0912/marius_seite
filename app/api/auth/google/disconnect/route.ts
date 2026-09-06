@@ -12,16 +12,20 @@ export async function POST() {
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const admin = supabaseAdmin();
-  const { data: accounts } = await admin.from("google_accounts").select("*").eq("user_id", user.id);
+  const { data: accounts, error: accountsError } = await admin.from("google_accounts").select("*").eq("user_id", user.id);
+  if (accountsError) return NextResponse.json({ error: "db_error", message: "Google-Verbindung konnte nicht geladen werden." }, { status: 500 });
+  let revokeFailed = false;
   for (const acc of accounts || []) {
     const enc = (acc as any).refresh_token_enc || (acc as any).access_token_enc;
     if (enc) {
       try {
         const token = decrypt(enc);
-        await fetch(`https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(token)}`, { method: "POST" });
-      } catch { /* Widerruf best effort */ }
+        const response = await fetch(`https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(token)}`, { method: "POST" });
+        if (!response.ok) revokeFailed = true;
+      } catch { revokeFailed = true; }
     }
   }
-  await admin.from("google_accounts").delete().eq("user_id", user.id);
-  return NextResponse.json({ ok: true });
+  const { error: deleteError } = await admin.from("google_accounts").delete().eq("user_id", user.id);
+  if (deleteError) return NextResponse.json({ error: "db_error", message: "Google-Kalender konnte nicht getrennt werden." }, { status: 500 });
+  return NextResponse.json({ ok: true, warning: revokeFailed ? "Die lokale Verbindung wurde getrennt; der Widerruf bei Google konnte nicht bestätigt werden." : undefined });
 }

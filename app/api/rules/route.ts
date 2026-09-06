@@ -9,14 +9,16 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const user = await requireUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const { data } = await supabaseAdmin().from("mail_rules").select("*").eq("user_id", user.id).order("created_at", { ascending: false });
+  const { data, error } = await supabaseAdmin().from("mail_rules").select("*").eq("user_id", user.id).order("created_at", { ascending: false });
+  if (error) return NextResponse.json({ error: "db_error", message: "Regeln konnten nicht geladen werden." }, { status: 500 });
   return NextResponse.json({ rules: data || [] });
 }
 
 export async function POST(req: NextRequest) {
   const user = await requireUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const b = await req.json();
+  const b = await req.json().catch(() => null);
+  if (!b) return NextResponse.json({ error: "bad_request", message: "Ungültige Eingabe." }, { status: 400 });
   const match_type = String(b.match_type || "");
   const match_value = String(b.match_value || "").trim().toLowerCase();
   if (!["sender", "domain", "account"].includes(match_type) || !match_value) {
@@ -37,22 +39,25 @@ export async function POST(req: NextRequest) {
   if (b.set_hidden) patch.hidden = true;
   if (b.set_needs_reply === false) { patch.needs_reply = false; patch.user_needs_reply = false; patch.action_status = "no_action"; }
   if (b.set_needs_reply === true) { patch.needs_reply = true; patch.user_needs_reply = true; patch.action_status = "reply_required"; }
-  const q = admin.from("messages").update(patch).eq("user_id", user.id);
-  if (match_type === "sender") await q.eq("from_address", match_value);
-  else if (match_type === "domain") await q.ilike("from_address", `%@${match_value}`);
-  else if (match_type === "account") await q.eq("mail_account_id", match_value);
+  const query = admin.from("messages").update(patch).eq("user_id", user.id);
+  const propagation = match_type === "sender"
+    ? await query.eq("from_address", match_value)
+    : match_type === "domain"
+      ? await query.ilike("from_address", `%@${match_value}`)
+      : await query.eq("mail_account_id", match_value);
   // set_label auf vorhandene Nachrichten anzuwenden (Array-Append) ist über die
   // Standard-Update-API nicht sauber möglich – neue Mails erhalten das Label
   // über die Regel beim Sync; bestehende über „Alles neu einordnen".
 
-  return NextResponse.json({ rule: data });
+  return NextResponse.json({ rule: data, warning: propagation.error ? "Die Regel wurde gespeichert, vorhandene Nachrichten konnten aber nicht vollständig aktualisiert werden." : undefined });
 }
 
 export async function DELETE(req: NextRequest) {
   const user = await requireUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const { id } = await req.json();
+  const { id } = await req.json().catch(() => ({}));
   if (!id) return NextResponse.json({ error: "bad_request" }, { status: 400 });
-  await supabaseAdmin().from("mail_rules").delete().eq("id", id).eq("user_id", user.id);
+  const { error } = await supabaseAdmin().from("mail_rules").delete().eq("id", id).eq("user_id", user.id);
+  if (error) return NextResponse.json({ error: "db_error", message: "Die Regel konnte nicht gelöscht werden." }, { status: 500 });
   return NextResponse.json({ ok: true });
 }

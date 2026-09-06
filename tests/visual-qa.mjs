@@ -45,7 +45,7 @@ async function main() {
     const browser = await chromium.launch({ headless: true });
     try {
       fs.mkdirSync("artifacts", { recursive: true });
-      for (const [name, width, height] of [["desktop", 1440, 960], ["mobile", 390, 844]]) {
+      for (const [name, width, height] of [["desktop", 1440, 960], ["laptop", 1280, 800], ["tablet", 1024, 900], ["mobile", 390, 844]]) {
         const page = await browser.newPage({ viewport: { width, height } });
         const errors = [];
         page.on("pageerror", (error) => errors.push(error.message));

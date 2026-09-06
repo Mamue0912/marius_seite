@@ -9,6 +9,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 45;
 
+const SAFE_STYLE = /^(?![\s\S]*(?:url\s*\(|expression\s*\(|@import|javascript\s*:))[\s\S]*$/i;
+
 // Sicheres HTML für isolierte iframe-Darstellung. Inline-Styles UND
 // Tabellenlayout bleiben erhalten (sonst zerbricht das Original-Layout,
 // z. B. bei PayPal). Skripte/Formulare/Event-Handler werden entfernt.
@@ -24,7 +26,7 @@ function safeHtml(html: string, withImages: boolean): string {
       img: withImages ? ["src", "alt", "width", "height", "style", "loading", "decoding", "referrerpolicy"] : ["alt", "width", "height", "style"],
       font: ["face", "size", "color"]
     },
-    allowedSchemes: ["http", "https", "mailto", "data"],
+    allowedSchemes: ["http", "https", "mailto"],
     allowedSchemesByTag: { img: withImages ? ["http", "https", "data"] : [] },
     // Tracking-Pixel (1×1 o. Ä.) entfernen, auch wenn Bilder erlaubt sind.
     exclusiveFilter: (frame) => {
@@ -40,13 +42,13 @@ function safeHtml(html: string, withImages: boolean): string {
     // Gefährliche/positionierende Styles raus, Layout-Styles behalten.
     allowedStyles: {
       "*": {
-        "color": [/.*/], "background-color": [/.*/], "background": [/.*/],
-        "text-align": [/.*/], "font-size": [/.*/], "font-weight": [/.*/], "font-family": [/.*/], "font-style": [/.*/],
-        "width": [/.*/], "max-width": [/.*/], "height": [/.*/], "min-width": [/.*/],
-        "padding": [/.*/], "padding-top": [/.*/], "padding-bottom": [/.*/], "padding-left": [/.*/], "padding-right": [/.*/],
-        "margin": [/.*/], "margin-top": [/.*/], "margin-bottom": [/.*/], "margin-left": [/.*/], "margin-right": [/.*/],
-        "border": [/.*/], "border-radius": [/.*/], "border-top": [/.*/], "border-bottom": [/.*/], "border-collapse": [/.*/],
-        "line-height": [/.*/], "letter-spacing": [/.*/], "text-decoration": [/.*/], "vertical-align": [/.*/], "display": [/.*/]
+        "color": [SAFE_STYLE], "background-color": [SAFE_STYLE], "background": [SAFE_STYLE],
+        "text-align": [SAFE_STYLE], "font-size": [SAFE_STYLE], "font-weight": [SAFE_STYLE], "font-family": [SAFE_STYLE], "font-style": [SAFE_STYLE],
+        "width": [SAFE_STYLE], "max-width": [SAFE_STYLE], "height": [SAFE_STYLE], "min-width": [SAFE_STYLE],
+        "padding": [SAFE_STYLE], "padding-top": [SAFE_STYLE], "padding-bottom": [SAFE_STYLE], "padding-left": [SAFE_STYLE], "padding-right": [SAFE_STYLE],
+        "margin": [SAFE_STYLE], "margin-top": [SAFE_STYLE], "margin-bottom": [SAFE_STYLE], "margin-left": [SAFE_STYLE], "margin-right": [SAFE_STYLE],
+        "border": [SAFE_STYLE], "border-radius": [SAFE_STYLE], "border-top": [SAFE_STYLE], "border-bottom": [SAFE_STYLE], "border-collapse": [SAFE_STYLE],
+        "line-height": [SAFE_STYLE], "letter-spacing": [SAFE_STYLE], "text-decoration": [SAFE_STYLE], "vertical-align": [SAFE_STYLE], "display": [SAFE_STYLE]
       }
     },
     transformTags: {
@@ -58,7 +60,8 @@ function safeHtml(html: string, withImages: boolean): string {
         for (const [k, v] of Object.entries(attribs)) if (v != null) clean[k] = String(v);
         if (!withImages) { delete clean.src; return { tagName: "img", attribs: clean } as any; }
         const src = clean.src || "";
-        if (/^https?:\/\//i.test(src)) clean.src = `/api/mail/img?u=${encodeURIComponent(src)}`;
+        if (/^data:/i.test(src) && !/^data:image\/(?:avif|gif|jpeg|png|webp);base64,/i.test(src)) delete clean.src;
+        else if (/^https?:\/\//i.test(src)) clean.src = `/api/mail/img?u=${encodeURIComponent(src)}`;
         clean.loading = "lazy"; clean.decoding = "async"; clean.referrerpolicy = "no-referrer";
         return { tagName: "img", attribs: clean } as any;
       }

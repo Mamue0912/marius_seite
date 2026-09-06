@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { calStore, calCovered, calFetchWindow } from "@/lib/calendarStore";
+import { requestJson } from "@/lib/http";
 
 interface Ev {
   id: string; title: string; start: string; end: string | null;
@@ -68,8 +69,8 @@ export default function CalendarView({ initialEmail }: { initialEmail?: string |
   async function disconnect() {
     if (disconnecting || !confirm("Google-Kalender wirklich trennen?")) return;
     setDisconnecting(true);
-    try { await fetch("/api/auth/google/disconnect", { method: "POST" }); window.location.href = "/calendar"; }
-    catch { setDisconnecting(false); }
+    try { await requestJson("/api/auth/google/disconnect", { method: "POST" }); window.location.href = "/calendar"; }
+    catch (caught) { setError((caught as Error).message || "Google-Kalender konnte nicht getrennt werden."); setDisconnecting(false); }
   }
 
   // Zu ladendes Zeitfenster je nach Ansicht.

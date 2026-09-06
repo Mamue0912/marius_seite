@@ -48,5 +48,6 @@ export async function downloadDocument(path: string): Promise<{ buffer: Buffer; 
 }
 
 export async function deleteDocument(path: string): Promise<void> {
-  try { await supabaseAdmin().storage.from(BUCKET).remove([path]); } catch {}
+  const { error } = await supabaseAdmin().storage.from(BUCKET).remove([path]);
+  if (error) throw new Error("delete_failed: " + error.message);
 }

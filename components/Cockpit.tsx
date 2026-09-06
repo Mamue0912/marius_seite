@@ -192,13 +192,15 @@ export default function Cockpit({
   accounts,
   folders = [],
   sendEnabled,
-  initialOpenId
+  initialOpenId,
+  initialUnreadOnly = false
 }: {
   connected: boolean;
   accounts: Account[];
   folders?: Folder[];
   sendEnabled: boolean;
   initialOpenId?: string | null;
+  initialUnreadOnly?: boolean;
 }) {
   const [msgs, setMsgs] = useState<Msg[]>(() => (getMailCache() as Msg[]) || []);
   const [showHidden, setShowHidden] = useState(true);
@@ -229,7 +231,7 @@ export default function Cockpit({
   const [listLimit, setListLimit] = useState(50);
   // Listenfilter: alle Mails oder nur aktuell ungelesene. Kombinierbar mit
   // Suche, Konto/Ordner-Auswahl und intelligenten Ansichten.
-  const [unreadOnly, setUnreadOnly] = useState(false);
+  const [unreadOnly, setUnreadOnly] = useState(initialUnreadOnly);
   const accById: Record<string, Account> = Object.fromEntries(accounts.map((a) => [a.id, a]));
   const filter = { account: sel.account, folder: sel.ftype, cat: "all", unread: false, needs: false, q };
   const [drawer, setDrawer] = useState<any>(null); // { msg, mode, loading, draft, body, tone, customInstruction, confirmBinding, sending }
@@ -495,9 +497,10 @@ export default function Cockpit({
     let report: any = null;
     try {
       const qs = clean ? "?clean=1" : reseed ? "?reseed=1" : "";
-      const r = await fetch("/api/mail/sync" + qs, { method: "POST" });
-      if (r.ok) { const j = await r.json(); errors = j.errors || []; report = j.report || null; }
-      else errors = [`Sync-Route HTTP ${r.status}`];
+      const response = await fetch("/api/mail/sync" + qs, { method: "POST" });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok) { errors = data.errors || []; report = data.report || null; }
+      else errors = [data.message || `Synchronisierung fehlgeschlagen (HTTP ${response.status}).`];
     } catch { errors = ["Netzwerkfehler beim Synchronisieren"]; }
     // Nach dem Sync alle Queries neu laden (Badge + Liste + Übersicht aus einer Quelle).
     await reloadMessages();
@@ -517,7 +520,7 @@ export default function Cockpit({
     setBackfill({ running: true, label: "Abgleich wird vorbereitet…" });
     const summary: any[] = [];
     try {
-      const accs = ((await (await fetch("/api/mail/backfill")).json()).accounts) || [];
+      const accs = ((await requestJson<any>("/api/mail/backfill")).accounts) || [];
       for (const a of accs) {
         const prov = PROVIDERS[a.provider]?.label || a.provider;
         for (const folder of ["inbox", "sent"] as const) {
@@ -552,7 +555,12 @@ export default function Cockpit({
   async function reclassifyAll() {
     if (!confirm("Alle Mails werden neu eingeordnet (z. B. damit Google-Sicherheitshinweise nicht mehr als dringend gelten). Deine manuellen Einstufungen bleiben erhalten. Fortfahren?")) return;
     setClassifyErr(null);
-    try { await fetch("/api/mail/classify?reset=1", { method: "POST" }); } catch {}
+    try {
+      await requestJson("/api/mail/classify?reset=1", { method: "POST" });
+    } catch (error) {
+      setClassifyErr((error as Error).message || "Neu-Einordnung konnte nicht gestartet werden.");
+      return;
+    }
     await runClassify();
   }
 
@@ -619,8 +627,8 @@ export default function Cockpit({
     setDrawer((d:any)=>({...d,sending:true,error:null}));
     try {
       await saveEdited();
-      await requestJson("/api/reply/send",jsonRequest("POST",{messageId:drawer.msg.id,confirm:true,fromAccountId:drawer.fromAccountId}));
-      setDrawer(null); notify("Antwort versendet."); await reloadMessages();
+      const result = await requestJson<any>("/api/reply/send",jsonRequest("POST",{messageId:drawer.msg.id,confirm:true,fromAccountId:drawer.fromAccountId}));
+      setDrawer(null); notify(result.warning || "Antwort versendet."); await reloadMessages();
     } catch(e) { setDrawer((d:any)=>d?{...d,sending:false,error:(e as Error).message}:d); }
     finally { actionLocks.current.delete("send"); }
   }
@@ -666,9 +674,17 @@ export default function Cockpit({
   }
 
   async function setReplyFlag(m: Msg, needs: boolean) {
-    setMsgs((prev) => prev.map((x) => x.id === m.id ? { ...x, needs_reply: needs, action_status: needs ? "reply_required" : "no_action" } : x));
-    setReading((s: any) => s && s.msg.id === m.id ? { ...s, msg: { ...s.msg, needs_reply: needs, user_needs_reply: needs } } : s);
-    await fetch("/api/mail/categorize", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messageId: m.id, needs_reply: needs }) });
+    const patch = { needs_reply: needs, user_needs_reply: needs, action_status: needs ? "reply_required" : "no_action" };
+    setMsgs((prev) => prev.map((item) => item.id === m.id ? { ...item, ...patch } : item));
+    setReading((state: any) => state && state.msg.id === m.id ? { ...state, msg: { ...state.msg, ...patch } } : state);
+    try {
+      const result = await requestJson<any>("/api/mail/categorize", jsonRequest("POST", { messageId: m.id, needs_reply: needs }));
+      if (result.warning) notify(result.warning);
+    } catch (error) {
+      setMsgs((prev) => prev.map((item) => item.id === m.id ? m : item));
+      setReading((state: any) => state && state.msg.id === m.id ? { ...state, msg: m } : state);
+      notify((error as Error).message || "Antwortstatus konnte nicht gespeichert werden.");
+    }
   }
 
   // Nutzerregeln laden (für aktive Zustände der Dauerregel-Buttons).
@@ -684,14 +700,15 @@ export default function Cockpit({
       && (patch.set_label !== undefined ? r.set_label === patch.set_label : true)
       && (patch.set_needs_reply !== undefined ? r.set_needs_reply === patch.set_needs_reply : true));
     if (existing) {
-      await fetch("/api/rules", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: existing.id }) });
-      setRules((rs) => rs.filter((x) => x.id !== existing.id));
+      await requestJson("/api/rules", jsonRequest("DELETE", { id: existing.id }));
+      setRules((current) => current.filter((item) => item.id !== existing.id));
       return false;
     }
-    const r = await fetch("/api/rules", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ match_type: scope, match_value: v, ...patch }) });
-    const j = await r.json();
-    if (r.ok && j.rule) { setRules((rs) => [j.rule, ...rs.filter((x) => !(x.match_type === scope && x.match_value === v && x.set_label === j.rule.set_label && x.set_needs_reply === j.rule.set_needs_reply))]); return true; }
-    throw new Error(j.message || j.error || "Regel konnte nicht gespeichert werden");
+    const result = await requestJson<any>("/api/rules", jsonRequest("POST", { match_type: scope, match_value: v, ...patch }));
+    if (!result.rule) throw new Error("Regel konnte nicht gespeichert werden.");
+    setRules((current) => [result.rule, ...current.filter((item) => !(item.match_type === scope && item.match_value === v && item.set_label === result.rule.set_label && item.set_needs_reply === result.rule.set_needs_reply))]);
+    if (result.warning) notify(result.warning);
+    return true;
   }
 
   // Manuell als beantwortet markieren (falls die App es nicht selbst erkennt).
@@ -713,15 +730,29 @@ export default function Cockpit({
     } else {
       setReading((s: any) => s && s.msg.id === m.id ? { ...s, msg: { ...s.msg, ...patch } } : s);
     }
-    await fetch("/api/mail/categorize", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messageId: m.id, answered }) });
+    try {
+      const result = await requestJson<any>("/api/mail/categorize", jsonRequest("POST", { messageId: m.id, answered }));
+      if (result.warning) notify(result.warning);
+    } catch (error) {
+      setMsgs((prev) => prev.map((item) => item.id === m.id ? m : item));
+      setReading((state: any) => state && state.msg.id === m.id ? { ...state, msg: m } : state);
+      notify((error as Error).message || "Antwortstatus konnte nicht gespeichert werden.");
+    }
   }
 
   async function addLabel(m: Msg, label: string, remove = false) {
-    const cur = (m.user_labels && m.user_labels.length ? m.user_labels : (m.labels || [])) as string[];
-    const next = remove ? cur.filter((l) => l !== label) : Array.from(new Set([...cur, label]));
-    setMsgs((prev) => prev.map((x) => x.id === m.id ? { ...x, user_labels: next } : x));
-    setReading((s: any) => s && s.msg.id === m.id ? { ...s, msg: { ...s.msg, user_labels: next } } : s);
-    await fetch("/api/mail/categorize", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messageId: m.id, user_labels: next }) });
+    const current = (m.user_labels && m.user_labels.length ? m.user_labels : (m.labels || [])) as string[];
+    const next = remove ? current.filter((item) => item !== label) : Array.from(new Set([...current, label]));
+    setMsgs((prev) => prev.map((item) => item.id === m.id ? { ...item, user_labels: next } : item));
+    setReading((state: any) => state && state.msg.id === m.id ? { ...state, msg: { ...state.msg, user_labels: next } } : state);
+    try {
+      const result = await requestJson<any>("/api/mail/categorize", jsonRequest("POST", { messageId: m.id, user_labels: next }));
+      if (result.warning) notify(result.warning);
+    } catch (error) {
+      setMsgs((prev) => prev.map((item) => item.id === m.id ? m : item));
+      setReading((state: any) => state && state.msg.id === m.id ? { ...state, msg: m } : state);
+      notify((error as Error).message || "Label konnte nicht gespeichert werden.");
+    }
   }
 
   async function categorize(m: Msg, opts: { category?: string; hidden?: boolean; ruleScope?: "sender" | "domain"; relevance?: string; message_type?: string; ruleLabel?: string; ruleNeverReply?: boolean }) {
@@ -733,8 +764,16 @@ export default function Cockpit({
     if (opts.message_type !== undefined) { patch.message_type = opts.message_type; patch.user_message_type = opts.message_type; }
     setMsgs((prev) => prev.map((x) => x.id === m.id ? { ...x, ...patch } : x));
     setReading((s: any) => s && s.msg.id === m.id ? { ...s, msg: { ...s.msg, ...patch } } : s);
-    const r = await fetch("/api/mail/categorize", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messageId: m.id, ...opts }) });
-    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.message || j.error || "Speichern fehlgeschlagen"); }
+    try {
+      const result = await requestJson<any>("/api/mail/categorize", jsonRequest("POST", { messageId: m.id, ...opts }));
+      if (result.warning) notify(result.warning);
+      return true;
+    } catch (error) {
+      setMsgs((prev) => prev.map((item) => item.id === m.id ? m : item));
+      setReading((state: any) => state && state.msg.id === m.id ? { ...state, msg: m } : state);
+      notify((error as Error).message || "Kategorie konnte nicht gespeichert werden.");
+      return false;
+    }
   }
 
   const statusView = () => {
@@ -1157,7 +1196,7 @@ function Reader({ reading, account, onClose, onReply, suggests, suggestsLoading,
   const [saveErr, setSaveErr] = useState<string | null>(null);
   async function doSave(key: string, fn: () => Promise<any>) {
     setSaveErr(null); setSaving(key);
-    try { await fn(); setSaving("ok"); setTimeout(() => setSaving((s) => s === "ok" ? null : s), 1200); }
+    try { const result = await fn(); if (result === false) throw new Error("Speichern fehlgeschlagen."); setSaving("ok"); setTimeout(() => setSaving((s) => s === "ok" ? null : s), 1200); }
     catch (e: any) { setSaving(null); setSaveErr(e?.message || "Speichern fehlgeschlagen"); }
   }
   const ruleActive = (scope: string, value: string, patch: any) => !!(rules || []).find((r: any) => r.match_type === scope && r.match_value === (value || "").toLowerCase()
@@ -1415,12 +1454,13 @@ function ConnectForm({ accounts, onClose }: { accounts: Account[]; onClose: () =
 
   async function disconnect(id: string) {
     if (!confirm("Dieses Postfach trennen? Die geladenen Mails werden entfernt.")) return;
-    await fetch("/api/mail/disconnect", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id })
-    });
-    window.location.reload();
+    setErr(null);
+    try {
+      await requestJson("/api/mail/disconnect", jsonRequest("POST", { id }));
+      window.location.reload();
+    } catch (error) {
+      setErr((error as Error).message || "Das Postfach konnte nicht getrennt werden.");
+    }
   }
 
   return (

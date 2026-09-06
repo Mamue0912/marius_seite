@@ -1,5 +1,6 @@
 import nodemailer from "nodemailer";
 import { MailAccount, accountPassword } from "./mailAccounts";
+import { resolvePublicNetworkEndpoint } from "./safeRemote";
 
 export interface SendParams {
   to: string;
@@ -14,21 +15,24 @@ export interface SendParams {
   attachments?: { filename: string; content: Buffer; contentType?: string }[];
 }
 
-function transport(acc: MailAccount) {
+async function transport(acc: MailAccount) {
+  const endpoint = await resolvePublicNetworkEndpoint(acc.smtp_host);
   return nodemailer.createTransport({
-    host: acc.smtp_host,
+    // Die Verbindung nutzt die geprüfte Adresse; SNI und Zertifikatsprüfung
+    // bleiben an den vom Nutzer konfigurierten Hostnamen gebunden.
+    host: endpoint.address,
     port: acc.smtp_port,
-    // secure=true → 465 (SSL); false → 587 (STARTTLS).
     secure: (acc as any).smtp_secure === true,
     auth: { user: acc.username, pass: accountPassword(acc) },
     requireTLS: (acc as any).smtp_secure !== true, // STARTTLS erzwingen bei 587
+    tls: endpoint.servername ? { servername: endpoint.servername } : undefined,
     connectionTimeout: 20_000
   });
 }
 
 // Prüft NUR die SMTP-Anmeldung (für „Verbindung testen").
 export async function verifySmtp(acc: MailAccount): Promise<void> {
-  const t = transport(acc);
+  const t = await transport(acc);
   await t.verify();
   t.close();
 }
@@ -36,7 +40,7 @@ export async function verifySmtp(acc: MailAccount): Promise<void> {
 // Versendet eine Nachricht über das SMTP des eigenen Kontos.
 // Absender = das verbundene Konto (acc.email). Sendet erst nach Bestätigung.
 export async function sendMail(acc: MailAccount, p: SendParams): Promise<string> {
-  const t = transport(acc);
+  const t = await transport(acc);
   const info = await t.sendMail({
     from: p.fromName ? { name: p.fromName, address: acc.email } : acc.email,
     to: p.to,

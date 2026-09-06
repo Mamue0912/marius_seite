@@ -7,10 +7,13 @@ import { findDuplicateApplication } from "@/lib/appDuplicate";
 import { imageBlock, isImageMime } from "@/lib/docExtract";
 import { recordAiEvent } from "@/lib/aiDiagnostics";
 import { env } from "@/lib/env";
+import { fetchPublicResource, readTextLimited } from "@/lib/safeRemote";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
+
+const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 
 function htmlToText(html: string): string {
   return html
@@ -23,19 +26,27 @@ function htmlToText(html: string): string {
 }
 
 async function fetchJobPage(url: string): Promise<string | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
   try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 15000);
-    const r = await fetch(url, {
-      signal: ctrl.signal,
-      headers: { "user-agent": "Mozilla/5.0 (compatible; CockpitBewerbung/1.0)", "accept": "text/html,application/xhtml+xml" }
+    const response = await fetchPublicResource(url, {
+      signal: controller.signal,
+      headers: { "user-agent": "Mozilla/5.0 (compatible; CockpitBewerbung/1.0)", accept: "text/html,application/xhtml+xml" }
     });
-    clearTimeout(t);
-    if (!r.ok) return null;
-    const html = await r.text();
+    const contentType = (response.headers.get("content-type") || "").toLowerCase();
+    if (!response.ok || (contentType && !contentType.includes("html") && !contentType.includes("xml"))) {
+      await response.body?.cancel();
+      return null;
+    }
+    const html = await readTextLimited(response, 2 * 1024 * 1024);
+    if (!html) return null;
     const text = htmlToText(html);
     return text.length > 200 ? text.slice(0, 14000) : null;
-  } catch { return null; }
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -58,6 +69,7 @@ export async function POST(req: NextRequest) {
       mode = (form.get("mode") as string) || "pdf";
       const file = form.get("file") as File | null;
       if (!file) return NextResponse.json({ error: "no_file", message: "Keine Datei ausgewählt." }, { status: 400 });
+      if (file.size > MAX_UPLOAD_BYTES) return NextResponse.json({ error: "too_large", message: "Datei ist zu groß (max. 15 MB)." }, { status: 413 });
       const buffer = Buffer.from(await file.arrayBuffer());
       const mime = file.type || "application/octet-stream";
       if (isImageMime(mime) || /\.(png|jpe?g|webp|gif)$/i.test(file.name || "")) {
@@ -112,10 +124,12 @@ export async function POST(req: NextRequest) {
 
     let appId = applicationId;
     if (appId) {
-      const { data: exists } = await admin.from("applications").select("id,status").eq("id", appId).eq("user_id", user.id).maybeSingle();
+      const { data: exists, error: lookupError } = await admin.from("applications").select("id,status").eq("id", appId).eq("user_id", user.id).maybeSingle();
+      if (lookupError) return NextResponse.json({ error: "db_error", message: lookupError.message }, { status: 500 });
       if (!exists) return NextResponse.json({ error: "not_found" }, { status: 404 });
       const keepStatus = ["interessant", "analyse_offen"].includes(exists.status) ? "analyse_offen" : exists.status;
-      await admin.from("applications").update({ ...row, status: keepStatus }).eq("id", appId);
+      const { error: updateError } = await admin.from("applications").update({ ...row, status: keepStatus }).eq("id", appId).eq("user_id", user.id);
+      if (updateError) return NextResponse.json({ error: "db_error", message: updateError.message }, { status: 500 });
     } else {
       const { data: created, error } = await admin.from("applications").insert(row).select("id").single();
       if (error) return NextResponse.json({ error: "db_error", message: error.message }, { status: 500 });

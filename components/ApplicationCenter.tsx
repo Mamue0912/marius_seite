@@ -71,13 +71,34 @@ export default function ApplicationCenter({ accounts, sendEnabled, initialSectio
   const [openId, setOpenId] = useState<string | null>(initialOpenId || null);
   const [listFilter, setListFilter] = useState<string>("all");
   const [loading, setLoading] = useState(() => getAppsCache() === null || getDocsCache() === null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [diag, setDiag] = useState(false);
   const [mergePrompt, setMergePrompt] = useState<{ newId: string; existing: any } | null>(null);
 
-  const loadApps = useCallback(async () => { setApps(await fetchApps()); }, []);
-  const loadDocs = useCallback(async () => { setDocs(await fetchDocs()); }, []);
+  const loadApps = useCallback(async (): Promise<any[] | null> => {
+    try {
+      const list = await fetchApps();
+      setApps(list);
+      setLoadError(null);
+      return list;
+    } catch (caught) {
+      setLoadError((caught as Error).message);
+      return null;
+    }
+  }, []);
+  const loadDocs = useCallback(async (): Promise<any[] | null> => {
+    try {
+      const list = await fetchDocs();
+      setDocs(list);
+      setLoadError(null);
+      return list;
+    } catch (caught) {
+      setLoadError((caught as Error).message);
+      return null;
+    }
+  }, []);
   // Immer im Hintergrund aktualisieren; blockt aber nicht, wenn schon Cache da ist.
-  useEffect(() => { (async () => { await Promise.all([loadApps(), loadDocs()]); setLoading(false); })(); }, [loadApps, loadDocs]);
+  useEffect(() => { (async () => { await Promise.allSettled([loadApps(), loadDocs()]); setLoading(false); })(); }, [loadApps, loadDocs]);
 
   const NAV: { key: any; label: string; ic: string }[] = [
     { key: "uebersicht", label: "Übersicht", ic: "overview" },
@@ -111,7 +132,8 @@ export default function ApplicationCenter({ accounts, sendEnabled, initialSectio
   // angelegt. Dann die Liste neu laden und die gerade erstellte öffnen, statt
   // fälschlich „abgebrochen" zu zeigen.
   async function recoverRecent(): Promise<boolean> {
-    const list = await fetchApps(); setApps(list);
+    const list = await loadApps();
+    if (!list) return false;
     const now = Date.now();
     const recent = list
       .filter((a: any) => a.created_at && now - new Date(a.created_at).getTime() < 120000)
@@ -123,9 +145,14 @@ export default function ApplicationCenter({ accounts, sendEnabled, initialSectio
     if (!mergePrompt) return;
     const { newId, existing } = mergePrompt;
     setMergePrompt(null);
-    const r = await aj("/api/applications/merge", { json: { targetId: existing.id, sourceId: newId }, timeoutMs: 20000 });
+    const result = await aj("/api/applications/merge", { json: { targetId: existing.id, sourceId: newId }, timeoutMs: 20000 });
+    if (!result.ok) {
+      setLoadError(errText(result, "Die Bewerbungen konnten nicht zusammengeführt werden."));
+      await loadApps();
+      return;
+    }
     await loadApps();
-    setOpenId(r.ok && r.data.applicationId ? r.data.applicationId : existing.id);
+    setOpenId(result.data.applicationId || existing.id);
   }
 
   return (
@@ -150,6 +177,7 @@ export default function ApplicationCenter({ accounts, sendEnabled, initialSectio
             <span className="ac-back-ic">‹</span><span className="ac-back-l">Übersicht</span>
           </button>
         )}
+        {loadError && <Notice retry={() => { void Promise.allSettled([loadApps(), loadDocs()]); }}>{loadError}</Notice>}
         {loading ? <div className="ac-empty"><span className="spin" /></div>
           : openId ? <Workspace id={openId} apps={apps} onOpen={openApp} accounts={accounts} sendEnabled={sendEnabled} docs={docs} onBack={() => nav("uebersicht")} onChanged={loadApps} onDeleted={async () => { nav("uebersicht"); await loadApps(); }} onDiag={() => setDiag(true)} />
           : section === "uebersicht" ? <Overview apps={apps} onOpen={openApp} onNav={nav} onNew={() => nav("neu")} />
@@ -399,6 +427,7 @@ const LIST_FILTERS: { key: string; label: string }[] = [
 ];
 function AppList({ apps, filter = "all", onFilter, onOpen, onNew, onReload }: any) {
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   function match(a: any) {
     if (filter === "active") return !["absage", "zusage"].includes(a.status);
     if (filter === "prep") return ["analyse_offen", "unterlagen", "bereit"].includes(a.status);
@@ -414,13 +443,21 @@ function AppList({ apps, filter = "all", onFilter, onOpen, onNew, onReload }: an
     e.stopPropagation();
     if (!confirm("Diese Bewerbung inklusive Chat, Analyse, zugeordneten Unterlagen und erstellten Dokumenten wirklich vollständig löschen? Das kann nicht rückgängig gemacht werden.")) return;
     setBusyId(id);
-    await aj(`/api/applications/${id}`, { method: "DELETE" });
-    setBusyId(null); await onReload();
+    setError(null);
+    const result = await aj(`/api/applications/${id}`, { method: "DELETE" });
+    setBusyId(null);
+    if (!result.ok) {
+      setError(errText(result, "Die Bewerbung konnte nicht gelöscht werden."));
+      return;
+    }
+    notify("Bewerbung gelöscht.");
+    await onReload();
   }
 
   return (
     <div className="ac-view">
       <div className="ac-view-head"><h1>{title}</h1><button className="ac-btn primary" onClick={onNew}>＋ Neue Stelle</button></div>
+      {error && <Notice retry={onReload}>{error}</Notice>}
       <div className="ac-filterbar">
         {LIST_FILTERS.map((f) => <button key={f.key} className={"ac-fchip" + (filter === f.key ? " on" : "")} onClick={() => onFilter && onFilter(f.key)}>{f.label}</button>)}
       </div>
@@ -449,27 +486,51 @@ function AppList({ apps, filter = "all", onFilter, onOpen, onNew, onReload }: an
 function GeneratedDocsAll({ apps, onOpen }: any) {
   // Aus dem Cache initialisieren → nicht bei jedem Öffnen komplett neu laden.
   const [docs, setDocs] = useState<any[] | null>(() => getGenDocsCache());
+  const [error, setError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
   const load = useCallback(async () => {
-    const all: any[] = [];
-    // Detailabrufe laufen über den Cache (fetchAppDetail) und parallel.
-    const results = await Promise.all(apps.map((a: any) => fetchAppDetail(a.id).then((data: any) => ({ a, data }))));
-    for (const { a, data } of results) {
-      if (data) (data.generatedDocs || []).forEach((d: any) => all.push({ ...d, app: a }));
+    setError(null);
+    try {
+      const all: any[] = [];
+      // Detailabrufe laufen über den Cache parallel; einzelne Fehler blockieren die übrigen Ergebnisse nicht.
+      const results = await Promise.allSettled(apps.map(async (a: any) => ({ a, data: await fetchAppDetail(a.id) })));
+      const failures = results.filter((result) => result.status === "rejected").length;
+      for (const result of results) {
+        if (result.status !== "fulfilled") continue;
+        const { a, data } = result.value;
+        if (data) (data.generatedDocs || []).forEach((d: any) => all.push({ ...d, app: a }));
+      }
+      if (apps.length > 0 && failures === apps.length) throw new Error("Dokumente konnten nicht geladen werden.");
+      all.sort((x, y) => new Date(y.updated_at).getTime() - new Date(x.updated_at).getTime());
+      setDocs(all);
+      setGenDocsCache(all);
+      if (failures > 0) setError("Einige Bewerbungen konnten nicht geladen werden. Die übrigen Dokumente werden angezeigt.");
+    } catch (loadError: any) {
+      setDocs((current) => current ?? []);
+      setError(loadError?.message || "Dokumente konnten nicht geladen werden.");
     }
-    all.sort((x, y) => new Date(y.updated_at).getTime() - new Date(x.updated_at).getTime());
-    setDocs(all); setGenDocsCache(all);
   }, [apps]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   async function del(id: string, e: any) {
     e.stopPropagation();
     if (!confirm("Dieses erstellte Dokument löschen?")) return;
-    await aj(`/api/applications/doc/${id}`, { method: "DELETE" });
+    setBusyId(id);
+    setError(null);
+    const result = await aj(`/api/applications/doc/${id}`, { method: "DELETE" });
+    setBusyId(null);
+    if (!result.ok) {
+      setError(errText(result, "Das Dokument konnte nicht gelöscht werden."));
+      return;
+    }
+    notify("Dokument gelöscht.");
     await load();
   }
   return (
     <div className="ac-view">
       <div className="ac-view-head"><h1>Erstellte Dokumente</h1></div>
+      {error && <Notice retry={load}>{error}</Notice>}
       {docs === null ? <div className="ac-empty"><span className="spin" /></div>
         : !docs.length ? <div className="ac-card ac-empty2">Noch keine Dokumente erstellt. Öffne eine Bewerbung und erstelle im rechten Bereich z. B. ein Anschreiben.</div>
         : <div className="ac-list">
@@ -482,7 +543,7 @@ function GeneratedDocsAll({ apps, onOpen }: any) {
                 <div className="ac-row-actions" onClick={(e) => e.stopPropagation()}>
                   <a className="ac-btn sm" href={`/api/applications/doc/${d.id}?format=docx`} target="_blank" rel="noreferrer">DOCX</a>
                   <button className="ac-btn sm" onClick={() => onOpen(d.app.id)}>Öffnen</button>
-                  <button className="ac-iconbtn danger" title="Dokument löschen" onClick={(e) => del(d.id, e)} aria-label="Dokument löschen"><Icon name="trash" size={16} /></button>
+                  <button className="ac-iconbtn danger" disabled={busyId === d.id} title="Dokument löschen" onClick={(e) => del(d.id, e)} aria-label="Dokument löschen">{busyId === d.id ? "…" : <Icon name="trash" size={16} />}</button>
                 </div>
               </div>
             ))}
@@ -490,7 +551,6 @@ function GeneratedDocsAll({ apps, onOpen }: any) {
     </div>
   );
 }
-
 // Stellensuche: echte Jobs/Praktika/Ausbildung (Bundesagentur für Arbeit),
 // optional per KI auf die bestätigten Profil-Fakten zugeschnitten.
 function JobSearch({ onOpenApp }: any) {
@@ -584,24 +644,68 @@ function MyFacts() {
   const [addCat, setAddCat] = useState("faehigkeit");
   const [addVal, setAddVal] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [adding, setAdding] = useState(false);
   const didInit = useRef(false);
-  const load = useCallback(async () => { setFacts(await fetchFacts()); }, []);
-  useEffect(() => { load(); }, [load]);
+
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      setFacts(await fetchFacts());
+    } catch (loadError: any) {
+      setFacts((current) => current ?? []);
+      setError(loadError?.message || "Die Angaben konnten nicht geladen werden.");
+    }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
   // Änderungen (Bearbeiten/Bestätigen/Löschen/Hinzufügen) im Cache spiegeln.
   useEffect(() => { if (facts) setFactsCache(facts); }, [facts]);
 
-  async function patch(id: string, patch: any) {
-    setFacts((fs) => (fs || []).map((f) => f.id === id ? { ...f, ...patch } : f));
-    await aj("/api/documents/facts", { method: "PATCH", json: { id, ...patch } });
+  async function patch(id: string, changes: any) {
+    const previous = (facts || []).find((fact) => fact.id === id);
+    if (!previous) return;
+    setError(null);
+    setFacts((items) => (items || []).map((fact) => fact.id === id ? { ...fact, ...changes } : fact));
+    const result = await aj("/api/documents/facts", { method: "PATCH", json: { id, ...changes } });
+    if (!result.ok) {
+      setFacts((items) => (items || []).map((fact) => fact.id === id ? previous : fact));
+      setError(errText(result, "Die Änderung konnte nicht gespeichert werden."));
+    }
   }
-  async function del(id: string) { setFacts((fs) => (fs || []).filter((f) => f.id !== id)); await aj("/api/documents/facts", { method: "DELETE", json: { id } }); }
+
+  async function del(id: string) {
+    const previous = (facts || []).find((fact) => fact.id === id);
+    const previousIndex = (facts || []).findIndex((fact) => fact.id === id);
+    if (!previous) return;
+    setError(null);
+    setFacts((items) => (items || []).filter((fact) => fact.id !== id));
+    const result = await aj("/api/documents/facts", { method: "DELETE", json: { id } });
+    if (!result.ok) {
+      setFacts((items) => {
+        const current = items || [];
+        if (current.some((fact) => fact.id === id)) return current;
+        const restored = [...current];
+        restored.splice(Math.max(0, Math.min(previousIndex, restored.length)), 0, previous);
+        return restored;
+      });
+      setError(errText(result, "Die Angabe konnte nicht gelöscht werden."));
+    }
+  }
+
   async function add() {
-    if (!addVal.trim()) return; setBusy(true);
-    const r = await aj("/api/documents/facts", { method: "POST", json: { category: addCat, value: addVal } });
+    if (!addVal.trim() || busy) return;
+    setBusy(true);
+    setError(null);
+    const result = await aj("/api/documents/facts", { method: "POST", json: { category: addCat, value: addVal.trim() } });
     setBusy(false);
-    if (r.ok && r.data.fact) { setFacts((fs) => [...(fs || []), r.data.fact]); setAddVal(""); setOpen((o) => ({ ...o, [addCat]: true })); }
+    if (result.ok && result.data.fact) {
+      setFacts((items) => [...(items || []), result.data.fact]);
+      setAddVal("");
+      setOpen((current) => ({ ...current, [addCat]: true }));
+      return;
+    }
+    setError(errText(result, "Die Angabe konnte nicht hinzugefügt werden."));
   }
 
   const cats = useMemo(() => Object.keys(FACT_CAT_LABEL), []);
@@ -612,7 +716,7 @@ function MyFacts() {
   }, [facts]);
   const shownCats = useMemo(() => cats.filter((category) => byCat[category]?.length), [byCat, cats]);
   const total = facts?.length || 0;
-  const confirmed = (facts || []).filter((f) => f.status === "bestaetigt").length;
+  const confirmed = (facts || []).filter((fact) => fact.status === "bestaetigt").length;
   const openCount = total - confirmed;
 
   // Beim ersten Laden: Gruppen mit offenen (unbestätigten) Angaben aufklappen,
@@ -620,15 +724,16 @@ function MyFacts() {
   useEffect(() => {
     if (didInit.current || facts === null) return;
     didInit.current = true;
-    const init: Record<string, boolean> = {};
-    for (const c of shownCats) init[c] = byCat[c].some((f) => f.status !== "bestaetigt");
-    setOpen(init);
+    const initialOpen: Record<string, boolean> = {};
+    for (const category of shownCats) initialOpen[category] = byCat[category].some((fact) => fact.status !== "bestaetigt");
+    setOpen(initialOpen);
   }, [facts, shownCats, byCat]);
 
   return (
     <div className="ac-card ac-myfacts">
       <div className="ac-panel-h" style={{ position: "static" }}>Was das Cockpit über dich weiß</div>
       <div className="ac-hint" style={{ marginTop: 0, marginBottom: 12 }}>Alle erkannten und selbst ergänzten Angaben, nach Bereich gegliedert. Tippe auf einen Bereich zum Auf- und Zuklappen. <b>Nur bestätigte</b> Fakten werden in Bewerbungen verwendet.</div>
+      {error && <Notice retry={load}>{error}</Notice>}
       {facts === null ? <div className="ac-empty"><span className="spin" /></div> : (
         <>
           {total > 0 && (
@@ -636,33 +741,33 @@ function MyFacts() {
               <span className="ac-facts-stat"><b>{total}</b> Angaben</span>
               <span className="ac-facts-stat ok"><b>{confirmed}</b> bestätigt</span>
               {openCount > 0 && <span className="ac-facts-stat todo"><b>{openCount}</b> offen</span>}
-              <button className="ac-facts-toggleall" onClick={() => { const allOpen = shownCats.every((c) => open[c]); const next: Record<string, boolean> = {}; for (const c of shownCats) next[c] = !allOpen; setOpen(next); }}>
-                {shownCats.every((c) => open[c]) ? "Alle zuklappen" : "Alle aufklappen"}
+              <button className="ac-facts-toggleall" onClick={() => { const allOpen = shownCats.every((category) => open[category]); const next: Record<string, boolean> = {}; for (const category of shownCats) next[category] = !allOpen; setOpen(next); }}>
+                {shownCats.every((category) => open[category]) ? "Alle zuklappen" : "Alle aufklappen"}
               </button>
             </div>
           )}
           {!facts.length && <div className="ac-mod-empty">Noch keine Fakten. Lade Unterlagen hoch und nutze „Fakten erkennen" – oder ergänze unten selbst.</div>}
-          {shownCats.map((c) => {
-            const items = byCat[c];
-            const off = items.filter((f) => f.status !== "bestaetigt").length;
-            const isOpen = !!open[c];
+          {shownCats.map((category) => {
+            const items = byCat[category];
+            const unconfirmed = items.filter((fact) => fact.status !== "bestaetigt").length;
+            const isOpen = !!open[category];
             return (
-              <div key={c} className={"ac-fact-group" + (isOpen ? " open" : "")}>
-                <button className="ac-fact-grouphead" onClick={() => setOpen((o) => ({ ...o, [c]: !o[c] }))}>
+              <div key={category} className={"ac-fact-group" + (isOpen ? " open" : "")}>
+                <button className="ac-fact-grouphead" onClick={() => setOpen((current) => ({ ...current, [category]: !current[category] }))}>
                   <span className={"ac-fact-chev" + (isOpen ? " open" : "")}>›</span>
-                  <span className="ac-fact-grouptitle">{FACT_CAT_LABEL[c]}</span>
+                  <span className="ac-fact-grouptitle">{FACT_CAT_LABEL[category]}</span>
                   <span className="ac-fact-groupcount">{items.length}</span>
-                  {off > 0 && <span className="ac-fact-groupoffen">{off} offen</span>}
+                  {unconfirmed > 0 && <span className="ac-fact-groupoffen">{unconfirmed} offen</span>}
                 </button>
                 {isOpen && (
                   <div className="ac-fact-groupbody">
-                    {items.map((f) => (
-                      <div key={f.id} className={"ac-fact " + (f.status === "bestaetigt" ? "ok" : f.status === "abgelehnt" ? "" : "offen")}>
-                        <input className="ac-fact-input" defaultValue={f.value} onBlur={(e) => { if (e.target.value.trim() && e.target.value !== f.value) patch(f.id, { value: e.target.value }); }} />
-                        {f.status !== "bestaetigt"
-                          ? <button className="ac-fact-badge todo" onClick={() => patch(f.id, { status: "bestaetigt" })} title="Bestätigen">✓ bestätigen</button>
+                    {items.map((fact) => (
+                      <div key={fact.id} className={"ac-fact " + (fact.status === "bestaetigt" ? "ok" : fact.status === "abgelehnt" ? "" : "offen")}>
+                        <input key={fact.id + ":" + fact.value} className="ac-fact-input" defaultValue={fact.value} onBlur={(event) => { const value = event.target.value.trim(); if (value && value !== fact.value) void patch(fact.id, { value }); }} />
+                        {fact.status !== "bestaetigt"
+                          ? <button className="ac-fact-badge todo" onClick={() => void patch(fact.id, { status: "bestaetigt" })} title="Bestätigen">✓ bestätigen</button>
                           : <span className="ac-fact-badge done">bestätigt</span>}
-                        <button className="ac-fact-del" onClick={() => del(f.id)} title="Löschen" aria-label="Löschen"><Icon name="close" size={14} /></button>
+                        <button className="ac-fact-del" onClick={() => void del(fact.id)} title="Löschen" aria-label="Löschen"><Icon name="close" size={14} /></button>
                       </div>
                     ))}
                   </div>
@@ -672,10 +777,10 @@ function MyFacts() {
           })}
           {adding ? (
             <div className="ac-fact-add" style={{ marginTop: 14 }}>
-              <select className="ac-select sm" value={addCat} onChange={(e) => setAddCat(e.target.value)}>{cats.map((c) => <option key={c} value={c}>{FACT_CAT_LABEL[c]}</option>)}</select>
-              <input className="ac-input sm" placeholder="Eigene Angabe ergänzen…" value={addVal} autoFocus onChange={(e) => setAddVal(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") add(); }} />
-              <button className="ac-btn sm primary" disabled={busy || !addVal.trim()} onClick={add}>Hinzufügen</button>
-              <button className="ac-btn sm" onClick={() => { setAdding(false); setAddVal(""); }}>Abbrechen</button>
+              <select className="ac-select sm" value={addCat} onChange={(event) => setAddCat(event.target.value)}>{cats.map((category) => <option key={category} value={category}>{FACT_CAT_LABEL[category]}</option>)}</select>
+              <input className="ac-input sm" placeholder="Eigene Angabe ergänzen…" value={addVal} autoFocus onChange={(event) => setAddVal(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void add(); }} />
+              <button className="ac-btn sm primary" disabled={busy || !addVal.trim()} onClick={() => void add()}>{busy ? "Wird hinzugefügt…" : "Hinzufügen"}</button>
+              <button className="ac-btn sm" disabled={busy} onClick={() => { setAdding(false); setAddVal(""); }}>Abbrechen</button>
             </div>
           ) : (
             <button className="ac-facts-addbtn" onClick={() => setAdding(true)}>+ Eigene Angabe ergänzen</button>
@@ -685,7 +790,6 @@ function MyFacts() {
     </div>
   );
 }
-
 // Chat über die eigenen Unterlagen (Erklärungen geben, Rückfragen beantworten).
 function DocumentsChat({ onDiag }: any) {
   const [msgs, setMsgs] = useState<any[]>([]);
@@ -695,7 +799,13 @@ function DocumentsChat({ onDiag }: any) {
   const ctrlRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const initScrolled = useRef(false);
-  useEffect(() => { aj("/api/documents/chat", { timeoutMs: 15000 }).then((r) => { if (r.ok) setMsgs(r.data.messages || []); }); }, []);
+  const loadMessages = useCallback(async () => {
+    setError(null);
+    const result = await aj("/api/documents/chat", { timeoutMs: 15000 });
+    if (result.ok) setMsgs(result.data.messages || []);
+    else setError(errText(result, "Der Unterlagen-Chat konnte nicht geladen werden."));
+  }, []);
+  useEffect(() => { void loadMessages(); }, [loadMessages]);
   // Beim ersten Anzeigen sofort ganz nach unten springen (ohne Animation),
   // danach neue Nachrichten sanft einscrollen. Der erste Sprung zählt erst,
   // wenn tatsächlich Nachrichten geladen sind (sonst animiert das Nachladen).
@@ -725,7 +835,7 @@ function DocumentsChat({ onDiag }: any) {
         {busy && <div className="ac-msg assistant"><div className="ac-msg-b"><span className="spin" /> denkt nach…{ctrlRef.current && <button className="ac-diaglink" onClick={() => ctrlRef.current?.abort()}>Abbrechen</button>}</div></div>}
         <div ref={endRef} />
       </div>
-      {error && <div className="ac-note bad">{error} {onDiag && <button className="ac-diaglink" onClick={onDiag}>Diagnose</button>}</div>}
+      {error && <div className="ac-note bad">{error} <button className="ac-diaglink" onClick={() => void loadMessages()}>Neu laden</button> {onDiag && <button className="ac-diaglink" onClick={onDiag}>Diagnose</button>}</div>}
       <div className="ac-chat-input" style={{ position: "static" }}>
         <textarea className="ac-chat-ta" placeholder="Nachricht an den Unterlagen-Chat…" value={input} disabled={busy}
           onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(input); } }} />
@@ -800,24 +910,72 @@ function DocDetail({ doc, reload, onDiag }: any) {
   const replaceRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
-    const r = await aj(`/api/documents/${doc.id}`, { timeoutMs: 20000 });
-    if (r.ok) setDetail(r.data);
+    const result = await aj(`/api/documents/${doc.id}`, { timeoutMs: 20000 });
+    if (result.ok) {
+      setDetail(result.data);
+      setError(null);
+      return true;
+    }
+    setError(errText(result, "Die Unterlage konnte nicht geladen werden."));
+    return false;
   }, [doc.id]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   async function factAction(payload: any) {
     const r = await aj(`/api/documents/${doc.id}/facts`, { json: payload, timeoutMs: 50000 });
     if (!r.ok) { setError(errText(r, "Aktion fehlgeschlagen.")); return false; }
     await load(); await reload(); return true;
   }
-  async function extract() { setBusy(true); setError(null); const ok = await factAction({ action: "extract" }); setBusy(false); }
-  async function rename() {
-    const name = prompt("Neuer Name:", doc.name); if (name == null) return;
-    await aj(`/api/documents/${doc.id}`, { method: "PATCH", json: { name } }); await reload();
+  async function extract() {
+    setBusy(true);
+    setError(null);
+    await factAction({ action: "extract" });
+    setBusy(false);
   }
-  async function setAllowed(v: boolean) { await aj(`/api/documents/${doc.id}`, { method: "PATCH", json: { allowed_for_applications: v } }); await reload(); }
-  async function del() { if (!confirm("Dieses Dokument wirklich löschen?")) return; await aj(`/api/documents/${doc.id}`, { method: "DELETE" }); await reload(); }
-  async function replace(file: File) { setBusy(true); const fd = new FormData(); fd.append("file", file); const r = await aj(`/api/documents/${doc.id}`, { method: "PUT", body: fd, timeoutMs: 60000 }); setBusy(false); if (r.ok) { await load(); await reload(); } else setError(errText(r)); }
+  async function updateDocument(changes: any, fallback: string) {
+    setError(null);
+    const result = await aj(`/api/documents/${doc.id}`, { method: "PATCH", json: changes });
+    if (!result.ok) {
+      setError(errText(result, fallback));
+      return false;
+    }
+    await reload();
+    return true;
+  }
+  async function rename() {
+    const name = prompt("Neuer Name:", doc.name)?.trim();
+    if (!name || name === doc.name) return;
+    if (await updateDocument({ name }, "Die Unterlage konnte nicht umbenannt werden.")) notify("Unterlage umbenannt.");
+  }
+  async function setAllowed(value: boolean) {
+    await updateDocument({ allowed_for_applications: value }, "Die Freigabe konnte nicht gespeichert werden.");
+  }
+  async function del() {
+    if (!confirm("Dieses Dokument wirklich löschen?")) return;
+    setError(null);
+    const result = await aj(`/api/documents/${doc.id}`, { method: "DELETE" });
+    if (!result.ok) {
+      setError(errText(result, "Die Unterlage konnte nicht gelöscht werden."));
+      return;
+    }
+    notify("Unterlage gelöscht.");
+    await reload();
+  }
+  async function replace(file: File) {
+    setBusy(true);
+    setError(null);
+    const form = new FormData();
+    form.append("file", file);
+    const result = await aj(`/api/documents/${doc.id}`, { method: "PUT", body: form, timeoutMs: 60000 });
+    setBusy(false);
+    if (result.ok) {
+      await load();
+      await reload();
+      notify("Unterlage ersetzt.");
+    } else {
+      setError(errText(result, "Die Unterlage konnte nicht ersetzt werden."));
+    }
+  }
 
   const facts = detail?.facts || [];
   const offen = facts.filter((f: any) => f.status === "offen");
@@ -882,13 +1040,18 @@ function Workspace({ id, apps, onOpen, accounts, sendEnabled, docs, onBack, onCh
   const [menu, setMenu] = useState(false);
 
   const load = useCallback(async () => {
-    const data = await fetchAppDetail(id);
-    if (data) { setD(data); setError(null); } else setError("Bewerbung konnte nicht geladen werden.");
+    try {
+      const data = await fetchAppDetail(id);
+      setD(data);
+      setError(null);
+    } catch (caught) {
+      setError((caught as Error).message || "Bewerbung konnte nicht geladen werden.");
+    }
   }, [id]);
   // Beim Wechsel der Bewerbung sofort Cache zeigen (kein Leerblitzen), dann laden.
   useEffect(() => { setD(getAppDetail(id)); load(); }, [id, load]);
 
-  if (error) return <div className="ac-view"><button className="ac-btn" onClick={onBack}>‹ Zurück</button><div className="ac-note bad" style={{ marginTop: 12 }}>{error}</div></div>;
+  if (error && !d) return <div className="ac-view"><button className="ac-btn" onClick={onBack}>‹ Zurück</button><Notice retry={load}>{error}</Notice></div>;
   if (!d) return <div className="ac-empty"><span className="spin" /></div>;
   const app = d.application;
 
@@ -908,7 +1071,12 @@ function Workspace({ id, apps, onOpen, accounts, sendEnabled, docs, onBack, onCh
   async function deleteApp() {
     setMenu(false);
     if (!confirm("Diese Bewerbung vollständig löschen – inklusive Chat, Analyse, Zuordnungen und erstellten Dokumenten? Das kann nicht rückgängig gemacht werden.")) return;
-    await aj(`/api/applications/${id}`, { method: "DELETE" });
+    const result = await aj(`/api/applications/${id}`, { method: "DELETE" });
+    if (!result.ok) {
+      setError(errText(result, "Die Bewerbung konnte nicht gelöscht werden."));
+      return;
+    }
+    notify("Bewerbung gelöscht.");
     await onDeleted();
   }
 
@@ -1148,6 +1316,8 @@ function DocsPanel({ app, data, accounts, sendEnabled, onReload, onDiag, embedde
   const [editId, setEditId] = useState<string | null>(null);
   const [editBody, setEditBody] = useState("");
   const [refining, setRefining] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [assignmentBusy, setAssignmentBusy] = useState<string | null>(null);
   const [sendOpen, setSendOpen] = useState(false);
   const ctrlRef = useRef<AbortController | null>(null);
   const gdocs = data.generatedDocs || [];
@@ -1163,15 +1333,49 @@ function DocsPanel({ app, data, accounts, sendEnabled, onReload, onDiag, embedde
     else setError(errText(r, "Dokument konnte nicht erstellt werden."));
   }
   function openEdit(doc: any) { setEditId(doc.id); setEditBody(doc.body); }
-  async function saveEdit() { if (!editId) return; await aj(`/api/applications/doc/${editId}`, { method: "PATCH", json: { body: editBody } }); await onReload(); }
+  async function saveEdit() {
+    if (!editId || saving || editBody === editing?.body) return;
+    setSaving(true);
+    setError(null);
+    const result = await aj(`/api/applications/doc/${editId}`, { method: "PATCH", json: { body: editBody } });
+    setSaving(false);
+    if (!result.ok) {
+      setError(errText(result, "Der Entwurf konnte nicht gespeichert werden."));
+      return;
+    }
+    await onReload();
+  }
   async function refine(cmd: string) {
     if (!editId) return; setRefining(true); setError(null);
     const r = await aj("/api/applications/refine-doc", { json: { docId: editId, command: cmd }, timeoutMs: 60000 });
     setRefining(false);
     if (r.ok) { setEditBody(r.data.body); await onReload(); } else setError(errText(r, "Anpassung fehlgeschlagen."));
   }
-  async function delDoc(docId: string) { if (!confirm("Dokument löschen?")) return; await aj(`/api/applications/doc/${docId}`, { method: "DELETE" }); if (editId === docId) setEditId(null); await onReload(); }
-  async function assign(documentId: string, action: string) { await aj(`/api/applications/${app.id}/assign`, { json: { documentId, action } }); await onReload(); }
+  async function delDoc(docId: string) {
+    if (!confirm("Dokument löschen?")) return;
+    setError(null);
+    const result = await aj(`/api/applications/doc/${docId}`, { method: "DELETE" });
+    if (!result.ok) {
+      setError(errText(result, "Das Dokument konnte nicht gelöscht werden."));
+      return;
+    }
+    if (editId === docId) setEditId(null);
+    await onReload();
+    notify("Dokument gelöscht.");
+  }
+  async function assign(documentId: string, action: string) {
+    if (assignmentBusy) return false;
+    setAssignmentBusy(documentId);
+    setError(null);
+    const result = await aj(`/api/applications/${app.id}/assign`, { json: { documentId, action } });
+    setAssignmentBusy(null);
+    if (!result.ok) {
+      setError(errText(result, "Die Unterlagen-Zuordnung konnte nicht gespeichert werden."));
+      return false;
+    }
+    await onReload();
+    return true;
+  }
 
   return (
     <div className={embedded ? "ac-panel-embed" : "ac-panel"}>
@@ -1200,13 +1404,13 @@ function DocsPanel({ app, data, accounts, sendEnabled, onReload, onDiag, embedde
               </div>
               {editId === doc.id && (
                 <div className="ac-editor-wrap">
-                  <textarea className="ac-editor" value={editBody} onChange={(e) => setEditBody(e.target.value)} onBlur={saveEdit} />
+                  <textarea className="ac-editor" value={editBody} onChange={(e) => setEditBody(e.target.value)} onBlur={() => void saveEdit()} />
                   <div className="ac-chips">
                     {REFINE.map((c) => <button key={c} className="ac-chip" disabled={refining} onClick={() => refine(c)}>{c}</button>)}
                     {refining && <span className="spin" />}
                   </div>
                   <div className="ac-gdoc-actions">
-                    <button className="ac-btn sm" onClick={saveEdit}>Speichern</button>
+                    <button className="ac-btn sm" disabled={saving || editBody === editing?.body} onClick={() => void saveEdit()}>{saving ? "Speichert…" : "Speichern"}</button>
                     <a className="ac-btn sm primary" href={`/api/applications/doc/${doc.id}?format=docx`} target="_blank" rel="noreferrer">DOCX herunterladen</a>
                     <button className="ac-btn sm danger" onClick={() => delDoc(doc.id)}>Löschen</button>
                   </div>
@@ -1220,9 +1424,9 @@ function DocsPanel({ app, data, accounts, sendEnabled, onReload, onDiag, embedde
       <div className="ac-label sm">Angehängte Unterlagen</div>
       <div className="ac-assign">
         {(data.assignedDocuments || []).map((d: any) => (
-          <span key={d.id} className="ac-chipv low">{d.name}<button className="ac-x" onClick={() => assign(d.id, "remove")}>×</button></span>
+          <span key={d.id} className="ac-chipv low">{d.name}<button className="ac-x" disabled={assignmentBusy === d.id} onClick={() => void assign(d.id, "remove")}>×</button></span>
         ))}
-        <AssignPicker app={app} assigned={assigned} onAssign={(id: string) => assign(id, "add")} />
+        <AssignPicker assigned={assigned} busyId={assignmentBusy} onAssign={(id: string) => assign(id, "add")} />
       </div>
 
       <button className="ac-btn primary block" onClick={() => setSendOpen(true)}>Bewerbungsmail vorbereiten</button>
@@ -1231,17 +1435,31 @@ function DocsPanel({ app, data, accounts, sendEnabled, onReload, onDiag, embedde
   );
 }
 
-function AssignPicker({ assigned, onAssign }: any) {
+function AssignPicker({ assigned, busyId, onAssign }: any) {
   const [docs, setDocs] = useState<any[] | null>(null);
   const [open, setOpen] = useState(false);
-  useEffect(() => { if (open && !docs) aj("/api/documents", { timeoutMs: 20000 }).then((r) => { if (r.ok) setDocs((r.data.documents || []).filter((d: any) => d.allowed_for_applications)); }); }, [open, docs]);
-  const assignedIds = new Set(assigned.map((a: any) => a.id));
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setError(null);
+    const result = await aj("/api/documents", { timeoutMs: 20000 });
+    if (result.ok) {
+      setDocs((result.data.documents || []).filter((document: any) => document.allowed_for_applications));
+      return;
+    }
+    setDocs([]);
+    setError(errText(result, "Unterlagen konnten nicht geladen werden."));
+  }, []);
+  useEffect(() => { if (open && docs === null) void load(); }, [open, docs, load]);
+
+  const assignedIds = new Set(assigned.map((item: any) => item.id));
   return (
     <span className="ac-assign-pick">
-      <button className="ac-chipv add" onClick={() => setOpen((v) => !v)}>＋ Unterlage</button>
+      <button className="ac-chipv add" disabled={!!busyId} onClick={() => setOpen((value) => !value)}>＋ Unterlage</button>
       {open && <div className="ac-assign-menu">
-        {docs === null ? <span className="spin" /> : !docs.length ? <div className="ac-mod-empty sm">Keine freigegebenen Unterlagen.</div> :
-          docs.map((d) => <button key={d.id} disabled={assignedIds.has(d.id)} onClick={() => { onAssign(d.id); setOpen(false); }}>{d.name}</button>)}
+        {error ? <div className="ac-mod-empty sm">{error} <button className="ac-diaglink" onClick={() => { setDocs(null); void load(); }}>Erneut versuchen</button></div>
+          : docs === null ? <span className="spin" /> : !docs.length ? <div className="ac-mod-empty sm">Keine freigegebenen Unterlagen.</div> :
+          docs.map((document) => <button key={document.id} disabled={assignedIds.has(document.id) || busyId === document.id} onClick={async () => { const ok = await onAssign(document.id); if (ok !== false) setOpen(false); }}>{document.name}</button>)}
       </div>}
     </span>
   );
@@ -1256,24 +1474,33 @@ function SendModal({ app, data, accounts, sendEnabled, onClose, onSent, onDiag }
   const [text, setText] = useState(mailDoc?.body || "");
   const [warnings, setWarnings] = useState<string[]>([]);
   const [checked, setChecked] = useState(false);
+  const [checking, setChecking] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
+  const [sentNotice, setSentNotice] = useState("Gesendet. Status auf „Beworben“ gesetzt.");
   const attachIds = (data.assignedDocuments || []).map((d: any) => d.id);
 
-  useEffect(() => {
-    (async () => {
-      const r = await aj("/api/applications/send", { json: { applicationId: app.id, mode: "check", attachmentDocIds: attachIds }, timeoutMs: 25000 });
-      if (r.ok) { setWarnings(r.data.warnings || []); }
-      setChecked(true);
-    })();
-  }, []); // eslint-disable-line
+  async function checkSend() {
+    setChecking(true);
+    setChecked(false);
+    setError(null);
+    const result = await aj("/api/applications/send", { json: { applicationId: app.id, mode: "check", attachmentDocIds: attachIds }, timeoutMs: 25000 });
+    setChecking(false);
+    if (!result.ok) {
+      setError(errText(result, "Die Versandprüfung ist fehlgeschlagen."));
+      return;
+    }
+    setWarnings(result.data.warnings || []);
+    setChecked(true);
+  }
+  useEffect(() => { void checkSend(); }, []); // eslint-disable-line
 
   async function doSend() {
     setBusy(true); setError(null);
     const r = await aj("/api/applications/send", { json: { applicationId: app.id, mode: "send", confirm: true, fromAccountId, to, cc, subject, text, attachmentDocIds: attachIds, generatedDocId: mailDoc ? null : (data.generatedDocs || []).find((d: any) => d.kind === "anschreiben")?.id || null }, timeoutMs: 60000 });
     setBusy(false);
-    if (r.ok) { setSent(true); await onSent(); setTimeout(onClose, 1200); }
+    if (r.ok) { setSentNotice(r.data.warning || "Gesendet. Status auf „Beworben“ gesetzt."); setSent(true); await onSent(); setTimeout(onClose, r.data.warning ? 3000 : 1200); }
     else setError(errText(r, "Versand fehlgeschlagen."));
   }
 
@@ -1282,7 +1509,7 @@ function SendModal({ app, data, accounts, sendEnabled, onClose, onSent, onDiag }
       <div className="ac-modal" onClick={(e) => e.stopPropagation()}>
         <div className="ac-modal-h"><h3>Bewerbungsmail</h3><button className="ac-x" aria-label="Schließen" onClick={() => !busy && onClose()}><Icon name="close" size={17} /></button></div>
         <div className="ac-modal-b">
-          {sent ? <div className="ac-note ok">Gesendet. Status auf „Beworben" gesetzt.</div> : <>
+          {sent ? <div className={"ac-note " + (sentNotice.startsWith("Gesendet.") ? "ok" : "warn")}>{sentNotice}</div> : <>
             <div className="ac-field"><label>Von</label>
               <select className="ac-select" value={fromAccountId} onChange={(e) => setFrom(e.target.value)}>{accounts.map((a: any) => <option key={a.id} value={a.id}>{a.email}</option>)}</select></div>
             <div className="ac-field"><label>An</label><input className="ac-input" value={to} onChange={(e) => setTo(e.target.value)} placeholder="empfaenger@unternehmen.de" /></div>
@@ -1294,13 +1521,14 @@ function SendModal({ app, data, accounts, sendEnabled, onClose, onSent, onDiag }
                 {(data.assignedDocuments || []).length ? (data.assignedDocuments).map((d: any) => <span key={d.id} className="ac-chipv">{d.name}</span>) : <span className="ac-mod-empty sm">Keine Unterlagen angehängt.</span>}
               </div>
             </div>
+            {checking && <div className="ac-note">Versand und Anhänge werden geprüft…</div>}
             {checked && warnings.map((w, i) => <div key={i} className="ac-note warn">{w}</div>)}
-            {error && <div className="ac-note bad">{error} <button className="ac-diaglink" onClick={onDiag}>Diagnose</button></div>}
+            {error && <div className="ac-note bad">{error} {!checked && !checking && <button className="ac-diaglink" onClick={() => void checkSend()}>Erneut prüfen</button>} <button className="ac-diaglink" onClick={onDiag}>Diagnose</button></div>}
             {!sendEnabled && <div className="ac-note warn">Versand ist nicht aktiviert (ENABLE_SEND=false). Du kannst alles vorbereiten, aber noch nicht senden.</div>}
           </>}
         </div>
         {!sent && <div className="ac-modal-f">
-          <button className="ac-btn primary" disabled={busy || !sendEnabled || !to.trim() || !text.trim()} onClick={doSend}>{busy ? <><span className="spin" /> Sende…</> : "Senden"}</button>
+          <button className="ac-btn primary" disabled={busy || checking || !checked || !sendEnabled || !to.trim() || !text.trim()} onClick={doSend}>{busy ? <><span className="spin" /> Sende…</> : "Senden"}</button>
           <button className="ac-btn" onClick={() => !busy && onClose()}>Abbrechen</button>
         </div>}
       </div>

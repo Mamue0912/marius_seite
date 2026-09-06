@@ -5,6 +5,9 @@ import { mapLimit } from "../lib/concurrency";
 import { messageContentKey } from "../lib/mailKeys";
 import { requestJson } from "../lib/http";
 import { parseIcsEvents, normalizeColor, readableText } from "../lib/icloudCalendar";
+import { safeInternalPath } from "../lib/safeNavigation";
+import { isPrivateAddress, resolvePublicNetworkEndpoint } from "../lib/safeRemote";
+import { taskDueDate, taskNote, taskPriorityRank, taskTitle, validTaskPriority, validTaskStatus } from "../lib/taskValidation";
 
 test("Aufgaben ohne Datum sind nie überfällig", () => {
  assert.equal(dayDistance(null, new Date("2026-09-04T12:00:00")), null);
@@ -65,4 +68,36 @@ test("iCloud-Farben: ARGB/8-stellig wird auf #RRGGBB gekürzt", () => {
  assert.equal(normalizeColor("kaputt"), "#e8863c");
  assert.equal(readableText("#ffffff"), "#1a1a1a");
  assert.equal(readableText("#101010"), "#ffffff");
+});
+
+test("Auth redirects stay inside the application", () => {
+ assert.equal(safeInternalPath("/mail?unread=1"), "/mail?unread=1");
+ assert.equal(safeInternalPath("https://evil.example/path"), "/");
+ assert.equal(safeInternalPath("//evil.example/path"), "/");
+});
+
+test("Private and reserved network targets are recognized", () => {
+ for (const address of ["127.0.0.1", "10.1.2.3", "169.254.169.254", "192.168.1.4", "::1", "fc00::1", "2001:db8::1"]) {
+  assert.equal(isPrivateAddress(address), true, address);
+ }
+ assert.equal(isPrivateAddress("8.8.8.8"), false);
+ assert.equal(isPrivateAddress("2606:4700:4700::1111"), false);
+});
+
+test("Mail endpoints pin a validated public IP address", async () => {
+ const endpoint = await resolvePublicNetworkEndpoint("8.8.8.8");
+ assert.deepEqual(endpoint, { address: "8.8.8.8", family: 4, hostname: "8.8.8.8", servername: undefined });
+ await assert.rejects(() => resolvePublicNetworkEndpoint("127.0.0.1"), /private_remote_host/);
+});
+
+test("Task input and priorities are validated consistently", () => {
+ assert.equal(taskTitle("  Zeugnis senden  "), "Zeugnis senden");
+ assert.equal(taskNote("  heute  "), "heute");
+ assert.equal(taskDueDate(null), null);
+ assert.equal(validTaskPriority("dringend"), true);
+ assert.equal(validTaskPriority("sofort"), false);
+ assert.equal(validTaskStatus("warten"), true);
+ assert.ok(taskPriorityRank("dringend") > taskPriorityRank("hoch"));
+ assert.throws(() => taskTitle("   "));
+ assert.throws(() => taskDueDate("kein-datum"));
 });

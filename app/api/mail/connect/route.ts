@@ -7,23 +7,22 @@ import { verifyLogin, syncInbox } from "@/lib/imapSync";
 import { verifySmtp } from "@/lib/mailSend";
 import { MailAccount } from "@/lib/mailAccounts";
 import { friendlyMailError } from "@/lib/mailErrors";
+import { assertPublicNetworkHost } from "@/lib/safeRemote";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-// Verbindet ein IMAP/SMTP-Postfach. Prüft IMAP + SMTP getrennt, speichert die
-// Zugangsdaten verschlüsselt und lädt die ersten Mails.
+function validPort(value: number): boolean {
+  return Number.isInteger(value) && value > 0 && value <= 65535;
+}
+
 export async function POST(req: NextRequest) {
   const user = await requireUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  let body: any;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "bad_request" }, { status: 400 });
-  }
+  const body = await req.json().catch(() => null);
+  if (!body) return NextResponse.json({ error: "Ungültige Eingabe." }, { status: 400 });
 
   const provider = String(body.provider || "");
   const email = String(body.email || "").trim();
@@ -34,7 +33,6 @@ export async function POST(req: NextRequest) {
   if (!preset) return NextResponse.json({ error: "Unbekannter Anbieter." }, { status: 400 });
   if (!email || !password) return NextResponse.json({ error: "E-Mail und Passwort sind erforderlich." }, { status: 400 });
 
-  // Manuelle Serverdaten (bei „custom" bzw. wenn angegeben) überschreiben Presets.
   const imap_host = String(body.imapHost || preset.imapHost || "").trim();
   const imap_port = Number(body.imapPort || preset.imapPort);
   const imap_secure = body.imapSecure != null ? !!body.imapSecure : preset.imapSecure;
@@ -46,6 +44,14 @@ export async function POST(req: NextRequest) {
   if (!imap_host || !smtp_host) {
     return NextResponse.json({ error: "IMAP- und SMTP-Server sind erforderlich." }, { status: 400 });
   }
+  if (!validPort(imap_port) || !validPort(smtp_port)) {
+    return NextResponse.json({ error: "Ungültiger IMAP- oder SMTP-Port." }, { status: 400 });
+  }
+  try {
+    await Promise.all([assertPublicNetworkHost(imap_host), assertPublicNetworkHost(smtp_host)]);
+  } catch {
+    return NextResponse.json({ error: "Die Serveradresse ist nicht zulässig oder nicht erreichbar." }, { status: 400 });
+  }
 
   const password_enc = encrypt(password);
   const temp = {
@@ -55,20 +61,19 @@ export async function POST(req: NextRequest) {
     inbox_uidvalidity: null, inbox_last_uid: 0
   } as unknown as MailAccount;
 
-  // IMAP prüfen.
   try {
     await verifyLogin(temp);
-  } catch (e) {
-    return NextResponse.json({ error: `IMAP: ${friendlyMailError(e as Error)}` }, { status: 400 });
+  } catch (error) {
+    return NextResponse.json({ error: "IMAP: " + friendlyMailError(error as Error) }, { status: 400 });
   }
-  // SMTP prüfen (nicht fatal für das Lesen, aber wichtig fürs Antworten).
+
   let smtpOk = true;
   let smtpMsg = "";
   try {
     await verifySmtp(temp);
-  } catch (e) {
+  } catch (error) {
     smtpOk = false;
-    smtpMsg = friendlyMailError(e as Error);
+    smtpMsg = friendlyMailError(error as Error);
   }
 
   const admin = supabaseAdmin();
@@ -87,22 +92,18 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (error || !account) {
-    return NextResponse.json({ error: `Speichern fehlgeschlagen: ${error?.message || "unbekannt"}` }, { status: 500 });
+    return NextResponse.json({ error: "Speichern fehlgeschlagen: " + (error?.message || "unbekannt") }, { status: 500 });
   }
 
-  // Erst-Sync zeitlich begrenzen: Das Konto ist bereits gespeichert. Läuft der
-  // Sync in die Länge (langsamer Server, viele Mails), brechen wir kontrolliert
-  // ab und liefern trotzdem sauberes JSON zurück – der reguläre Sync (Fokus/
-  // Intervall/Cron) holt den Rest nach. So kein 504/Nicht-JSON-Fehler.
   let synced = 0;
   try {
-    const res = await Promise.race([
+    const result = await Promise.race([
       syncInbox(account as MailAccount),
-      new Promise<{ processed: number }>((_, rej) => setTimeout(() => rej(new Error("sync_timeout")), 18000))
+      new Promise<{ processed: number }>((_, reject) => setTimeout(() => reject(new Error("sync_timeout")), 18000))
     ]);
-    synced = (res as { processed: number }).processed;
-  } catch (e) {
-    await admin.from("mail_accounts").update({ last_error: (e as Error).message }).eq("id", (account as any).id);
+    synced = result.processed;
+  } catch (error) {
+    await admin.from("mail_accounts").update({ last_error: (error as Error).message }).eq("id", (account as MailAccount).id);
   }
 
   return NextResponse.json({ ok: true, email, synced, smtpOk, smtpMsg });

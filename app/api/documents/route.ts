@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabaseServer";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { uploadDocument } from "@/lib/storage";
+import { deleteDocument, uploadDocument } from "@/lib/storage";
 import { extractText, guessDocType } from "@/lib/docExtract";
 
 export const runtime = "nodejs";
@@ -15,9 +15,15 @@ export async function GET() {
   const user = await requireUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const admin = supabaseAdmin();
-  const { data: docs } = await admin.from("app_documents").select("*").eq("user_id", user.id).order("created_at", { ascending: false });
-  const { data: facts } = await admin.from("app_document_facts").select("document_id,status").eq("user_id", user.id);
-  const counts: Record<string, { offen: number; bestaetigt: number }> = {};
+  const [docsResult, factsResult] = await Promise.all([
+    admin.from("app_documents").select("*").eq("user_id", user.id).order("created_at", { ascending: false }),
+    admin.from("app_document_facts").select("document_id,status").eq("user_id", user.id)
+  ]);
+  if (docsResult.error || factsResult.error) {
+    return NextResponse.json({ error: "db_error", message: "Unterlagen konnten nicht geladen werden." }, { status: 500 });
+  }
+  const docs = docsResult.data;
+  const facts = factsResult.data;  const counts: Record<string, { offen: number; bestaetigt: number }> = {};
   for (const f of facts || []) {
     const c = (counts[f.document_id] ||= { offen: 0, bestaetigt: 0 });
     if (f.status === "bestaetigt") c.bestaetigt++; else if (f.status === "offen") c.offen++;
@@ -64,7 +70,10 @@ export async function POST(req: NextRequest) {
     storage_path: path, mime, size_bytes: file.size,
     processing_status: status, extracted_text: extracted, allowed_for_applications: true
   }).select("*").single();
-  if (error) return NextResponse.json({ error: "db_error", message: "Konnte Dokument nicht speichern." }, { status: 500 });
+  if (error) {
+    await deleteDocument(path).catch(() => undefined);
+    return NextResponse.json({ error: "db_error", message: "Konnte Dokument nicht speichern." }, { status: 500 });
+  }
 
   return NextResponse.json({ document: { ...row, factCounts: { offen: 0, bestaetigt: 0 } } });
 }

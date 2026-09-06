@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { requestJson } from "@/lib/http";
 
 // Verbindet den iCloud-Kalender per app-spezifischem Passwort (CalDAV, nur Lesen).
 // Das Passwort gibt der Nutzer selbst ein; es wird serverseitig verschlüsselt
@@ -42,10 +43,12 @@ export default function IcloudConnect({
   async function disconnect() {
     if (!confirm("iCloud-Kalender wirklich trennen?")) return;
     setBusy(true);
+    setError(null);
     try {
-      await fetch("/api/icloud/disconnect", { method: "POST" });
+      await requestJson("/api/icloud/disconnect", { method: "POST" });
       window.location.href = "/calendar";
-    } catch {
+    } catch (caught) {
+      setError((caught as Error).message || "iCloud-Kalender konnte nicht getrennt werden.");
       setBusy(false);
     }
   }

@@ -9,7 +9,8 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const user = await requireUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const { data } = await supabaseAdmin().from("applications").select("*").eq("user_id", user.id).order("last_activity_at", { ascending: false });
+  const { data, error } = await supabaseAdmin().from("applications").select("*").eq("user_id", user.id).order("last_activity_at", { ascending: false });
+  if (error) return NextResponse.json({ error: "db_error", message: "Bewerbungen konnten nicht geladen werden." }, { status: 500 });
   return NextResponse.json({ applications: data || [] });
 }
 

@@ -1,10 +1,11 @@
 import { chromium } from "@playwright/test";
 import fs from "node:fs";
-import { overview, mail, calendar, applications } from "./fixtures/product-pages.mjs";
+import { overview, mail, calendar, applications, tasks, deadlines, settings } from "./fixtures/product-pages.mjs";
 
-const views = { overview, mail, calendar, applications };
+const views = { overview, mail, calendar, applications, tasks, deadlines, settings };
 const sizes = [
   ["desktop", 1440, 960],
+  ["laptop", 1280, 800],
   ["tablet", 1024, 900],
   ["mobile", 390, 844],
 ];

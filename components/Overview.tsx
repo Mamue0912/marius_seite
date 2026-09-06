@@ -2,6 +2,7 @@
 import { PROVIDERS } from "@/lib/mailProviders";
 import CalendarTile from "@/components/CalendarTile";
 import Icon from "@/components/Icon";
+import { Notice } from "@/components/Feedback";
 
 type Task = { id: string; title: string; note?: string | null; due_at?: string | null; priority?: string; status?: string; source?: string };
 
@@ -23,7 +24,7 @@ function dueLabel(value?: string | null) {
   return date.toLocaleDateString("de-DE", { day: "2-digit", month: "short" });
 }
 
-export default function Overview({ accounts, summary, newestUnread = [], needsReplyList, deadlineList, appStats, tasks = [] }: any) {
+export default function Overview({ accounts, summary, newestUnread = [], needsReplyList, deadlineList, appStats, tasks = [], initialError = null }: any) {
   const dateStr = new Date().toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" });
   const openTasks: Task[] = [...tasks].filter((task) => task.status !== "erledigt").sort((a, b) => {
     const aDue = a.due_at ? new Date(a.due_at).getTime() : Number.MAX_SAFE_INTEGER;
@@ -61,6 +62,8 @@ export default function Overview({ accounts, summary, newestUnread = [], needsRe
           <a className="primary" href="/applications?view=neu"><Icon name="briefcase" size={16} /> Neue Stelle</a>
         </nav>
       </header>
+
+      {initialError && <Notice>{initialError}</Notice>}
 
       <section className="ov-metrics" aria-label="Tagesstatus">
         <a href="/tasks" className={summary.overdueTasks ? "attention" : ""}><span className="ov-metric-label">Offene Aufgaben</span><strong>{openTasks.length}</strong><small>{summary.overdueTasks ? `${summary.overdueTasks} überfällig` : "im Plan"}</small></a>

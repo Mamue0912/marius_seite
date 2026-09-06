@@ -6,6 +6,7 @@ import { loadMailAccount, MailAccount, accountPassword } from "@/lib/mailAccount
 import { friendlyMailError } from "@/lib/mailErrors";
 import { folderType } from "@/lib/folders";
 import { classifyMessage, semanticCategoryOf } from "@/lib/classify2";
+import { resolvePublicNetworkEndpoint } from "@/lib/safeRemote";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,8 +26,14 @@ export async function GET(req: NextRequest) {
   if (!acc || acc.user_id !== user.id) return NextResponse.json({ error: "no_account" }, { status: 403 });
   const a = acc as MailAccount;
 
+  let endpoint;
+  try {
+    endpoint = await resolvePublicNetworkEndpoint(a.imap_host);
+  } catch {
+    return NextResponse.json({ error: "Die Mailserver-Adresse ist nicht zulässig oder nicht erreichbar." }, { status: 400 });
+  }
   const client = new ImapFlow({
-    host: a.imap_host, port: a.imap_port, secure: (a as any).imap_secure !== false,
+    host: endpoint.address, servername: endpoint.servername, port: a.imap_port, secure: (a as any).imap_secure !== false,
     auth: { user: a.username, pass: accountPassword(a) }, logger: false, socketTimeout: 30_000
   });
   try {

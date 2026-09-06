@@ -3,10 +3,13 @@ import { simpleParser } from "mailparser";
 import { MailAccount, accountPassword } from "./mailAccounts";
 import { ThreadMessage } from "./anthropic";
 import { supabaseAdmin } from "./supabaseAdmin";
+import { resolvePublicNetworkEndpoint } from "./safeRemote";
 
-function client(acc: MailAccount): ImapFlow {
+async function client(acc: MailAccount): Promise<ImapFlow> {
+  const endpoint = await resolvePublicNetworkEndpoint(acc.imap_host);
   return new ImapFlow({
-    host: acc.imap_host,
+    host: endpoint.address,
+    servername: endpoint.servername,
     port: acc.imap_port,
     secure: (acc as any).imap_secure !== false,
     auth: { user: acc.username, pass: accountPassword(acc) },
@@ -17,7 +20,7 @@ function client(acc: MailAccount): ImapFlow {
 
 // Lädt den reinen Text einer Nachricht per UID aus dem angegebenen Ordner.
 export async function fetchMessageText(acc: MailAccount, uid: number, mailbox = "INBOX"): Promise<string> {
-  const c = client(acc);
+  const c = await client(acc);
   await c.connect();
   try {
     const lock = await c.getMailboxLock(mailbox);
@@ -36,7 +39,7 @@ export async function fetchMessageText(acc: MailAccount, uid: number, mailbox = 
 
 // Lädt Text UND HTML einer Nachricht (für die Leseansicht).
 export async function fetchMessageFull(acc: MailAccount, uid: number, mailbox = "INBOX", markRead = false): Promise<{ text: string; html: string | null }> {
-  const c = client(acc);
+  const c = await client(acc);
   await c.connect();
   try {
     const lock = await c.getMailboxLock(mailbox);

@@ -12,8 +12,13 @@ const BATCH = 150;
 
 async function counts(userId: string) {
   const admin = supabaseAdmin();
-  const total = (await admin.from("messages").select("id", { count: "exact", head: true }).eq("user_id", userId).eq("is_deleted", false)).count || 0;
-  const remaining = (await admin.from("messages").select("id", { count: "exact", head: true }).eq("user_id", userId).eq("is_deleted", false).is("classified_at", null)).count || 0;
+  const [totalResult, remainingResult] = await Promise.all([
+    admin.from("messages").select("id", { count: "exact", head: true }).eq("user_id", userId).eq("is_deleted", false),
+    admin.from("messages").select("id", { count: "exact", head: true }).eq("user_id", userId).eq("is_deleted", false).is("classified_at", null)
+  ]);
+  if (totalResult.error || remainingResult.error) throw new Error("Klassifizierungsstand konnte nicht geladen werden.");
+  const total = totalResult.count || 0;
+  const remaining = remainingResult.count || 0;
   return { total, remaining, classified: total - remaining };
 }
 
@@ -21,7 +26,8 @@ async function counts(userId: string) {
 export async function GET() {
   const user = await requireUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  return NextResponse.json(await counts(user.id));
+  try { return NextResponse.json(await counts(user.id)); }
+  catch (error) { return NextResponse.json({ error: "db_error", message: (error as Error).message }, { status: 500 }); }
 }
 
 // POST: klassifiziert einen Stapel noch nicht eingeordneter Mails.
@@ -32,7 +38,8 @@ export async function POST(req: NextRequest) {
   const admin = supabaseAdmin();
 
   if (new URL(req.url).searchParams.get("reset") === "1") {
-    await admin.from("messages").update({ classified_at: null }).eq("user_id", user.id).eq("is_deleted", false);
+    const { error } = await admin.from("messages").update({ classified_at: null }).eq("user_id", user.id).eq("is_deleted", false);
+    if (error) return NextResponse.json({ error: "db_error", message: "Neu-Einordnung konnte nicht gestartet werden." }, { status: 500 });
     return NextResponse.json({ ...(await counts(user.id)), reset: true });
   }
 
@@ -83,11 +90,11 @@ export async function POST(req: NextRequest) {
     // das volle Update fehl (z. B. weil eine Spalte noch fehlt), wird ein
     // minimales Update versucht, damit die Nachricht NICHT dauerhaft im Zustand
     // "Wird eingeordnet…" hängen bleibt.
-    const { error: upErr } = await admin.from("messages").update(update).eq("id", m.id);
+    const { error: upErr } = await admin.from("messages").update(update).eq("id", m.id).eq("user_id", user.id);
     if (!upErr) { processed++; continue; }
     if (!firstError) firstError = upErr.message;
     failed++;
-    await admin.from("messages").update({ summary: res.summary, classified_at: now, relevance: res.relevance, needs_reply: res.needs_reply }).eq("id", m.id);
+    await admin.from("messages").update({ summary: res.summary, classified_at: now, relevance: res.relevance, needs_reply: res.needs_reply }).eq("id", m.id).eq("user_id", user.id);
   }
 
   const c = await counts(user.id);

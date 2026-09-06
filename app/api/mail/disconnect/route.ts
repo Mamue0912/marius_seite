@@ -18,10 +18,9 @@ export async function POST(req: NextRequest) {
   }
   const admin = supabaseAdmin();
 
-  if (body.id) {
-    await admin.from("mail_accounts").delete().eq("id", body.id).eq("user_id", user.id);
-  } else {
-    await admin.from("mail_accounts").delete().eq("user_id", user.id);
-  }
+  const result = body.id
+    ? await admin.from("mail_accounts").delete().eq("id", body.id).eq("user_id", user.id)
+    : await admin.from("mail_accounts").delete().eq("user_id", user.id);
+  if (result.error) return NextResponse.json({ error: "db_error", message: "Das Mailkonto konnte nicht getrennt werden." }, { status: 500 });
   return NextResponse.json({ ok: true });
 }

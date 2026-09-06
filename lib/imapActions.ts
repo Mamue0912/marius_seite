@@ -1,10 +1,12 @@
 import { ImapFlow } from "imapflow";
 import { MailAccount, accountPassword } from "./mailAccounts";
 import { folderType, FolderType } from "./folders";
+import { resolvePublicNetworkEndpoint } from "./safeRemote";
 
-function client(acc: MailAccount): ImapFlow {
+async function client(acc: MailAccount): Promise<ImapFlow> {
+  const endpoint = await resolvePublicNetworkEndpoint(acc.imap_host);
   return new ImapFlow({
-    host: acc.imap_host, port: acc.imap_port, secure: (acc as any).imap_secure !== false,
+    host: endpoint.address, servername: endpoint.servername, port: acc.imap_port, secure: (acc as any).imap_secure !== false,
     auth: { user: acc.username, pass: accountPassword(acc) }, logger: false, socketTimeout: 30_000
   });
 }
@@ -23,7 +25,7 @@ async function findPath(c: ImapFlow, type: FolderType): Promise<string | null> {
 export async function imapAction(acc: MailAccount, sourceMailbox: string, uid: number, action: string): Promise<{ movedTo: FolderType | null; path?: string; uid?: number }> {
   if (!Number.isSafeInteger(uid) || uid <= 0) throw new Error("Ungültige Nachrichten-ID");
   if (action === "trash") action = "delete";
-  const c = client(acc);
+  const c = await client(acc);
   await c.connect();
   try {
     const lock = await c.getMailboxLock(sourceMailbox || "INBOX");

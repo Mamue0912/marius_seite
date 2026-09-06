@@ -5,6 +5,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { loadMailAccount, MailAccount, accountPassword } from "@/lib/mailAccounts";
 import { folderType } from "@/lib/folders";
 import { friendlyMailError } from "@/lib/mailErrors";
+import { resolvePublicNetworkEndpoint } from "@/lib/safeRemote";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,8 +24,14 @@ export async function POST(req: NextRequest) {
   if (!acc || (acc as any).user_id !== user.id) return NextResponse.json({ error: "no_account" }, { status: 403 });
   const a = acc as MailAccount;
 
+  let endpoint;
+  try {
+    endpoint = await resolvePublicNetworkEndpoint(a.imap_host);
+  } catch {
+    return NextResponse.json({ error: "invalid_host", message: "Die Mailserver-Adresse ist nicht zulässig oder nicht erreichbar." }, { status: 400 });
+  }
   const client = new ImapFlow({
-    host: a.imap_host, port: a.imap_port, secure: (a as any).imap_secure !== false,
+    host: endpoint.address, servername: endpoint.servername, port: a.imap_port, secure: (a as any).imap_secure !== false,
     auth: { user: a.username, pass: accountPassword(a) }, logger: false, socketTimeout: 30_000
   });
   try {
@@ -39,10 +46,16 @@ export async function POST(req: NextRequest) {
     }
     // In die Cockpit-Ordnerliste aufnehmen (Typ automatisch bestimmt).
     const ftype = folderType(path, null);
-    await supabaseAdmin().from("mail_folders").upsert({
+    const { error: storageError } = await supabaseAdmin().from("mail_folders").upsert({
       user_id: user.id, account_id: a.id, path, folder_type: ftype, unread: 0, total: 0, updated_at: new Date().toISOString()
     }, { onConflict: "account_id,path" });
-    return NextResponse.json({ ok: true, path, folder_type: ftype, existed: !!exists });
+    return NextResponse.json({
+      ok: true,
+      path,
+      folder_type: ftype,
+      existed: !!exists,
+      warning: storageError ? "Der Ordner wurde auf dem Mailserver erstellt, konnte aber noch nicht in der lokalen Ordnerliste gespeichert werden." : undefined
+    });
   } catch (e) {
     return NextResponse.json({ error: "create_failed", message: friendlyMailError(e as Error) }, { status: 502 });
   } finally {
