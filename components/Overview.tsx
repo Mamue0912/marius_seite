@@ -97,7 +97,7 @@ export default function Overview({ accounts, summary, newest, newestUnread = [],
         </a>
 
         <div className="tile">
-          <div className="tile-h"><span className="tile-ic">✎</span><span className="tile-t">Antwort nötig</span></div>
+          <div className="tile-h"><span className="tile-ic"><Icon name="edit" size={18} /></span><span className="tile-t">Antwort nötig</span></div>
           {needsReplyList.length > 0 ? needsReplyList.map((m: any) => (
             <a className="tile-inrow" key={m.id} href={`/mail?open=${m.id}`} title="Mail öffnen">
               <span className="il"><b>{m.from_name || m.from_address}</b><br /><span style={{ color: "var(--muted)" }}>{m.subject || "(kein Betreff)"}</span></span>

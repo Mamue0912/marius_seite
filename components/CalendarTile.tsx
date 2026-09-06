@@ -36,7 +36,7 @@ export default function CalendarTile() {
     <Link className="tile" href="/calendar" prefetch>
       <div className="tile-h"><span className="tile-ic"><Icon name="calendar" /></span><span className="tile-t">Kalender</span><span className="tile-go"><Icon name="arrow" size={16} /></span></div>
       {state === "loading" && <div className="tile-empty">lädt…</div>}
-      {state === "off" && <div className="tile-empty">Google-Kalender verbinden, um Termine hier zu sehen.</div>}
+      {state === "off" && <div className="tile-empty">Kalender verbinden (Google oder iCloud), um Termine hier zu sehen.</div>}
       {state === "reauth" && <div className="tile-empty">Google-Verbindung abgelaufen – neu verbinden.</div>}
       {state === "connected" && (events.length === 0
         ? <div className="tile-empty">Keine anstehenden Termine.</div>

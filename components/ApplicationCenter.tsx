@@ -80,13 +80,13 @@ export default function ApplicationCenter({ accounts, sendEnabled, initialSectio
   useEffect(() => { (async () => { await Promise.all([loadApps(), loadDocs()]); setLoading(false); })(); }, [loadApps, loadDocs]);
 
   const NAV: { key: any; label: string; ic: string }[] = [
-    { key: "uebersicht", label: "Übersicht", ic: "◉" },
-    { key: "suche", label: "Stellensuche", ic: "🔎" },
-    { key: "neu", label: "Neue Stelle", ic: "＋" },
-    { key: "aktiv", label: "Aktive Bewerbungen", ic: "▤" },
-    { key: "chat", label: "Bewerbungs-Chat", ic: "💬" } as any,
-    { key: "unterlagen", label: "Meine Unterlagen", ic: "📎" },
-    { key: "dokumente", label: "Erstellte Dokumente", ic: "✍" }
+    { key: "uebersicht", label: "Übersicht", ic: "overview" },
+    { key: "suche", label: "Stellensuche", ic: "search" },
+    { key: "neu", label: "Neue Stelle", ic: "plus" },
+    { key: "aktiv", label: "Aktive Bewerbungen", ic: "tasks" },
+    { key: "chat", label: "Bewerbungs-Chat", ic: "chat" } as any,
+    { key: "unterlagen", label: "Meine Unterlagen", ic: "paperclip" },
+    { key: "dokumente", label: "Erstellte Dokumente", ic: "document" }
   ];
 
   function go(key: any) {
@@ -135,7 +135,7 @@ export default function ApplicationCenter({ accounts, sendEnabled, initialSectio
         <nav className="ac-nav">
           {NAV.map((n) => (
             <button key={n.key} className={"ac-nav-item" + ((!openId && section === n.key) || (openId && n.key === "chat") ? " on" : "")} onClick={() => go(n.key)}>
-              <span className="ac-nav-ic">{n.ic}</span><span>{n.label}</span>
+              <span className="ac-nav-ic"><Icon name={n.ic} size={17} /></span><span>{n.label}</span>
             </button>
           ))}
         </nav>
@@ -256,11 +256,11 @@ function Overview({ apps, onOpen, onNav, onNew }: any) {
 
       {/* Schnell-Einstiege */}
       <div className="ac-quick">
-        <button className="ac-qtile accent" onClick={onNew}><span className="ac-qic">＋</span><span className="ac-qt">Neue Stelle</span><span className="ac-qs">Link, Text, PDF oder Screenshot</span></button>
-        {last && <button className="ac-qtile" onClick={() => onOpen(last.id)}><span className="ac-qic">🕘</span><span className="ac-qt">Zuletzt bearbeitet</span><span className="ac-qs">{last.position || last.company || "Bewerbung"}</span></button>}
-        <button className="ac-qtile" onClick={() => onNav("aktiv", "all")}><span className="ac-qic">▤</span><span className="ac-qt">Aktive Bewerbungen</span><span className="ac-qs">{apps.length} {apps.length === 1 ? "Projekt" : "Projekte"}</span></button>
-        <button className="ac-qtile" onClick={() => onNav("unterlagen")}><span className="ac-qic">📎</span><span className="ac-qt">Meine Unterlagen</span><span className="ac-qs">Lebenslauf, Zeugnisse, Zertifikate</span></button>
-        <button className="ac-qtile" onClick={() => onNav("dokumente")}><span className="ac-qic">✍</span><span className="ac-qt">Erstellte Dokumente</span><span className="ac-qs">Anschreiben, Mails, Kurzprofil</span></button>
+        <button className="ac-qtile accent" onClick={onNew}><span className="ac-qic"><Icon name="plus" size={21} /></span><span className="ac-qt">Neue Stelle</span><span className="ac-qs">Link, Text, PDF oder Screenshot</span></button>
+        {last && <button className="ac-qtile" onClick={() => onOpen(last.id)}><span className="ac-qic"><Icon name="clock" size={21} /></span><span className="ac-qt">Zuletzt bearbeitet</span><span className="ac-qs">{last.position || last.company || "Bewerbung"}</span></button>}
+        <button className="ac-qtile" onClick={() => onNav("aktiv", "all")}><span className="ac-qic"><Icon name="tasks" size={21} /></span><span className="ac-qt">Aktive Bewerbungen</span><span className="ac-qs">{apps.length} {apps.length === 1 ? "Projekt" : "Projekte"}</span></button>
+        <button className="ac-qtile" onClick={() => onNav("unterlagen")}><span className="ac-qic"><Icon name="paperclip" size={21} /></span><span className="ac-qt">Meine Unterlagen</span><span className="ac-qs">Lebenslauf, Zeugnisse, Zertifikate</span></button>
+        <button className="ac-qtile" onClick={() => onNav("dokumente")}><span className="ac-qic"><Icon name="document" size={21} /></span><span className="ac-qt">Erstellte Dokumente</span><span className="ac-qs">Anschreiben, Mails, Kurzprofil</span></button>
       </div>
     </div>
   );
@@ -435,7 +435,7 @@ function AppList({ apps, filter = "all", onFilter, onOpen, onNew, onReload }: an
               <span className={"ac-badge " + statusTone(a.status)}>{statusLabel(a.status)}</span>
               <div className="ac-row-actions" onClick={(e) => e.stopPropagation()}>
                 <button className="ac-btn sm" onClick={() => onOpen(a.id)}>Öffnen</button>
-                <button className="ac-iconbtn danger" disabled={busyId === a.id} title="Bewerbung löschen" onClick={(e) => del(a.id, e)}>{busyId === a.id ? "…" : "🗑"}</button>
+                <button className="ac-iconbtn danger" disabled={busyId === a.id} title="Bewerbung löschen" onClick={(e) => del(a.id, e)}>{busyId === a.id ? "…" : <Icon name="trash" size={16} />}</button>
               </div>
             </div>
           ))}
@@ -482,7 +482,7 @@ function GeneratedDocsAll({ apps, onOpen }: any) {
                 <div className="ac-row-actions" onClick={(e) => e.stopPropagation()}>
                   <a className="ac-btn sm" href={`/api/applications/doc/${d.id}?format=docx`} target="_blank" rel="noreferrer">DOCX</a>
                   <button className="ac-btn sm" onClick={() => onOpen(d.app.id)}>Öffnen</button>
-                  <button className="ac-iconbtn danger" title="Dokument löschen" onClick={(e) => del(d.id, e)}>🗑</button>
+                  <button className="ac-iconbtn danger" title="Dokument löschen" onClick={(e) => del(d.id, e)} aria-label="Dokument löschen"><Icon name="trash" size={16} /></button>
                 </div>
               </div>
             ))}
@@ -662,7 +662,7 @@ function MyFacts() {
                         {f.status !== "bestaetigt"
                           ? <button className="ac-fact-badge todo" onClick={() => patch(f.id, { status: "bestaetigt" })} title="Bestätigen">✓ bestätigen</button>
                           : <span className="ac-fact-badge done">bestätigt</span>}
-                        <button className="ac-fact-del" onClick={() => del(f.id)} title="Löschen">✕</button>
+                        <button className="ac-fact-del" onClick={() => del(f.id)} title="Löschen" aria-label="Löschen"><Icon name="close" size={14} /></button>
                       </div>
                     ))}
                   </div>
@@ -758,7 +758,7 @@ function Documents({ docs, reload, onDiag }: any) {
     <div className="ac-view">
       <div className="ac-view-head"><h1>Meine Unterlagen</h1>
         <div className="ac-row-actions">
-          <button className={"ac-btn" + (chatOpen ? " primary" : "")} onClick={() => setChatOpen((v) => !v)}>💬 Unterlagen-Chat</button>
+          <button className={"ac-btn" + (chatOpen ? " primary" : "")} onClick={() => setChatOpen((v) => !v)}><Icon name="chat" size={15} /> Unterlagen-Chat</button>
           <input ref={fileRef} type="file" multiple accept=".pdf,.docx,.txt,image/*" hidden onChange={(e) => { if (e.target.files?.length) upload(e.target.files); e.currentTarget.value = ""; }} />
           <button className="ac-btn primary" disabled={busy} onClick={() => fileRef.current?.click()}>{busy ? <><span className="spin" /> Lädt…</> : "＋ Hochladen"}</button>
         </div>
@@ -772,7 +772,7 @@ function Documents({ docs, reload, onDiag }: any) {
           {docs.map((d: any) => (
             <div key={d.id} className={"ac-doc" + (openId === d.id ? " on" : "")}>
               <div className="ac-doc-head" onClick={() => setOpenId(openId === d.id ? null : d.id)}>
-                <span className="ac-doc-ic">{/(png|jpe?g|webp|gif)/i.test(d.mime || "") ? "🖼" : d.mime?.includes("pdf") ? "📄" : "📝"}</span>
+                <span className="ac-doc-ic"><Icon name={/(png|jpe?g|webp|gif)/i.test(d.mime || "") ? "image" : "document"} size={20} /></span>
                 <div className="ac-doc-main">
                   <div className="ac-doc-name">{d.name}</div>
                   <div className="ac-doc-sub">{d.doc_type || "sonstiges"} · {new Date(d.created_at).toLocaleDateString("de-DE")} · <span className={"ac-dot " + (d.processing_status === "verarbeitet" ? "ok" : d.processing_status === "fehler" ? "bad" : "wait")} />{d.processing_status}</div>
@@ -843,8 +843,8 @@ function DocDetail({ doc, reload, onDiag }: any) {
             <div key={f.id} className="ac-fact offen">
               <span className="ac-fact-cat">{f.category}</span><span className="ac-fact-val">{f.value}</span>
               <span className="ac-fact-act">
-                <button title="Bestätigen" onClick={() => factAction({ action: "confirm", factId: f.id })}>✓</button>
-                <button title="Löschen" onClick={() => factAction({ action: "delete", factId: f.id })}>✕</button>
+                <button title="Bestätigen" aria-label="Bestätigen" onClick={() => factAction({ action: "confirm", factId: f.id })}><Icon name="check" size={14} /></button>
+                <button title="Löschen" aria-label="Löschen" onClick={() => factAction({ action: "delete", factId: f.id })}><Icon name="close" size={14} /></button>
               </span>
             </div>
           ))}
@@ -856,7 +856,7 @@ function DocDetail({ doc, reload, onDiag }: any) {
         {bestaetigt.map((f: any) => (
           <div key={f.id} className="ac-fact ok">
             <span className="ac-fact-cat">{f.category}</span><span className="ac-fact-val">{f.value}</span>
-            <span className="ac-fact-act"><button title="Entfernen" onClick={() => factAction({ action: "delete", factId: f.id })}>✕</button></span>
+            <span className="ac-fact-act"><button title="Entfernen" aria-label="Entfernen" onClick={() => factAction({ action: "delete", factId: f.id })}><Icon name="close" size={14} /></button></span>
           </div>
         ))}
         {!bestaetigt.length && <div className="ac-mod-empty">Noch keine bestätigten Fakten.</div>}
@@ -913,10 +913,10 @@ function Workspace({ id, apps, onOpen, accounts, sendEnabled, docs, onBack, onCh
   }
 
   const TABS: { key: typeof pane; label: string; ic: string }[] = [
-    { key: "liste", label: "Übersicht", ic: "▤" },
-    { key: "chat", label: "Chat", ic: "💬" },
-    { key: "stelle", label: "Stelle", ic: "▦" },
-    { key: "docs", label: "Unterlagen", ic: "📄" }
+    { key: "liste", label: "Übersicht", ic: "tasks" },
+    { key: "chat", label: "Chat", ic: "chat" },
+    { key: "stelle", label: "Stelle", ic: "briefcase" },
+    { key: "docs", label: "Unterlagen", ic: "document" }
   ];
 
   return (
@@ -951,7 +951,7 @@ function Workspace({ id, apps, onOpen, accounts, sendEnabled, docs, onBack, onCh
       <nav className="ac-tabbar">
         {TABS.map((t) => (
           <button key={t.key} className={"ac-tab-item" + (pane === t.key ? " on" : "")} onClick={() => setPane(t.key)}>
-            <span className="ac-tab-ic">{t.ic}</span><span className="ac-tab-l">{t.label}</span>
+            <span className="ac-tab-ic"><Icon name={t.ic} size={17} /></span><span className="ac-tab-l">{t.label}</span>
           </button>
         ))}
       </nav>
@@ -1280,9 +1280,9 @@ function SendModal({ app, data, accounts, sendEnabled, onClose, onSent, onDiag }
   return (
     <div className="ac-modal-scrim" onClick={() => !busy && onClose()}>
       <div className="ac-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="ac-modal-h"><h3>Bewerbungsmail</h3><button className="ac-x" onClick={() => !busy && onClose()}>✕</button></div>
+        <div className="ac-modal-h"><h3>Bewerbungsmail</h3><button className="ac-x" aria-label="Schließen" onClick={() => !busy && onClose()}><Icon name="close" size={17} /></button></div>
         <div className="ac-modal-b">
-          {sent ? <div className="ac-note ok">Gesendet ✓ Status auf „Beworben" gesetzt.</div> : <>
+          {sent ? <div className="ac-note ok">Gesendet. Status auf „Beworben" gesetzt.</div> : <>
             <div className="ac-field"><label>Von</label>
               <select className="ac-select" value={fromAccountId} onChange={(e) => setFrom(e.target.value)}>{accounts.map((a: any) => <option key={a.id} value={a.id}>{a.email}</option>)}</select></div>
             <div className="ac-field"><label>An</label><input className="ac-input" value={to} onChange={(e) => setTo(e.target.value)} placeholder="empfaenger@unternehmen.de" /></div>
@@ -1316,15 +1316,15 @@ function DiagModal({ onClose }: { onClose: () => void }) {
   return (
     <div className="ac-modal-scrim" onClick={onClose}>
       <div className="ac-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="ac-modal-h"><h3>KI-Diagnose</h3><button className="ac-x" onClick={onClose}>✕</button></div>
+        <div className="ac-modal-h"><h3>KI-Diagnose</h3><button className="ac-x" aria-label="Schließen" onClick={onClose}><Icon name="close" size={17} /></button></div>
         <div className="ac-modal-b">
           {s.loading ? <div className="ac-empty"><span className="spin" /></div> : s.error ? <div className="ac-note bad">Diagnose nicht verfügbar.</div> : <>
-            <div className="ac-field"><label>KI-Verbindung</label><div>{s.configured ? "✅ eingerichtet" : "❌ nicht eingerichtet (ANTHROPIC_API_KEY fehlt)"}</div></div>
+            <div className="ac-field"><label>KI-Verbindung</label><div className="ac-status-line"><Icon name={s.configured ? "check" : "info"} size={15} />{s.configured ? "eingerichtet" : "nicht eingerichtet (ANTHROPIC_API_KEY fehlt)"}</div></div>
             <div className="ac-field"><label>Modell</label><div>{s.model || "—"}</div></div>
             <div className="ac-field"><label>Versand</label><div>{s.sendEnabled ? "aktiviert" : "deaktiviert"}</div></div>
             <div className="ac-label sm">Letzte KI-Anfragen</div>
             {(!s.events || !s.events.length) ? <div className="ac-mod-empty">Noch keine protokolliert. (Tabelle ai_events via schema_ai.sql.)</div> :
-              <div className="ac-diag-list">{s.events.map((e: any, i: number) => <div key={i} className={"ac-diag-row" + (e.ok ? "" : " bad")}><span>{e.ok ? "✅" : "⚠️"}</span><span className="ac-diag-kind">{e.kind}</span><span className="ac-diag-meta">{new Date(e.created_at).toLocaleString("de-DE")} · {e.duration_ms != null ? Math.round(e.duration_ms / 100) / 10 + "s" : "—"}{e.error_category ? " · " + (cat[e.error_category] || e.error_category) : ""}</span></div>)}</div>}
+              <div className="ac-diag-list">{s.events.map((e: any, i: number) => <div key={i} className={"ac-diag-row" + (e.ok ? "" : " bad")}><span><Icon name={e.ok ? "check" : "info"} size={15} /></span><span className="ac-diag-kind">{e.kind}</span><span className="ac-diag-meta">{new Date(e.created_at).toLocaleString("de-DE")} · {e.duration_ms != null ? Math.round(e.duration_ms / 100) / 10 + "s" : "—"}{e.error_category ? " · " + (cat[e.error_category] || e.error_category) : ""}</span></div>)}</div>}
             <div className="ac-hint">Keine Schlüssel und keine vollständigen Inhalte werden gespeichert.</div>
           </>}
         </div>

@@ -114,6 +114,7 @@ input::placeholder, textarea::placeholder { color: var(--faint); }
 .login label { display: block; margin-bottom: 8px; font-size: 14px; }
 .cal-vbtn.on, .cal-chip { color: var(--on-accent); }
 .cal-note.ok { color: var(--accent-ink); }
+.status-line, .ac-status-line { display: inline-flex; align-items: center; gap: 7px; }
 @media (max-width: 1100px) { .sidebar { width: 184px; flex-basis: 184px; } .ov { padding: 28px 24px; } .task-add { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 760px) {
   .ov, .ac-view, .wrap-inner { padding: 24px 16px 100px; }

@@ -5,6 +5,7 @@ import { Notice, notify } from "./Feedback";
 import { requestJson, jsonRequest } from "@/lib/http";
 import { messageContentKey } from "@/lib/mailKeys";
 import OverlayScroll from "@/components/OverlayScroll";
+import Icon from "@/components/Icon";
 import { getMailCache, fetchMessages, setMailCache, getFolderCache, fetchFolder, prefetchFolder, getMsgContent, setMsgContent, invalidateFolderCache } from "@/lib/mailStore";
 import { PROVIDERS } from "@/lib/mailProviders";
 import { RELEVANCE_LABEL } from "@/lib/classify2";
@@ -63,7 +64,7 @@ const BUCKETS: { k: string; t: string; c: string }[] = [
 ];
 const CATEGORIES = ["Wichtig", "Antwort erforderlich", "Schule", "Bewerbungen und Karriere", "Sport und Karate", "Reisen", "Termine und Veranstaltungen", "Rechnungen und Finanzen", "Bestellungen und Lieferungen", "Verträge und Versicherungen", "Behörden", "Konten und Sicherheit", "Persönlich", "Newsletter und Werbung", "Automatische Benachrichtigungen", "Sonstiges"];
 const FOLDER_LABELS: Record<string, string> = { inbox: "Posteingang", sent: "Gesendet", drafts: "Entwürfe", archive: "Archiv", spam: "Junk", trash: "Papierkorb", other: "Weitere" };
-const FOLDER_ICONS: Record<string, string> = { inbox: "📥", sent: "➤", drafts: "✎", archive: "🗄", spam: "⚠", trash: "🗑", other: "📁" };
+const FOLDER_ICONS: Record<string, string> = { inbox: "inbox", sent: "send", drafts: "edit", archive: "archive", spam: "shield", trash: "trash", other: "folder" };
 const DEFAULT_FOLDERS = ["inbox", "sent", "drafts", "archive", "spam", "trash"];
 const LABEL_COLORS: Record<string, string> = {
   Karate: "#4AA3FF", Bewerbungen: "#B4B2FF", Zahlungen: "#4ADE80", Abonnements: "#FFB340",
@@ -104,18 +105,18 @@ type Account = { id: string; email: string; provider: string };
 type Folder = { account_id: string; path: string; folder_type: string; unread: number; total: number };
 
 const SMART_VIEWS = [
-  { key: "wichtig", label: "Wichtig", ic: "★" },
-  { key: "reply", label: "Antwort nötig", ic: "↩" },
-  { key: "Persönlich", label: "Persönlich", ic: "👤" },
-  { key: "Karate", label: "Karate", ic: "🥋" },
-  { key: "Bewerbungen", label: "Bewerbungen", ic: "💼" },
-  { key: "Zahlungen", label: "Zahlungen", ic: "€" },
-  { key: "Abonnements", label: "Abos", ic: "↻" },
-  { key: "Reisen", label: "Reisen", ic: "✈" },
-  { key: "Sicherheit", label: "Sicherheit", ic: "🛡" },
-  { key: "Newsletter", label: "Newsletter", ic: "✉" },
-  { key: "Automatisch", label: "Automatisch", ic: "⚙" },
-  { key: "Niedrig", label: "Niedrige Priorität", ic: "▽" }
+  { key: "wichtig", label: "Wichtig", ic: "star" },
+  { key: "reply", label: "Antwort nötig", ic: "arrow" },
+  { key: "Persönlich", label: "Persönlich", ic: "user" },
+  { key: "Karate", label: "Karate", ic: "tasks" },
+  { key: "Bewerbungen", label: "Bewerbungen", ic: "briefcase" },
+  { key: "Zahlungen", label: "Zahlungen", ic: "document" },
+  { key: "Abonnements", label: "Abos", ic: "refresh" },
+  { key: "Reisen", label: "Reisen", ic: "calendar" },
+  { key: "Sicherheit", label: "Sicherheit", ic: "shield" },
+  { key: "Newsletter", label: "Newsletter", ic: "mail" },
+  { key: "Automatisch", label: "Automatisch", ic: "settings" },
+  { key: "Niedrig", label: "Niedrige Priorität", ic: "info" }
 ];
 
 export default function Cockpit({
@@ -683,8 +684,8 @@ export default function Cockpit({
         </div>
         <div className="spacer" />
         {statusView()}
-        {connected && <button className="btn small ghost" onClick={() => manualSync()} aria-label="Aktualisieren" title="Aktualisieren">↻</button>}
-        <a className="btn small ghost" href="/settings" title="Einstellungen" aria-label="Einstellungen">⚙</a>
+        {connected && <button className="btn small ghost" onClick={() => manualSync()} aria-label="Aktualisieren" title="Aktualisieren"><Icon name="refresh" size={16} /></button>}
+        <a className="btn small ghost" href="/settings" title="Einstellungen" aria-label="Einstellungen"><Icon name="settings" size={16} /></a>
         {connected && <button className="btn small" onClick={() => setCompose({ fromAccountId: accounts[0]?.id, to: "", cc: "", bcc: "", subject: "", body: "", instruction: "" })}>Neue E-Mail</button>}
         <button className="btn btn-primary small" onClick={() => setShowConnect((v) => !v)}>
           {connected ? "+ Postfach" : "Postfach verbinden"}
@@ -701,7 +702,7 @@ export default function Cockpit({
           <div className="msidebar">
             <OverlayScroll className="msidebar-scroll">
             <button className={"mfolder top" + (sel.account === "all" && !sel.view && sel.ftype === "inbox" ? " active" : "")} onClick={() => selectFolder("all", "inbox")}>
-              <span className="mf-ic">📥</span><span className="mf-lbl">Alle Postfächer</span>
+              <span className="mf-ic"><Icon name="inbox" size={16} /></span><span className="mf-lbl">Alle Postfächer</span>
               {unreadInbox() > 0 && <span className="mf-count">{unreadInbox()}</span>}
             </button>
             {accounts.map((a) => {
@@ -721,7 +722,7 @@ export default function Cockpit({
                         const ftype = f.type_override || f.folder_type;
                         return (
                           <button key={f.folder_type + f.path} className={"mfolder" + (sel.account === a.id && sel.ftype === ftype && sel.path === f.path && !sel.view ? " active" : "")} onMouseEnter={() => { if (ftype !== "inbox" && ftype !== "sent" && f.path) prefetchFolder(a.id, f.path); }} onClick={() => selectFolder(a.id, ftype, f.path)}>
-                            <span className="mf-ic">{FOLDER_ICONS[ftype] || "📁"}</span>
+                            <span className="mf-ic"><Icon name={FOLDER_ICONS[ftype] || "folder"} size={16} /></span>
                             <span className="mf-lbl">{folderLabel(f)}</span>
                             {(ftype === "inbox" ? accUnread : f.unread) > 0 && <span className="mf-count">{ftype === "inbox" ? accUnread : f.unread}</span>}
                           </button>
@@ -735,7 +736,7 @@ export default function Cockpit({
             <div className="msmart-h">Intelligente Ansichten</div>
             {SMART_VIEWS.map((v) => (
               <button key={v.key} className={"mfolder" + (sel.view === v.key ? " active" : "")} onClick={() => selectView(v.key)}>
-                <span className="mf-ic">{v.ic}</span><span className="mf-lbl">{v.label}</span>
+                <span className="mf-ic"><Icon name={v.ic} size={16} /></span><span className="mf-lbl">{v.label}</span>
               </button>
             ))}
             <button className="btn small" style={{ margin: "12px 8px 4px" }} onClick={() => setShowConnect(true)}>+ Postfach</button>
@@ -746,9 +747,9 @@ export default function Cockpit({
           {/* Spalte 2: kompakte Nachrichtenliste */}
           <div className="mlist">
             <div className="mlist-top">
-              <button className="mback" onClick={() => setMobilePane("nav")} aria-label="Ordner">☰</button>
+              <button className="mback" onClick={() => setMobilePane("nav")} aria-label="Ordner"><Icon name="menu" size={17} /></button>
               <input className="f-search" placeholder="Suchen…" value={q} onChange={(e) => setQ(e.target.value)} />
-              <button className="btn small ghost" onClick={() => manualSync()} title="Aktualisieren">↻</button>
+              <button className="btn small ghost" onClick={() => manualSync()} title="Aktualisieren" aria-label="Aktualisieren"><Icon name="refresh" size={16} /></button>
             </div>
             {/* Filter: Alle / Ungelesen – kombinierbar mit Suche & Auswahl. */}
             <div className="mlist-filter" role="group" aria-label="Filter">
@@ -800,7 +801,7 @@ export default function Cockpit({
                 // Nur sichtbare Nachrichten, sortiert; für Performance gefenstert.
                 const all = msgs.filter(visible).sort((a, b) => new Date(b.received_at || 0).getTime() - new Date(a.received_at || 0).getTime());
                 if (listLoading || (msgs.length === 0 && status?.syncing)) return [0, 1, 2, 3].map((i) => <div className="sk-card" key={i} />);
-                if (!all.length) return <div className="empty" style={{ padding: 40 }}><div className="ic">✦</div>{unreadOnly ? "Keine ungelesenen Nachrichten." : "Keine Nachrichten."}</div>;
+                if (!all.length) return <div className="empty" style={{ padding: 40 }}><div className="ic"><Icon name="spark" size={21} /></div>{unreadOnly ? "Keine ungelesenen Nachrichten." : "Keine Nachrichten."}</div>;
                 const shown = all.slice(0, listLimit);
                 return <>
                   {shown.map((m) => (
@@ -822,7 +823,7 @@ export default function Cockpit({
                 onReply={(opts: any) => { openDraft(reading.msg, opts); }} suggests={suggests[reading.msg.id]} suggestsLoading={!!suggestLoading[reading.msg.id]} ensure={ensureSuggestions}
                 onCategorize={categorize} onCorrect={categorize} onLoadImages={() => reading.msg.readonly ? openFolderItem(reading.msg, true) : openReader(reading.msg, true)} onAction={mailAction} onSetReply={setReplyFlag} onAnswered={markAnswered} onAddLabel={addLabel} rules={rules} onRule={toggleRule} onDiag={() => setDiag(true)} />
             ) : (
-              <div className="mread-empty"><div className="ic">✉</div><div>Wähle eine Nachricht zum Lesen.</div></div>
+              <div className="mread-empty"><div className="ic"><Icon name="mail" size={22} /></div><div>Wähle eine Nachricht zum Lesen.</div></div>
             )}
           </div>
         </div>
@@ -859,7 +860,7 @@ function MailDiagModal({ onClose, client, onReseed, onClean, onReclassify, onBac
     <>
       <div className="scrim open" onClick={onClose} />
       <div className="modal">
-        <div className="dh"><h3>Sync-Diagnose</h3><button className="x" onClick={onClose}>✕</button></div>
+        <div className="dh"><h3>Sync-Diagnose</h3><button className="x" aria-label="Schließen" onClick={onClose}><Icon name="close" size={17} /></button></div>
         <div className="db">
           {!s.loading && s.schema && (s.schema.missingColumns?.length > 0 || !s.schema.bucketExists) && (
             <div className="note binding-warn" style={{ marginTop: 0 }}>
@@ -943,7 +944,7 @@ const MailRow = memo(function MailRow({ m, account, onOpen, selected, labelsOf }
           <span className="mrow-from">{isSent ? "An: " + (m.to_recipients || "") : (m.from_name || m.from_address || "")}</span>
           <span className="mrow-time">{m.received_at ? new Date(m.received_at).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" }) : ""}</span>
         </div>
-        <div className="mrow-subj">{m.subject || "(kein Betreff)"} {m.has_attachments && <span className="mrow-att">📎</span>}</div>
+        <div className="mrow-subj">{m.subject || "(kein Betreff)"} {m.has_attachments && <span className="mrow-att"><Icon name="paperclip" size={13} /></span>}</div>
         {m.preview && <div className="mrow-prev">{m.preview}</div>}
         <div className="mrow-tags">
           <span className="mrow-acct">{provider}</span>
@@ -1087,7 +1088,7 @@ function Reader({ reading, account, onClose, onReply, suggests, suggestsLoading,
             {account ? `${PROVIDERS[account.provider]?.label || account.provider} · ${account.email}` : m.account_display_name}
           </div>
         </div>
-        <button className="x" onClick={onClose}>✕</button>
+        <button className="x" aria-label="Schließen" onClick={onClose}><Icon name="close" size={17} /></button>
       </div>
       <div className="db">
         <div className="rd-head">
@@ -1104,7 +1105,7 @@ function Reader({ reading, account, onClose, onReply, suggests, suggestsLoading,
 
         {!isSent && (
           <div className="rd-want">
-            <span className="rd-want-ic">🤖</span>
+            <span className="rd-want-ic"><Icon name="spark" size={17} /></span>
             <div><b>Einordnung:</b> {m.summary || wantSummary(m)}</div>
           </div>
         )}
@@ -1382,8 +1383,8 @@ function ConnectForm({ accounts, onClose }: { accounts: Account[]; onClose: () =
           <div className="note" style={{ fontSize: 13 }}>{preset?.passwordHint}</div>
           {test && (
             <div className="note" style={{ borderColor: test.imap?.ok && test.smtp?.ok ? "var(--accent-line)" : undefined }}>
-              <div>{test.imap?.ok ? "✅" : "⚠️"} IMAP (Empfang): {test.imap?.msg}</div>
-              <div style={{ marginTop: 4 }}>{test.smtp?.ok ? "✅" : "⚠️"} SMTP (Versand): {test.smtp?.msg}</div>
+              <div className="status-line"><Icon name={test.imap?.ok ? "check" : "info"} size={15} /> IMAP (Empfang): {test.imap?.msg}</div>
+              <div className="status-line" style={{ marginTop: 4 }}><Icon name={test.smtp?.ok ? "check" : "info"} size={15} /> SMTP (Versand): {test.smtp?.msg}</div>
             </div>
           )}
           {err && <div className="note binding-warn">{err}</div>}
@@ -1411,7 +1412,7 @@ function MailCard({ m, account, onCategorize, onOpen, selected }: any) {
         </span>
         {m.folder_type && m.folder_type !== "inbox" && <span className="acct-pill soft">{FOLDER_LABELS[m.folder_type] || m.folder_type}</span>}
         {m.semantic_category && <span className="cat-chip">{m.semantic_category}</span>}
-        {m.has_attachments && <span className="acct-pill soft" title="Anhang">📎</span>}
+        {m.has_attachments && <span className="acct-pill soft" title="Anhang"><Icon name="paperclip" size={14} /></span>}
         <span className="m-time">{m.received_at ? new Date(m.received_at).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : ""}</span>
       </div>
       <div className="m-top">
@@ -1457,7 +1458,7 @@ function DraftPanel({ drawer, setDrawer, sendEnabled, onGenerateCustom, onRefine
           <h3>Antwort an {m.from_name || m.from_address}</h3>
           <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 4 }}>{m.subject}</div>
         </div>
-        <button className="x" onClick={() => !drawer.sending && setDrawer(null)}>✕</button>
+        <button className="x" aria-label="Schließen" onClick={() => !drawer.sending && setDrawer(null)}><Icon name="close" size={17} /></button>
       </div>
 
       <div className="db">
@@ -1574,7 +1575,7 @@ function DiagModal({ onClose }: { onClose: () => void }) {
     <>
       <div className="scrim open" onClick={onClose} />
       <div className="modal">
-        <div className="dh"><h3>KI-Diagnose</h3><button className="x" onClick={onClose}>✕</button></div>
+        <div className="dh"><h3>KI-Diagnose</h3><button className="x" aria-label="Schließen" onClick={onClose}><Icon name="close" size={17} /></button></div>
         <div className="db">
           {state.loading ? <div className="empty"><span className="spin" /></div> : state.error ? (
             <div className="note binding-warn">Diagnose konnte nicht geladen werden.</div>
@@ -1582,7 +1583,7 @@ function DiagModal({ onClose }: { onClose: () => void }) {
             <>
               <div className="meta-row">
                 <span className="k">KI-Verbindung</span>
-                <span className="v">{state.configured ? "✅ eingerichtet" : "❌ nicht eingerichtet (ANTHROPIC_API_KEY fehlt)"}</span>
+                <span className="v status-line"><Icon name={state.configured ? "check" : "info"} size={15} />{state.configured ? "eingerichtet" : "nicht eingerichtet (ANTHROPIC_API_KEY fehlt)"}</span>
                 <span className="k">Modell</span><span className="v">{state.model || "—"}</span>
                 <span className="k">Versand</span><span className="v">{state.sendEnabled ? "aktiviert" : "deaktiviert"}</span>
               </div>
@@ -1593,7 +1594,7 @@ function DiagModal({ onClose }: { onClose: () => void }) {
                 <div className="diag-list">
                   {state.events.map((e: any, i: number) => (
                     <div key={i} className={"diag-row" + (e.ok ? "" : " bad")}>
-                      <span className="diag-ic">{e.ok ? "✅" : "⚠️"}</span>
+                      <span className="diag-ic"><Icon name={e.ok ? "check" : "info"} size={15} /></span>
                       <span className="diag-kind">{e.kind}</span>
                       <span className="diag-meta">{e.created_at ? new Date(e.created_at).toLocaleString("de-DE") : ""} · {e.duration_ms != null ? Math.round(e.duration_ms / 100) / 10 + " s" : "—"}{e.error_category ? " · " + (catLabel[e.error_category] || e.error_category) : ""}</span>
                     </div>
@@ -1638,7 +1639,7 @@ function ComposeModal({ compose, setCompose, accounts, sendEnabled }: any) {
     <>
       <div className="scrim open" onClick={() => !compose.sending && setCompose(null)} />
       <div className="modal">
-        <div className="dh"><h3>Neue E-Mail</h3><button className="x" onClick={() => !compose.sending && setCompose(null)}>✕</button></div>
+        <div className="dh"><h3>Neue E-Mail</h3><button className="x" aria-label="Schließen" onClick={() => !compose.sending && setCompose(null)}><Icon name="close" size={17} /></button></div>
         <div className="db">
           <div className="label" style={{ marginTop: 0 }}>Von (Konto)</div>
           <select value={compose.fromAccountId || ""} onChange={(e) => set({ fromAccountId: e.target.value })}>
