@@ -36,21 +36,89 @@ function labelsOfMsg(m: any): string[] {
   return ls.filter((l) => !["Automatisch", "Persönlich", "Sonstiges"].includes(l));
 }
 
-// Kompakter Status-Chip aus gespeicherter Klassifizierung (Nutzer-Override zuerst).
-function statusChip(m: any): { text: string; tone: string } | null {
+// Kennzeichnungen der Liste sind in drei Ebenen getrennt:
+//   1. Handlungsbedarf ("Antwort nötig") – der wichtigste Hinweis, kräftig
+//   2. Priorität ("Wichtig")            – platzsparend als Stern
+//   3. Inhaltliche Kategorie            – dezent, höchstens eine sichtbar
+// Kategorien, die dieselbe Aussage wie Ebene 1/2 treffen, werden nicht doppelt
+// angezeigt. Die zugrunde liegenden Daten bleiben unverändert erhalten – sie
+// sind weiterhin über Filter, das „+n"-Aufklappen und die Leseansicht sichtbar.
+const TAG_REDUNDANT = ["Antwort nötig", "Antwort erforderlich", "Wichtig", "Automatisch", "Persönlich", "Sonstiges"];
+
+// Rohe Statuswerte lesbar machen (bisher stand z. B. "reply_required" in der
+// Leseansicht). Die gespeicherten Werte bleiben unverändert.
+const ACTION_LABEL: Record<string, string> = {
+  reply_required: "Antwort nötig",
+  act_now: "Sofort prüfen",
+  review_recommended: "Prüfen empfohlen",
+  action_no_reply: "Aktion nötig, keine Antwort",
+  no_action: "Keine Aktion nötig",
+  information_only: "Nur zur Information"
+};
+
+// Lange Kategorienamen für die Liste kürzen. "" bedeutet: taucht in der Liste
+// nicht als Kategorie auf, weil Handlungsbedarf/Priorität das schon ausdrücken.
+const CAT_SHORT: Record<string, string> = {
+  "Bewerbungen und Karriere": "Bewerbung",
+  "Sport und Karate": "Karate",
+  "Termine und Veranstaltungen": "Termine",
+  "Rechnungen und Finanzen": "Finanzen",
+  "Bestellungen und Lieferungen": "Bestellung",
+  "Verträge und Versicherungen": "Verträge",
+  "Konten und Sicherheit": "Sicherheit",
+  "Newsletter und Werbung": "Newsletter",
+  "Automatische Benachrichtigungen": "Automatisch",
+  "Antwort erforderlich": "",
+  Wichtig: ""
+};
+function shortCat(c?: string | null): string | null {
+  if (!c) return null;
+  const s = CAT_SHORT[c];
+  if (s === "") return null;
+  return s || c;
+}
+
+// Grobe Stammform, um inhaltlich gleiche Angaben ("Bewerbung"/"Bewerbungen")
+// zusammenzufassen.
+const tagStem = (s: string) => s.toLowerCase().replace(/[^a-zäöüß]/g, "").replace(/(en|er|e|n)$/, "");
+
+export type RowTags = {
+  action: { text: string; tone: string } | null;
+  important: 0 | 1 | 2;
+  category: string | null;
+  extras: string[];
+};
+
+function rowTags(m: any, labels: string[]): RowTags {
   const isSent = m.folder_type === "sent";
-  if (isSent) return null;
-  if (m.reply_sent_at || m.draft_status === "gesendet") return { text: "Beantwortet", tone: "answered" };
   const rel = m.user_relevance || m.relevance;
   const action = m.user_action_status || m.action_status;
   const needs = m.user_needs_reply != null ? m.user_needs_reply : m.needs_reply;
-  if (needs) return { text: "Antwort nötig", tone: "reply" };
-  if (action === "act_now") return { text: "Sofort prüfen", tone: "urgent" };
-  if (rel === "sehr_wichtig") return { text: "Sehr wichtig", tone: "urgent" };
-  if (rel === "wichtig") return { text: "Wichtig", tone: "high" };
-  if (action === "review_recommended" || action === "action_no_reply") return { text: "Prüfen", tone: "mid" };
-  if (action === "no_action" || action === "information_only" || rel === "irrelevant" || rel === "niedrig") return { text: "Nur Info", tone: "muted" };
-  return null;
+
+  let act: RowTags["action"] = null;
+  if (!isSent) {
+    if (m.reply_sent_at || m.draft_status === "gesendet") act = { text: "Beantwortet", tone: "answered" };
+    else if (needs) act = { text: "Antwort nötig", tone: "reply" };
+    else if (action === "act_now") act = { text: "Sofort prüfen", tone: "urgent" };
+    else if (action === "review_recommended" || action === "action_no_reply") act = { text: "Prüfen", tone: "mid" };
+    // "Nur Info" ist der Normalfall und bekommt in der Liste bewusst keinen Chip.
+  }
+
+  const important: 0 | 1 | 2 = isSent ? 0 : rel === "sehr_wichtig" ? 2 : rel === "wichtig" ? 1 : 0;
+
+  const seen = new Set<string>();
+  const cats: string[] = [];
+  const push = (l?: string | null) => {
+    if (!l) return;
+    const k = tagStem(l);
+    if (!k || seen.has(k)) return;
+    seen.add(k);
+    cats.push(l);
+  };
+  for (const l of labels) if (!TAG_REDUNDANT.includes(l)) push(l);
+  push(shortCat(m.semantic_category));
+
+  return { action: act, important, category: cats[0] || null, extras: cats.slice(1) };
 }
 
 const BUCKETS: { k: string; t: string; c: string }[] = [
@@ -934,8 +1002,10 @@ function MailDiagModal({ onClose, client, onReseed, onClean, onReclassify, onBac
 const MailRow = memo(function MailRow({ m, account, onOpen, selected, labelsOf }: any) {
   const isSent = m.folder_type === "sent";
   const provider = account ? (PROVIDERS[account.provider]?.label || account.provider) : (m.account_display_name || "");
-  const labels: string[] = (labelsOf ? labelsOf(m) : (m.labels || [])).filter((l: string) => l !== "Automatisch" && l !== "Persönlich" && l !== "Sonstiges").slice(0, 2);
-  const chip = statusChip(m);
+  const rawLabels: string[] = (labelsOf ? labelsOf(m) : (m.labels || [])) as string[];
+  const tags = rowTags(m, rawLabels);
+  const pending = !m.classified_at && !isSent;
+  const [showAll, setShowAll] = useState(false);
   return (
     <div className={"mrow" + (selected ? " sel" : "") + (!m.is_read && !isSent ? " unread" : "")} onClick={onOpen}>
       <span className="mrow-dot" style={{ opacity: !m.is_read && !isSent ? 1 : 0 }} />
@@ -948,10 +1018,36 @@ const MailRow = memo(function MailRow({ m, account, onOpen, selected, labelsOf }
         {m.preview && <div className="mrow-prev">{m.preview}</div>}
         <div className="mrow-tags">
           <span className="mrow-acct">{provider}</span>
-          {!m.classified_at && !isSent
-            ? <span className="mrow-status pending">Wird eingeordnet…</span>
-            : chip && <span className={"mrow-status " + chip.tone}>{chip.text}</span>}
-          {labels.map((l) => <span key={l} className="mrow-label" style={{ ["--lc" as any]: LABEL_COLORS[l] || "#8a8a8f" }}>{l}</span>)}
+          {pending ? (
+            <span className="mtag pending">Wird eingeordnet…</span>
+          ) : (
+            <>
+              {/* 1. Handlungsbedarf – der einzige kräftig eingefärbte Hinweis */}
+              {tags.action && <span className={"mtag " + tags.action.tone}>{tags.action.text}</span>}
+              {/* 2. Priorität – platzsparend als Stern */}
+              {tags.important > 0 && (
+                <span
+                  className={"mtag-star" + (tags.important === 2 ? " hi" : "")}
+                  title={tags.important === 2 ? "Sehr wichtig" : "Wichtig"}
+                  aria-label={tags.important === 2 ? "Sehr wichtig" : "Wichtig"}
+                >
+                  <Icon name="star" size={12} />
+                </span>
+              )}
+              {/* 3. Inhaltliche Kategorie – dezent, höchstens eine sichtbar */}
+              {tags.category && <span className="mtag cat">{tags.category}</span>}
+              {tags.extras.length > 0 && (showAll
+                ? tags.extras.map((l) => <span key={l} className="mtag cat">{l}</span>)
+                : (
+                  <button
+                    className="mtag more"
+                    title={tags.extras.join(" · ")}
+                    aria-label={`Weitere Kategorien anzeigen: ${tags.extras.join(", ")}`}
+                    onClick={(e) => { e.stopPropagation(); setShowAll(true); }}
+                  >+{tags.extras.length}</button>
+                ))}
+            </>
+          )}
         </div>
       </div>
     </div>
@@ -1099,7 +1195,7 @@ function Reader({ reading, account, onClose, onReply, suggests, suggestsLoading,
             {m.cc_addresses && <><span className="k">CC</span><span className="v">{m.cc_addresses}</span></>}
             <span className="k">Datum</span><span className="v">{m.received_at ? new Date(m.received_at).toLocaleString("de-DE") : ""}</span>
             {m.semantic_category && <><span className="k">Kategorie</span><span className="v">{m.semantic_category}</span></>}
-            {m.action_status && <><span className="k">Status</span><span className="v">{m.action_status}</span></>}
+            {m.action_status && <><span className="k">Status</span><span className="v">{ACTION_LABEL[m.action_status] || m.action_status}</span></>}
           </div>
         </div>
 

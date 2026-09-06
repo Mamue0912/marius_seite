@@ -12,61 +12,134 @@ export default async function Home() {
   if (!user) return <LoginForm />;
 
   const admin = supabaseAdmin();
-  const accounts = await loadMailAccounts(user.id);
+  const [accounts, inboxResult, applicationResult, taskResult] = await Promise.all([
+    loadMailAccounts(user.id),
+    admin
+      .from("messages")
+      .select("id,from_name,from_address,subject,received_at,is_read,needs_reply,semantic_category,relevance,mail_account_id,deadline_at,folder_type,hidden")
+      .eq("user_id", user.id)
+      .eq("is_deleted", false)
+      .eq("folder_type", "inbox")
+      .order("received_at", { ascending: false })
+      .limit(400),
+    admin
+      .from("applications")
+      .select("id,company,position,status,deadline,last_activity_at")
+      .eq("user_id", user.id),
+    admin
+      .from("tasks")
+      .select("id,title,note,priority,due_at,status,source")
+      .eq("user_id", user.id)
+      .neq("status", "erledigt")
+      .order("due_at", { ascending: true, nullsFirst: false })
+      .limit(200)
+  ]);
 
-  // Zusammenfassungen (keine langen Listen) aus echten Daten.
-  const { data: inbox } = await admin
-    .from("messages")
-    .select("id,from_name,from_address,subject,received_at,is_read,needs_reply,semantic_category,relevance,mail_account_id,deadline_at,folder_type,hidden")
-    .eq("user_id", user.id)
-    .eq("is_deleted", false)
-    .eq("folder_type", "inbox")
-    .order("received_at", { ascending: false })
-    .limit(400);
-
-  const rows = inbox || [];
-  // Ungelesen = Posteingang, nicht gelesen (gleiche Regel wie Liste & Nav-Badge).
-  const perAccount = accounts.map((a) => ({
-    id: a.id, email: a.email, provider: a.provider,
-    unread: rows.filter((m) => m.mail_account_id === a.id && !m.is_read).length
-  }));
-  const needsReply = rows.filter((m) => m.needs_reply && !m.hidden);
-  const unreadImportant = rows.filter((m) => !m.is_read && (m.relevance === "wichtig" || m.relevance === "sehr_wichtig" || m.semantic_category === "Wichtig" || m.needs_reply));
-  const newest = rows[0] || null;
-  // Zwei bis drei neueste ungelesene für die Übersicht (klickbar → direkt öffnen).
-  const acctById = Object.fromEntries(accounts.map((a) => [a.id, a]));
-  const newestUnread = rows.filter((m) => !m.is_read).slice(0, 3).map((m) => ({
-    id: m.id, from: m.from_name || m.from_address || "", subject: m.subject || "(kein Betreff)",
-    at: m.received_at, provider: acctById[m.mail_account_id]?.provider || "", email: acctById[m.mail_account_id]?.email || ""
-  }));
+  const rows = inboxResult.data || [];
+  const appRows = applicationResult.data || [];
+  const taskRows = taskResult.data || [];
   const now = Date.now();
-  const deadlines = rows.filter((m) => m.deadline_at && new Date(m.deadline_at).getTime() >= now - 864e5);
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const tomorrowStart = new Date(todayStart);
+  tomorrowStart.setDate(tomorrowStart.getDate() + 1);
 
-  // Bewerbungs-Kachel: kompakte Kennzahlen direkt aus den Bewerbungsprojekten.
-  const { data: apps } = await admin
-    .from("applications")
-    .select("id,company,position,status,deadline,last_activity_at")
-    .eq("user_id", user.id);
-  const appRows = apps || [];
-  const appActive = appRows.filter((a) => !["absage", "zusage"].includes(a.status));
-  const appPrep = appRows.filter((a) => ["analyse_offen", "unterlagen", "bereit"].includes(a.status));
-  const appWaiting = appRows.filter((a) => ["beworben", "rueckmeldung", "gespraech"].includes(a.status));
-  const appDeadlines = appRows.filter((a) => a.deadline && new Date(a.deadline).getTime() >= now - 864e5)
-    .sort((a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime());
-  const appLast = [...appRows].sort((a, b) => new Date(b.last_activity_at).getTime() - new Date(a.last_activity_at).getTime())[0] || null;
+  const perAccount = accounts.map((account) => ({
+    id: account.id,
+    email: account.email,
+    provider: account.provider,
+    unread: rows.filter((message) => message.mail_account_id === account.id && !message.is_read).length
+  }));
+  const needsReply = rows.filter((message) => message.needs_reply && !message.hidden);
+  const unreadImportant = rows.filter(
+    (message) =>
+      !message.is_read &&
+      (message.relevance === "wichtig" ||
+        message.relevance === "sehr_wichtig" ||
+        message.semantic_category === "Wichtig" ||
+        message.needs_reply)
+  );
+  const accountById = Object.fromEntries(accounts.map((account) => [account.id, account]));
+  const newestUnread = rows
+    .filter((message) => !message.is_read)
+    .slice(0, 4)
+    .map((message) => ({
+      id: message.id,
+      from: message.from_name || message.from_address || "",
+      subject: message.subject || "(kein Betreff)",
+      at: message.received_at,
+      provider: accountById[message.mail_account_id]?.provider || "",
+      email: accountById[message.mail_account_id]?.email || ""
+    }));
+  const deadlines = rows.filter(
+    (message) => message.deadline_at && new Date(message.deadline_at).getTime() >= now - 864e5
+  );
+  const overdueTasks = taskRows.filter(
+    (task) => task.due_at && new Date(task.due_at).getTime() < todayStart.getTime()
+  ).length;
+  const dueToday = taskRows.filter((task) => {
+    if (!task.due_at) return false;
+    const due = new Date(task.due_at).getTime();
+    return due >= todayStart.getTime() && due < tomorrowStart.getTime();
+  }).length;
+
+  const appActive = appRows.filter((application) => !["absage", "zusage"].includes(application.status));
+  const appPrep = appRows.filter((application) =>
+    ["analyse_offen", "unterlagen", "bereit"].includes(application.status)
+  );
+  const appWaiting = appRows.filter((application) =>
+    ["beworben", "rueckmeldung", "gespraech"].includes(application.status)
+  );
+  const appDeadlines = appRows
+    .filter((application) => application.deadline && new Date(application.deadline).getTime() >= now - 864e5)
+    .sort(
+      (a, b) =>
+        new Date(a.deadline as string).getTime() - new Date(b.deadline as string).getTime()
+    );
+  const appLast =
+    [...appRows].sort(
+      (a, b) =>
+        new Date(b.last_activity_at || 0).getTime() - new Date(a.last_activity_at || 0).getTime()
+    )[0] || null;
   const appNext = (() => {
-    const bereit = appRows.find((a) => a.status === "bereit");
-    if (bereit) return { text: `„${bereit.position || bereit.company || "Bewerbung"}" ist bereit zum Senden.`, id: bereit.id };
-    const analyse = appRows.find((a) => a.status === "analyse_offen");
-    if (analyse) return { text: `Unterlagen für „${analyse.position || analyse.company}" vorbereiten.`, id: analyse.id };
-    if (appDeadlines[0]) return { text: `Frist „${appDeadlines[0].position || appDeadlines[0].company}" am ${new Date(appDeadlines[0].deadline).toLocaleDateString("de-DE")}.`, id: appDeadlines[0].id };
+    const ready = appRows.find((application) => application.status === "bereit");
+    if (ready)
+      return {
+        text: `„${ready.position || ready.company || "Bewerbung"}" ist bereit zum Senden.`,
+        id: ready.id
+      };
+    const analysis = appRows.find((application) => application.status === "analyse_offen");
+    if (analysis)
+      return {
+        text: `Unterlagen für „${analysis.position || analysis.company}" vorbereiten.`,
+        id: analysis.id
+      };
+    if (appDeadlines[0])
+      return {
+        text: `Frist „${appDeadlines[0].position || appDeadlines[0].company}" am ${new Date(
+          appDeadlines[0].deadline as string
+        ).toLocaleDateString("de-DE")}.`,
+        id: appDeadlines[0].id
+      };
     return null;
   })();
   const appStats = {
     total: appRows.length,
-    active: appActive.length, prep: appPrep.length, waiting: appWaiting.length,
-    deadlines: appDeadlines.slice(0, 3).map((a) => ({ id: a.id, label: a.position || a.company || "Bewerbung", deadline: a.deadline })),
-    last: appLast ? { id: appLast.id, label: appLast.position || appLast.company || "Bewerbung", status: appLast.status } : null,
+    active: appActive.length,
+    prep: appPrep.length,
+    waiting: appWaiting.length,
+    deadlines: appDeadlines.slice(0, 3).map((application) => ({
+      id: application.id,
+      label: application.position || application.company || "Bewerbung",
+      deadline: application.deadline
+    })),
+    last: appLast
+      ? {
+          id: appLast.id,
+          label: appLast.position || appLast.company || "Bewerbung",
+          status: appLast.status
+        }
+      : null,
     next: appNext
   };
 
@@ -75,16 +148,18 @@ export default async function Home() {
       <Overview
         accounts={perAccount}
         summary={{
-          totalUnread: rows.filter((m) => !m.is_read).length,
+          totalUnread: rows.filter((message) => !message.is_read).length,
           needsReply: needsReply.length,
           unreadImportant: unreadImportant.length,
-          deadlines: deadlines.length
+          deadlines: deadlines.length,
+          overdueTasks,
+          dueToday
         }}
-        newest={newest}
         newestUnread={newestUnread}
         needsReplyList={needsReply.slice(0, 5)}
         deadlineList={deadlines.slice(0, 5)}
         appStats={appStats}
+        tasks={taskRows}
       />
     </AppShell>
   );

@@ -563,10 +563,44 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--mat); }
 .mrow-subj { font-size: 12.5px; color: var(--ink-2); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mrow-att { font-size: 11px; }
 .mrow-prev { font-size: 11.5px; color: var(--muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mrow-tags { display: flex; align-items: center; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
-.mrow-acct { font-size: 10px; color: var(--faint); }
+.mrow-tags { display: flex; align-items: center; gap: 5px; row-gap: 4px; margin-top: 6px; flex-wrap: wrap; }
+.mrow-acct { font-size: 10px; color: var(--faint); flex: 0 0 auto; }
+
+/* Kennzeichnungen der Mail-Liste – einheitliche Größe, ruhige Farben.
+   Hierarchie: Handlungsbedarf (kräftig) > Priorität (Stern) > Kategorie (dezent). */
+.mtag {
+  flex: 0 0 auto; display: inline-flex; align-items: center;
+  height: 17px; padding: 0 7px; border-radius: var(--r-pill);
+  font-size: 10px; font-weight: 600; line-height: 1; letter-spacing: .1px;
+  white-space: nowrap; max-width: 132px; overflow: hidden; text-overflow: ellipsis;
+  border: 1px solid transparent;
+}
+/* Ebene 1 – nur echter Handlungsbedarf wird kräftig eingefärbt. */
+.mtag.reply { background: var(--high); color: #1d1608; font-weight: 680; }
+.mtag.urgent { background: var(--urgent); color: #2a1212; font-weight: 680; }
+/* Abgeschwächte Zustände: informativ, aber zurückhaltend. */
+.mtag.mid { background: var(--mid-soft); color: var(--mid); }
+.mtag.answered { background: transparent; border-color: var(--line); color: var(--muted); font-weight: 560; }
+.mtag.pending { background: var(--accent-soft); color: var(--accent-ink); font-weight: 560; }
+/* Ebene 3 – Kategorien bewusst einfarbig und leise (kein bunter Chip-Teppich). */
+.mtag.cat { background: var(--mat-hi); color: var(--muted); font-weight: 560; }
+.mtag.more {
+  background: var(--mat-hi); color: var(--faint); font-weight: 620;
+  cursor: pointer; font-family: inherit; padding: 0 6px;
+}
+.mtag.more:hover { color: var(--ink-2); }
+/* Ebene 2 – Priorität als Stern statt als weiterer Text-Chip. */
+.mtag-star { flex: 0 0 auto; display: inline-flex; align-items: center; color: var(--high); opacity: .6; }
+.mtag-star.hi { opacity: 1; }
+
+/* Smartphone: nur der wichtigste Status bleibt stehen. */
+@media (max-width: 780px) {
+  .mrow-tags .mtag.cat, .mrow-tags .mtag.more { display: none; }
+}
 .mrow-badge { font-size: 9.5px; font-weight: 640; color: var(--high); background: var(--high-soft); padding: 1px 6px; border-radius: var(--r-pill); }
-.mrow-label { font-size: 9.5px; font-weight: 600; color: var(--lc, #8a8a8f); padding: 1px 7px; border-radius: var(--r-pill); background: color-mix(in srgb, var(--lc, #8a8a8f) 16%, transparent); display: inline-flex; align-items: center; gap: 3px; }
+/* Labels in der Leseansicht: gleiche Maße wie .mtag, Farbe bleibt zur
+   Unterscheidung erhalten (dort ist Platz für die volle Kategorienliste). */
+.mrow-label { height: 17px; font-size: 10px; font-weight: 600; color: var(--lc, #8a8a8f); padding: 0 7px; border-radius: var(--r-pill); background: color-mix(in srgb, var(--lc, #8a8a8f) 14%, transparent); display: inline-flex; align-items: center; gap: 3px; line-height: 1; }
 .lbl-x { border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 12px; padding: 0; line-height: 1; opacity: .7; }
 .lbl-add { width: auto; font-size: 11px; padding: 3px 22px 3px 8px; background: var(--surface-2); border-radius: var(--r-pill); }
 

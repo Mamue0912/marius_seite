@@ -192,33 +192,36 @@ function MonthView({ cursor, byDay, todayKey, selected, setSelected, loading }: 
   const selEvents: Ev[] = byDay[selected] || [];
   return (
     <div className="cal-grid-wrap">
-      <div className="cal-wd">{WD.map((w) => <div key={w} className="cal-wdc">{w}</div>)}</div>
-      <div className="cal-grid">
-        {cells.map((d) => {
-          const k = ymd(d);
-          const inMonth = d.getMonth() === cursor.getMonth();
-          const evs: Ev[] = byDay[k] || [];
-          return (
-            <button key={k} className={"cal-cell" + (inMonth ? "" : " out") + (k === todayKey ? " today" : "") + (k === selected ? " sel" : "")} onClick={() => setSelected(k)}>
-              <span className="cal-dnum">{d.getDate()}</span>
-              <span className="cal-dots">
-                {evs.slice(0, 3).map((e) => (
-                  <span key={e.id} className="cal-chip" style={{ background: e.color, color: e.textColor }} title={e.title}>
-                    {e.allDay ? "" : timeLabel(e) + " "}{e.title}
-                  </span>
-                ))}
-                {evs.length > 3 && <span className="cal-more">+{evs.length - 3}</span>}
-              </span>
-            </button>
-          );
-        })}
+      <div className="cal-month-board">
+        <div className="cal-wd">{WD.map((w) => <div key={w} className="cal-wdc">{w}</div>)}</div>
+        <div className="cal-grid">
+          {cells.map((d) => {
+            const k = ymd(d);
+            const inMonth = d.getMonth() === cursor.getMonth();
+            const evs: Ev[] = byDay[k] || [];
+            return (
+              <button key={k} className={"cal-cell" + (inMonth ? "" : " out") + (k === todayKey ? " today" : "") + (k === selected ? " sel" : "")} onClick={() => setSelected(k)}>
+                <span className="cal-dnum">{d.getDate()}</span>
+                <span className="cal-dots">
+                  {evs.slice(0, 3).map((e) => (
+                    <span key={e.id} className="cal-chip" style={{ background: e.color, color: e.textColor }} title={e.title}>
+                      {e.allDay ? "" : timeLabel(e) + " "}{e.title}
+                    </span>
+                  ))}
+                  {evs.length > 3 && <span className="cal-more">+{evs.length - 3}</span>}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
-      <div className="cal-day">
+      <aside className="cal-day" aria-label="Termine des ausgewählten Tages">
+        <div className="cal-day-kicker">Ausgewählter Tag</div>
         <div className="cal-day-h">{new Date(selected + "T00:00:00").toLocaleDateString("de-DE", { weekday: "long", day: "2-digit", month: "long" })}</div>
         {loading ? <div className="cal-empty">lädt…</div>
           : selEvents.length === 0 ? <div className="cal-empty">Keine Termine an diesem Tag.</div>
           : selEvents.map((e) => <EventRow key={e.id} e={e} />)}
-      </div>
+      </aside>
     </div>
   );
 }
