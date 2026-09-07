@@ -281,6 +281,7 @@ function toIso(value: string, isDate: boolean, timeZone?: string | null): string
 interface ParsedEvent {
   uid: string; summary: string; description: string | null; location: string | null;
   recurrenceId: string | null;
+  recurrenceRule: string | null;
   // Serientermin (RRULE oder Instanz einer Serie). Solche Termine gehören in
   // den Kalender, aber nicht in Aufgaben & Fristen – ein wöchentliches
   // Training ist keine Frist.
@@ -297,7 +298,7 @@ export function parseIcsEvents(ics: string): ParsedEvent[] {
   for (const raw of blocks) {
     const body = raw.split(/END:VEVENT/)[0];
     let uid = "", summary = "(ohne Titel)", description: string | null = null, location: string | null = null;
-    let recurrenceId: string | null = null, status: string | null = null, hasRule = false;
+    let recurrenceId: string | null = null, recurrenceRule: string | null = null, status: string | null = null, hasRule = false;
     let start: string | null = null, end: string | null = null, allDay = false;
     for (const line of body.split("\n")) {
       const idx = line.indexOf(":");
@@ -314,11 +315,11 @@ export function parseIcsEvents(ics: string): ParsedEvent[] {
       else if (name === "LOCATION") location = unescapeText(value) || null;
       else if (name === "RECURRENCE-ID") recurrenceId = toIso(value, isDate, tzid) || value;
       else if (name === "STATUS") status = value.toUpperCase();
-      else if (name === "RRULE" || name === "RDATE") hasRule = true;
+      else if (name === "RRULE" || name === "RDATE") { hasRule = true; recurrenceRule = name + ":" + value; }
       else if (name === "DTSTART") { start = toIso(value, isDate, tzid); if (isDate) allDay = true; }
       else if (name === "DTEND") { end = toIso(value, isDate, tzid); }
     }
-    if (start && status !== "CANCELLED") events.push({ uid: uid || start, summary, description, location, recurrenceId, recurring: hasRule || !!recurrenceId, start, end, allDay });
+    if (start && status !== "CANCELLED") events.push({ uid: uid || start, summary, description, location, recurrenceId, recurrenceRule, recurring: hasRule || !!recurrenceId, start, end, allDay });
   }
   return events;
 }
@@ -391,6 +392,7 @@ async function fetchCalendarEvents(
         allDay: ev.allDay,
         recurring: ev.recurring,
         recurrenceInstance: !!ev.recurrenceId,
+        recurrenceRule: ev.recurrenceRule,
         location: ev.location,
         calendar: cal.name,
         color: cal.color,

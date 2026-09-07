@@ -1256,7 +1256,7 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--mat); }
 
 /* ---- Wochenansicht als Zeitraster (Stundenachse links) ------------------ */
 .cal-tg { display: flex; flex-direction: column; min-height: 0; flex: 1; }
-.cal-tg-top, .cal-tg-allday { display: grid; grid-template-columns: 58px repeat(7, minmax(0, 1fr)); }
+.cal-tg-top, .cal-tg-allday { display: grid; grid-template-columns: 58px repeat(var(--cal-days, 7), minmax(0, 1fr)); }
 .cal-tg-top { border-bottom: 1px solid var(--line-2); }
 .cal-tg-gutter { display: flex; align-items: center; justify-content: flex-end; padding: 4px 8px; }
 .cal-tg-gutter span { font-size: 10px; color: var(--faint); }
@@ -1266,7 +1266,7 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--mat); }
 .cal-tg-adcol { border-left: 1px solid var(--line-2); padding: 4px; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .cal-tg-adev { font-size: 10.5px; font-weight: 600; padding: 2px 7px; border-radius: var(--r-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cal-tg-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
-.cal-tg-body { display: grid; grid-template-columns: 58px repeat(7, minmax(0, 1fr)); position: relative; }
+.cal-tg-body { display: grid; grid-template-columns: 58px repeat(var(--cal-days, 7), minmax(0, 1fr)); position: relative; }
 .cal-tg-axis { position: relative; }
 .cal-tg-hour { position: relative; }
 .cal-tg-hour span {
@@ -1302,7 +1302,28 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--mat); }
 }
 .cal-tg-zoom button:hover { border-color: var(--accent); color: var(--ink); }
 @media (max-width: 780px) {
-  .cal-tg-top, .cal-tg-allday, .cal-tg-body { grid-template-columns: 42px repeat(7, minmax(0, 1fr)); }
+  .cal-tg-top, .cal-tg-allday, .cal-tg-body { grid-template-columns: 42px repeat(var(--cal-days, 7), minmax(0, 1fr)); }
   .cal-tgev-s { font-size: 10px; }
   .cal-tg-hint span:first-child { display: none; }
+}
+
+.cal-tg.day .cal-tg-head { justify-content: flex-start; padding-left: 14px; }
+.cal-tg.day .cal-tgev { padding: 5px 9px; font-size: 12px; }
+.cal-tg.day .cal-tgev-t { font-size: 10.5px; }
+.cal-night-toggle {
+  border: 0; background: transparent; color: var(--accent-ink); font: inherit;
+  font-size: 11px; font-weight: 620; cursor: pointer; padding: 3px 5px; border-radius: var(--r-xs);
+}
+.cal-night-toggle:hover, .cal-night-toggle:focus-visible { background: var(--accent-soft); outline: none; }
+.task-reason { margin-top: 5px; color: var(--ink-2); font-size: 12px; line-height: 1.45; }
+.task-kind-select {
+  max-width: 150px; min-height: 30px; padding: 4px 7px; border-radius: var(--r-xs);
+  border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--ink-2); font-size: 11px;
+}
+.focus-possible { border: 1px solid var(--accent-line); border-radius: var(--r); padding: 12px; background: var(--accent-soft); }
+.task.possible { background: var(--mat); }
+@media (max-width: 640px) {
+  .cal-viewswitch { max-width: 100%; overflow-x: auto; }
+  .cal-vbtn { flex: 0 0 auto; }
+  .task-kind-select { max-width: 118px; }
 }

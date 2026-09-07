@@ -4,6 +4,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import LoginForm from "@/components/LoginForm";
 import AppShell from "@/components/AppShell";
 import Overview from "@/components/Overview";
+import { calendarTaskIsInFocus } from "@/lib/calendarFocus";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,7 @@ export default async function Home() {
   const rows = inboxResult.data || [];
   const appRows = applicationResult.data || [];
   const taskRows = taskResult.data || [];
+  const focusTaskRows = taskRows.filter((task) => calendarTaskIsInFocus(task));
   const loadErrors = {
     mail: inboxResult.error ? "E-Mails konnten nicht geladen werden." : null,
     applications: applicationResult.error ? "Bewerbungen konnten nicht geladen werden." : null,
@@ -79,13 +81,13 @@ export default async function Home() {
       provider: accountById[message.mail_account_id]?.provider || "",
       email: accountById[message.mail_account_id]?.email || ""
     }));
-  const deadlines = taskRows
+  const deadlines = focusTaskRows
     .filter((task) => task.due_at && new Date(task.due_at).getTime() >= now - 864e5)
     .sort((a, b) => new Date(a.due_at as string).getTime() - new Date(b.due_at as string).getTime());
-  const overdueTasks = taskRows.filter(
+  const overdueTasks = focusTaskRows.filter(
     (task) => task.due_at && new Date(task.due_at).getTime() < todayStart.getTime()
   ).length;
-  const dueToday = taskRows.filter((task) => {
+  const dueToday = focusTaskRows.filter((task) => {
     if (!task.due_at) return false;
     const due = new Date(task.due_at).getTime();
     return due >= todayStart.getTime() && due < tomorrowStart.getTime();
@@ -166,7 +168,7 @@ export default async function Home() {
         newestUnread={newestUnread}
         needsReplyList={needsReply.slice(0, 5)}
         appStats={appStats}
-        tasks={taskRows}
+        tasks={focusTaskRows}
         loadErrors={loadErrors}
       />
     </AppShell>

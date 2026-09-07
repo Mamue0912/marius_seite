@@ -258,6 +258,12 @@ export interface JobAnalysis {
   matches_partial: string[];
   open_points: string[];
   language: string;
+  location?: string | null;
+  employment_type?: string | null;
+  start_date?: string | null;
+  application_method?: string | null;
+  company_description?: string | null;
+  original_url?: string | null;
 }
 
 // Stellenanzeige analysieren (Text oder Screenshot per Vision).
@@ -267,7 +273,7 @@ export async function analyzeJobPosting(input: {
 }): Promise<JobAnalysis> {
   const schema = {
     type: "object", additionalProperties: false,
-    required: ["job_type", "company", "position", "summary", "tasks", "requirements_must", "requirements_nice", "documents_required", "deadline", "contact", "application_tips", "matches_strong", "matches_partial", "open_points", "language"],
+    required: ["job_type", "company", "position", "summary", "tasks", "requirements_must", "requirements_nice", "documents_required", "deadline", "contact", "application_tips", "matches_strong", "matches_partial", "open_points", "language", "location", "employment_type", "start_date", "application_method", "company_description", "original_url"],
     properties: {
       job_type: { type: "string", enum: ["praktikum", "nebenjob", "ausbildung", "stelle", "unbekannt"] },
       company: { type: ["string", "null"] },
@@ -283,7 +289,13 @@ export async function analyzeJobPosting(input: {
       matches_strong: { type: "array", items: { type: "string" } },
       matches_partial: { type: "array", items: { type: "string" } },
       open_points: { type: "array", items: { type: "string" } },
-      language: { type: "string" }
+      language: { type: "string" },
+      location: { type: ["string", "null"] },
+      employment_type: { type: ["string", "null"] },
+      start_date: { type: ["string", "null"] },
+      application_method: { type: ["string", "null"] },
+      company_description: { type: ["string", "null"] },
+      original_url: { type: ["string", "null"] }
     }
   };
   const facts = input.confirmedFactsText?.trim();
@@ -291,7 +303,8 @@ export async function analyzeJobPosting(input: {
 
 Aufgabe: Analysiere die folgende Stellenanzeige und erkläre sie verständlich.
 - job_type: Praktikum, Nebenjob, Ausbildungsplatz, reguläre Stelle oder unbekannt.
-- Erkenne Unternehmen und Position.
+- Erkenne Unternehmen, Position, Standort, Beschäftigungsart, möglichen Beginn, Bewerbungsweg, Unternehmensbeschreibung und Original-Link.
+- Setze jede nicht belegte Einzelangabe auf null. Übernimm nur Aussagen aus der Anzeige.
 - tasks: welche Aufgaben erwarten die Person.
 - requirements_must: zwingende Voraussetzungen. requirements_nice: nur wünschenswerte.
 - documents_required: welche Unterlagen verlangt werden (Lebenslauf, Zeugnisse …).

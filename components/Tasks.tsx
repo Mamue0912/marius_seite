@@ -3,8 +3,9 @@ import { useEffect, useRef, useState } from "react";
 import Icon from "./Icon";
 import { Notice, notify } from "./Feedback";
 import { requestJson, jsonRequest } from "@/lib/http";
-import { taskBucket, TASK_BUCKETS } from "@/lib/taskDates";
+import { taskBucket } from "@/lib/taskDates";
 import { taskPriorityRank } from "@/lib/taskValidation";
+import { calendarFocusLabel, calendarTaskReason, focusKindFromCategory, type CalendarFocusKind } from "@/lib/calendarFocus";
 
 type Task = {
   id: string; title: string; note: string | null; priority: string; due_at: string | null;
@@ -20,6 +21,15 @@ const SOURCE_LABEL: Record<string, string> = {
   icloud_calendar: "iCloud-Kalender", apple: "Apple", apple_erinnerungen: "Apple Erinnerungen"
 };
 const CATEGORIES = ["Schule", "Bewerbung", "Sport", "Privat", "Finanzen", "Reisen", "Projekte", "Kalender", "Sonstiges"];
+const FOCUS_OPTIONS: CalendarFocusKind[] = ["task","deadline","important_event","routine","training","travel","holiday","informational","personal","possible"];
+const displayCategory = (task: Task) => focusKindFromCategory(task.category) ? calendarFocusLabel(focusKindFromCategory(task.category)!) : (task.category || "Sonstiges");
+const FOCUS_BUCKETS = ["Überfällig","Heute","Bald fällig","Wichtige anstehende Termine","Später","Ohne Datum","Warten auf Rückmeldung","Erledigt"];
+function focusBucket(task: Task): string {
+  const base = taskBucket(task);
+  if (base === "Diese Woche") return "Bald fällig";
+  if (base === "Später" && focusKindFromCategory(task.category) === "important_event") return "Wichtige anstehende Termine";
+  return base;
+}
 
 function dueText(task: Task): string {
   if (!task.due_at) return "Ohne Datum";
@@ -49,7 +59,7 @@ export default function Tasks({ initial, initialError = null, initialOpenId = nu
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
   const [sourceFilter, setSourceFilter] = useState(initialSource || "all");
-  const [statusFilter, setStatusFilter] = useState("open");
+  const [statusFilter, setStatusFilter] = useState(() => initialOpenId && initial.find((task) => task.id === initialOpenId)?.status === "ignoriert" ? "ignoriert" : "open");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [undo, setUndo] = useState<{ id: string; status: string } | null>(null);
   const locks = useRef(new Set<string>());
@@ -74,7 +84,7 @@ export default function Tasks({ initial, initialError = null, initialOpenId = nu
     finally { locks.current.delete("add"); setAdding(false); }
   }
 
-  async function patch(task: Task, update: Partial<Task>) {
+  async function patch(task: Task, update: Partial<Task> & { focus_kind?: CalendarFocusKind; focus_override?: "show" | "hide" }) {
     if (locks.current.has(task.id)) return;
     locks.current.add(task.id); setPending(new Set(locks.current)); setError(null);
     setTasks((current) => current.map((item) => item.id === task.id ? { ...item, ...update } : item));
@@ -98,6 +108,11 @@ export default function Tasks({ initial, initialError = null, initialOpenId = nu
 
   const normalizedQuery = query.toLocaleLowerCase("de");
   const categories = Array.from(new Set(tasks.map((task) => task.category).filter(Boolean) as string[])).sort();
+  const possibleTasks = tasks.filter((task) => task.source === "icloud_calendar"
+    && task.status === "ignoriert" && focusKindFromCategory(task.category) === "possible"
+    && (sourceFilter === "all" || sourceFilter === "icloud_calendar")
+    && (categoryFilter === "all" || task.category === categoryFilter)
+    && (task.title + " " + (task.note || "") + " " + (task.calendar_name || "")).toLocaleLowerCase("de").includes(normalizedQuery));
   const visible = tasks.filter((task) => {
     // "ignoriert" erscheint nur, wenn ausdrücklich danach gefiltert wird –
     // die Einträge bleiben erhalten und lassen sich zurückholen.
@@ -135,21 +150,27 @@ export default function Tasks({ initial, initialError = null, initialOpenId = nu
         <select aria-label="Kategorie filtern" value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}><option value="all">Alle Kategorien</option>{categories.map((item) => <option key={item}>{item}</option>)}</select>
       </div>
 
-      {TASK_BUCKETS.map((bucket) => {
-        const list = visible.filter((task) => taskBucket(task) === bucket).sort((a,b) => taskPriorityRank(b.priority)-taskPriorityRank(a.priority) || String(a.due_at || "z").localeCompare(String(b.due_at || "z")));
+      {statusFilter === "open" && possibleTasks.length > 0 && <section className="bucket focus-possible"><div className="bh"><h2 className="bt">Möglicherweise handlungsrelevant</h2><span className="bc">{possibleTasks.length}</span></div>
+        {possibleTasks.slice(0, 8).map((task) => <article id={"task-"+task.id} className="task imported possible" key={task.id} aria-busy={pending.has(task.id)}>
+          <div className="task-body"><div className="task-title">{task.title}</div><div className="task-reason">{calendarTaskReason(task)}</div><div className="task-meta"><span>{dueText(task)}</span><span>iCloud-Kalender</span>{task.calendar_name && <span>{task.calendar_name}</span>}</div></div>
+          <div className="task-actions"><button type="button" className="btn small" disabled={pending.has(task.id)} onClick={() => void patch(task,{focus_override:"show",focus_kind:"important_event"})}>In Mein Fokus</button></div>
+        </article>)}</section>}
+      {FOCUS_BUCKETS.map((bucket) => {
+        const list = visible.filter((task) => focusBucket(task) === bucket).sort((a,b) => taskPriorityRank(b.priority)-taskPriorityRank(a.priority) || String(a.due_at || "z").localeCompare(String(b.due_at || "z")));
         return list.length ? <section className="bucket" key={bucket}><div className="bh"><h2 className="bt">{bucket}</h2><span className="bc">{list.length}</span></div>
           {list.map((task) => { const href=linkedHref(task); return <article id={`task-${task.id}`} className={`task${task.status === "erledigt" ? " done" : ""}${task.external_id ? " imported" : ""}${initialOpenId === task.id ? " selected" : ""}`} key={task.id} aria-busy={pending.has(task.id)}>
             <button type="button" className="task-check" disabled={pending.has(task.id)} aria-label={task.status === "erledigt" ? "Wieder öffnen" : "Erledigen"} onClick={() => void patch(task,{status:task.status === "erledigt" ? "offen" : "erledigt"})}>{task.status === "erledigt" && <Icon name="check" size={14} />}</button>
             <div className="task-body"><div className="task-title">{task.title}</div>{task.note && <div className="task-note">{task.note}</div>}
-              <div className="task-meta"><span>{dueText(task)}</span><span>{PRIORITY_LABEL[task.priority] || "Normal"}</span><span>{task.category || "Sonstiges"}</span><span>{SOURCE_LABEL[task.source] || task.source}</span>{task.calendar_name && <span>{task.calendar_name}</span>}{task.location && <span>{task.location}</span>}</div>
+              {task.source === "icloud_calendar" && <div className="task-reason">{calendarTaskReason(task)}</div>}
+              <div className="task-meta"><span>{dueText(task)}</span><span>{PRIORITY_LABEL[task.priority] || "Normal"}</span><span>{displayCategory(task)}</span><span>{SOURCE_LABEL[task.source] || task.source}</span>{task.calendar_name && <span>{task.calendar_name}</span>}{task.location && <span>{task.location}</span>}</div>
             </div>
-            <div className="task-actions">{href && <a className="icon-button" href={href} title="Quelle öffnen" aria-label="Quelle öffnen"><Icon name="arrow" /></a>}{task.status !== "erledigt" && <button type="button" className="icon-button" disabled={pending.has(task.id)} title={task.status === "warten" ? "Wieder aufnehmen" : "Auf Rückmeldung warten"} onClick={() => void patch(task,{status:task.status === "warten" ? "offen" : "warten"})}><Icon name={task.status === "warten" ? "refresh" : "clock"} /></button>}{task.external_id && task.status !== "ignoriert" && <button type="button" className="icon-button" title="Keine Aufgabe – dauerhaft aus der Liste nehmen" aria-label="Nicht als Aufgabe führen" disabled={pending.has(task.id)} onClick={() => void patch(task,{status:"ignoriert"})}><Icon name="close" /></button>}
-            {task.status === "ignoriert" && <button type="button" className="icon-button" title="Doch als Aufgabe führen" aria-label="Doch als Aufgabe führen" disabled={pending.has(task.id)} onClick={() => void patch(task,{status:"offen"})}><Icon name="refresh" /></button>}
+            <div className="task-actions">{task.source === "icloud_calendar" && <select className="task-kind-select" aria-label="Kalenderkategorie korrigieren" value={focusKindFromCategory(task.category) || "possible"} disabled={pending.has(task.id)} onChange={(event) => void patch(task,{focus_kind:event.target.value as CalendarFocusKind})}>{FOCUS_OPTIONS.map((kind) => <option key={kind} value={kind}>{calendarFocusLabel(kind)}</option>)}</select>}{href && <a className="icon-button" href={href} title="Quelle öffnen" aria-label="Quelle öffnen"><Icon name="arrow" /></a>}{task.status !== "erledigt" && <button type="button" className="icon-button" disabled={pending.has(task.id)} title={task.status === "warten" ? "Wieder aufnehmen" : "Auf Rückmeldung warten"} onClick={() => void patch(task,{status:task.status === "warten" ? "offen" : "warten"})}><Icon name={task.status === "warten" ? "refresh" : "clock"} /></button>}{task.external_id && task.status !== "ignoriert" && <button type="button" className="icon-button" title="Keine Aufgabe – dauerhaft aus der Liste nehmen" aria-label="Nicht als Aufgabe führen" disabled={pending.has(task.id)} onClick={() => void patch(task,{focus_override:"hide"})}><Icon name="close" /></button>}
+            {task.status === "ignoriert" && <button type="button" className="icon-button" title="Doch als Aufgabe führen" aria-label="Doch als Aufgabe führen" disabled={pending.has(task.id)} onClick={() => void patch(task,{focus_override:"show",focus_kind:"important_event"})}><Icon name="refresh" /></button>}
             {!task.external_id && <button type="button" className="icon-button" aria-label="Eintrag löschen" disabled={pending.has(task.id)} onClick={() => void remove(task)}><Icon name="trash" /></button>}</div>
           </article>; })}
         </section> : null;
       })}
-      {!visible.length && <div className="empty"><Icon name="tasks" size={30} /><p>Keine passenden Aufgaben oder Fristen.</p><div className="sub">Bestehende Aufgaben ohne Datum erscheinen im Bereich „Ohne Datum“.</div></div>}
+      {!visible.length && !(statusFilter === "open" && possibleTasks.length) && <div className="empty"><Icon name="tasks" size={30} /><p>Keine passenden Aufgaben oder Fristen.</p><div className="sub">Bestehende Aufgaben ohne Datum erscheinen im Bereich „Ohne Datum“.</div></div>}
     </div>
   </div>;
 }

@@ -112,8 +112,12 @@ async function requestPinned(url: URL, init: RequestInit): Promise<Response> {
     method: init.method || "GET",
     headers,
     signal: init.signal || undefined,
-    lookup: ((_hostname: string, _options: unknown, callback: (error: Error | null, address: string, family: number) => void) => {
-      callback(null, selected.address, selected.family);
+    lookup: ((_hostname: string, options: unknown, callback: (...args: any[]) => void) => {
+      if (options && typeof options === "object" && (options as { all?: boolean }).all) {
+        callback(null, [{ address: selected.address, family: selected.family }]);
+      } else {
+        callback(null, selected.address, selected.family);
+      }
     }) as any
   };
   return await new Promise<Response>((resolve, reject) => {
@@ -141,7 +145,10 @@ export async function fetchPublicResource(input: string | URL, init: RequestInit
   let target = await assertPublicHttpUrl(input);
   for (let redirect = 0; redirect <= maxRedirects; redirect++) {
     const response = await requestPinned(target, init);
-    if (!REDIRECTS.has(response.status)) return response;
+    if (!REDIRECTS.has(response.status)) {
+      response.headers.set("x-cockpit-final-url", target.toString());
+      return response;
+    }
     const location = response.headers.get("location");
     await response.body?.cancel();
     if (!location || redirect === maxRedirects) throw new Error("too_many_redirects");
@@ -179,5 +186,8 @@ export async function readBodyLimited(response: Response, maxBytes: number): Pro
 
 export async function readTextLimited(response: Response, maxBytes: number): Promise<string | null> {
   const body = await readBodyLimited(response, maxBytes);
-  return body ? body.toString("utf8") : null;
+  if (!body) return null;
+  const charset = /charset\s*=\s*["']?([^;"'\s]+)/i.exec(response.headers.get("content-type") || "")?.[1] || "utf-8";
+  try { return new TextDecoder(charset).decode(body); }
+  catch { return body.toString("utf8"); }
 }

@@ -1,7 +1,8 @@
+import { normalizeJobUrl } from "./jobPostingExtract";
 import { supabaseAdmin } from "./supabaseAdmin";
 
 const norm = (s: string | null | undefined) => (s || "").toLowerCase().replace(/\s+/g, " ").replace(/[^\p{L}\p{N} ]/gu, "").trim();
-const normUrl = (s: string | null | undefined) => (s || "").toLowerCase().replace(/^https?:\/\//, "").replace(/\/+$/, "").replace(/[?#].*$/, "").trim();
+const normUrl = (s: string | null | undefined) => { try { return normalizeJobUrl(s || ""); } catch { return ""; } };
 
 // Prüft, ob es zu einer gerade angelegten Bewerbung bereits eine bestehende
 // gibt, die dieselbe Stelle beschreibt: gleiche Firma UND Position, oder

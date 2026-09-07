@@ -2,12 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabaseServer";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { taskDueDate, taskNote, taskTitle, validTaskPriority, validTaskStatus } from "@/lib/taskValidation";
+import { isFocusKind, manualFocusCategory, type CalendarFocusKind } from "@/lib/calendarFocus";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 const serverError = (message: string) => NextResponse.json({ error: "db_error", message }, { status: 500 });
 const badRequest = (error: unknown) => NextResponse.json({ error: "bad_request", message: error instanceof Error ? error.message : "Ungültiger Eintrag." }, { status: 400 });
 function shortText(value: unknown, max: number, fallback: string | null = null): string | null { if (value == null || value === "") return fallback; if (typeof value !== "string") throw new Error("Ein Textfeld ist ungültig."); return value.trim().slice(0,max) || fallback; }
+const FOCUS_KINDS: CalendarFocusKind[] = ["task","deadline","important_event","routine","training","travel","holiday","informational","personal","possible"];
+const validFocusKind = (value: unknown): value is CalendarFocusKind => typeof value === "string" && FOCUS_KINDS.includes(value as CalendarFocusKind);
 
 export async function GET() {
   const user=await requireUser(); if(!user) return NextResponse.json({error:"unauthorized"},{status:401});
@@ -39,7 +42,22 @@ export async function PATCH(req: NextRequest) {
   if(!existing) return NextResponse.json({error:"not_found",message:"Eintrag wurde nicht gefunden."},{status:404});
   const patch:Record<string,unknown>={updated_at:new Date().toISOString()};
   try {
-    if("status" in body){if(!validTaskStatus(body.status)) throw new Error("Der Status ist ungültig.");patch.status=body.status;}
+    if("status" in body){
+      if(!validTaskStatus(body.status)) throw new Error("Der Status ist ungültig.");
+      patch.status=body.status;
+      if(existing.source==="icloud_calendar" && body.status==="ignoriert") patch.category=manualFocusCategory("hidden");
+      if(existing.source==="icloud_calendar" && body.status==="offen" && String(existing.category||"").endsWith("Ausgeblendet")) patch.category=manualFocusCategory("important_event");
+    }
+    if(existing.source==="icloud_calendar" && "focus_kind" in body){
+      if(!validFocusKind(body.focus_kind)) throw new Error("Die Fokus-Kategorie ist ungültig.");
+      patch.category=manualFocusCategory(body.focus_kind);
+      patch.status=isFocusKind(body.focus_kind)?"offen":"ignoriert";
+    }
+    if(existing.source==="icloud_calendar" && "focus_override" in body){
+      if(body.focus_override!=="show" && body.focus_override!=="hide") throw new Error("Die Fokus-Auswahl ist ungültig.");
+      if(body.focus_override==="hide") { patch.status="ignoriert"; patch.category=manualFocusCategory("hidden"); }
+      else { patch.status="offen"; patch.category=manualFocusCategory(validFocusKind(body.focus_kind)?body.focus_kind:"important_event"); }
+    }
     if("reminder_at" in body) patch.reminder_at=taskDueDate(body.reminder_at);
     if(!existing.external_id){
       if("title" in body) patch.title=taskTitle(body.title);

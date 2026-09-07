@@ -8,6 +8,7 @@ import { imageBlock, isImageMime } from "@/lib/docExtract";
 import { recordAiEvent } from "@/lib/aiDiagnostics";
 import { env } from "@/lib/env";
 import { fetchPublicResource, readTextLimited } from "@/lib/safeRemote";
+import { extractJobPostingPage, normalizeJobUrl, type JobPageExtraction } from "@/lib/jobPostingExtract";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,69 +16,61 @@ export const maxDuration = 60;
 
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 
-function htmlToText(html: string): string {
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-    .replace(/\s+/g, " ").trim();
-}
-
-// Ergebnis mit Grund: Eine Sammelmeldung ("konnte nicht geladen werden") sagt
-// dem Nutzer nicht, was er tun soll. Jeder Grund hat einen eigenen Hinweis.
 type JobPageResult =
-  | { ok: true; text: string }
-  | { ok: false; reason: "blocked" | "notfound" | "notHtml" | "tooShort" | "unreachable" };
+  | { ok: true; extraction: JobPageExtraction }
+  | { ok: false; reason: "blocked" | "notfound" | "notHtml" | "tooShort" | "unreachable" | "consent" | "notJob"; partial?: JobPageExtraction };
 
 const JOB_PAGE_HINT: Record<string, string> = {
-  blocked: "Diese Seite blockiert automatische Zugriffe (z. B. StepStone, LinkedIn, Indeed). Bitte den Anzeigentext kopieren und unter „Text einfügen“ verwenden.",
-  notfound: "Unter diesem Link war nichts zu finden. Bitte den Link prüfen – Stellenanzeigen werden oft nach kurzer Zeit entfernt.",
-  notHtml: "Der Link zeigt keine Webseite, sondern eine Datei (z. B. ein PDF). Bitte die Datei unter „Datei hochladen“ verwenden.",
-  tooShort: "Diese Seite lädt ihre Inhalte erst im Browser nach, deshalb ist der Text hier leer. Bitte den Anzeigentext kopieren und unter „Text einfügen“ verwenden.",
-  unreachable: "Die Stellenanzeige konnte nicht automatisch geladen werden. Bitte Text einfügen, PDF/Screenshot hochladen oder eine E-Mail übernehmen."
+  blocked: "Die Website blockiert automatische Zugriffe. Öffne die Anzeige im Browser und füge den Anzeigentext unter „Text einfügen“ ein.",
+  notfound: "Unter diesem Link ist keine Anzeige mehr erreichbar. Prüfe den Link oder füge den gespeicherten Anzeigentext ein.",
+  notHtml: "Der Link führt zu einer Datei statt zu einer Webseite. Lade die Datei bitte unter „PDF/Screenshot“ hoch.",
+  tooShort: "Die Anzeige lädt ihren Inhalt ausschließlich im Browser nach. Kopiere den sichtbaren Anzeigentext und nutze „Text einfügen“.",
+  consent: "Die Website liefert nur eine Cookie- oder Zustimmungsseite. Öffne sie im Browser, bestätige dort die Auswahl und füge anschließend den Anzeigentext ein.",
+  notJob: "Auf der erreichbaren Seite wurde keine Stellenanzeige erkannt. Prüfe, ob der Link direkt zur Anzeige führt, oder füge den Anzeigentext ein.",
+  unreachable: "Die Stellenanzeige ist nicht öffentlich erreichbar oder hat zu lange geantwortet. Du kannst stattdessen Text, PDF, Screenshot oder E-Mail übernehmen."
 };
 
 async function fetchJobPage(url: string): Promise<JobPageResult> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 15000);
+  const timer = setTimeout(() => controller.abort(), 18000);
   try {
     const response = await fetchPublicResource(url, {
       signal: controller.signal,
       headers: {
-        // Eine öffentliche Seite, die der Nutzer selbst eingefügt hat. Viele
-        // Stellenbörsen liefern an offensichtliche Automaten gar nichts aus,
-        // deshalb ein gebräuchlicher Browser-Kopf statt eines Bot-Kennzeichens.
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
         accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "accept-language": "de-DE,de;q=0.9,en;q=0.8"
+        "accept-language": "de-DE,de;q=0.9,en;q=0.8",
+        "cache-control": "no-cache"
       }
-    });
+    }, 6);
     if (!response.ok) {
       const status = response.status;
       await response.body?.cancel();
-      if (status === 401 || status === 403 || status === 429) return { ok: false, reason: "blocked" };
-      if (status === 404 || status === 410) return { ok: false, reason: "notfound" };
-      return { ok: false, reason: "unreachable" };
+      if (status === 401 || status === 403 || status === 429 || status === 451) return { ok:false, reason:"blocked" };
+      if (status === 404 || status === 410) return { ok:false, reason:"notfound" };
+      return { ok:false, reason:"unreachable" };
     }
     const contentType = (response.headers.get("content-type") || "").toLowerCase();
     if (contentType && !contentType.includes("html") && !contentType.includes("xml")) {
       await response.body?.cancel();
-      return { ok: false, reason: "notHtml" };
+      return { ok:false, reason:"notHtml" };
     }
-    const html = await readTextLimited(response, 2 * 1024 * 1024);
-    if (!html) return { ok: false, reason: "unreachable" };
-    const text = htmlToText(html);
-    if (text.length <= 200) return { ok: false, reason: "tooShort" };
-    return { ok: true, text: text.slice(0, 14000) };
+    const html = await readTextLimited(response, 3 * 1024 * 1024);
+    if (!html) return { ok:false, reason:"unreachable" };
+    const finalUrl = response.headers.get("x-cockpit-final-url") || url;
+    const extraction = extractJobPostingPage(html, finalUrl);
+    if (extraction.obstacle === "challenge") return { ok:false, reason:"blocked", partial:extraction };
+    if (extraction.obstacle === "consent") return { ok:false, reason:"consent", partial:extraction };
+    if (!extraction.isJobPosting) {
+      return { ok:false, reason:extraction.obstacle === "dynamic" ? "tooShort" : "notJob", partial:extraction };
+    }
+    return { ok:true, extraction };
   } catch {
-    return { ok: false, reason: "unreachable" };
+    return { ok:false, reason:"unreachable" };
   } finally {
     clearTimeout(timer);
   }
 }
-
 export async function POST(req: NextRequest) {
   const user = await requireUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -90,6 +83,7 @@ export async function POST(req: NextRequest) {
   let content: string | Block[] | null = null;
   let jobUrl: string | null = null;
   let jobText: string | null = null;
+  let jobExtraction: JobPageExtraction | null = null;
 
   try {
     if (ctype.includes("multipart/form-data")) {
@@ -116,19 +110,42 @@ export async function POST(req: NextRequest) {
       applicationId = body.applicationId;
       mode = body.mode || "text";
       if (mode === "url") {
-        jobUrl = String(body.url || "").trim();
-        // Kopierte Links kommen häufig ohne Schema ("www.stepstone.de/…") oder
-        // mit umschließenden Zeichen aus E-Mails. Beides wird ergänzt bzw.
-        // entfernt, statt die Eingabe abzulehnen.
-        jobUrl = jobUrl.replace(/^[<("'\s]+|[>)"'\s.,]+$/g, "");
-        if (jobUrl && !/^https?:\/\//i.test(jobUrl)) jobUrl = "https://" + jobUrl;
-        if (!/^https?:\/\/[^\s.]+\.[^\s]+/i.test(jobUrl)) {
-          return NextResponse.json({ error: "bad_url", message: "Das sieht nicht nach einem Link aus. Bitte die vollständige Adresse der Stellenanzeige einfügen." }, { status: 400 });
+        try {
+          jobUrl = normalizeJobUrl(String(body.url || ""));
+        } catch (error) {
+          const code = error instanceof Error ? error.message : "";
+          const message = code === "url_too_long"
+            ? "Der Link ist ungewöhnlich lang. Bitte öffne die Anzeige und kopiere die bereinigte Adresse aus der Browserzeile."
+            : "Das sieht nicht nach einer gültigen öffentlichen Webadresse aus. Bitte den vollständigen Link zur Stellenanzeige einfügen.";
+          return NextResponse.json({ error:"bad_url", message }, { status:400 });
         }
         const page = await fetchJobPage(jobUrl);
-        if (!page.ok) return NextResponse.json({ error: "fetch_failed", message: JOB_PAGE_HINT[page.reason] }, { status: 422 });
-        const text = page.text;
-        content = text; jobText = text;
+        if (!page.ok) {
+          return NextResponse.json({
+            error:"fetch_failed", reason:page.reason, message:JOB_PAGE_HINT[page.reason],
+            normalizedUrl:jobUrl, partial:page.partial?.fields || null,
+            fallbackText:page.partial?.text?.slice(0, 14000) || ""
+          }, { status:422 });
+        }
+        jobExtraction = page.extraction;
+        jobUrl = page.extraction.canonicalUrl;
+        jobText = page.extraction.analysisText;
+        content = jobText;
+
+        if (!applicationId) {
+          const { data: existingLinks } = await admin.from("applications")
+            .select("id,company,position,job_url").eq("user_id",user.id).not("job_url","is",null).limit(500);
+          const existing = (existingLinks || []).find((item) => {
+            try { return normalizeJobUrl(item.job_url) === jobUrl; } catch { return false; }
+          });
+          if (existing) {
+            return NextResponse.json({
+              applicationId:existing.id, alreadyAnalyzed:true,
+              duplicate:{ id:existing.id, company:existing.company, position:existing.position },
+              extraction:page.extraction.fields
+            });
+          }
+        }
       } else if (mode === "text") {
         jobText = String(body.text || "").trim();
         if (jobText.length < 40) return NextResponse.json({ error: "too_short", message: "Bitte mehr Text der Stellenanzeige einfügen." }, { status: 400 });
@@ -180,12 +197,12 @@ export async function POST(req: NextRequest) {
     }
 
     await recordAiEvent({ userId: user.id, kind: "compose", ok: true, durationMs: Date.now() - started, model: env.anthropicModel(), subjectHint: "stelle:" + (analysis.position || "") });
-    return NextResponse.json({ applicationId: appId, analysis, duplicate });
+    return NextResponse.json({ applicationId: appId, analysis, duplicate, extraction: jobExtraction?.fields || null });
   } catch (e) {
     const info = aiErrorInfo(e);
     console.error("analyze failed:", info.category, (e as Error).message);
     await recordAiEvent({ userId: user.id, kind: "compose", ok: false, durationMs: Date.now() - started, model: env.anthropicModel(), errorCategory: info.category, subjectHint: "stelle" });
     const msg = info.category === "api_error" ? "Die Stellenanzeige konnte nicht verarbeitet werden." : info.message;
-    return NextResponse.json({ error: info.category, message: msg }, { status: info.category === "not_configured" ? 503 : 502 });
+    return NextResponse.json({ error: info.category, message: msg, normalizedUrl: jobUrl, partial: jobExtraction?.fields || null, fallbackText: jobExtraction?.text?.slice(0, 14000) || "" }, { status: info.category === "not_configured" ? 503 : 502 });
   }
 }

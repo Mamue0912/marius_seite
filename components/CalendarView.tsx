@@ -9,7 +9,7 @@ interface Ev {
   color: string; textColor: string; htmlLink: string | null;
   description?: string | null; source?: "google" | "icloud"; taskId?: string | null;
 }
-type View = "month" | "week" | "year" | "agenda";
+type View = "day" | "month" | "week" | "year" | "agenda";
 
 const WD = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const MON = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
@@ -63,7 +63,7 @@ export default function CalendarView({ initialEmail, hasGoogle = false }: { init
   const [loading, setLoading] = useState(() => calStore().events.length === 0);
   const [error, setError] = useState<string | null>(null);
   const [needsReauth, setNeedsReauth] = useState(false);
-  const [view, setView] = useState<View>("month");
+  const [view, setView] = useState<View>("week");
   const [selected, setSelected] = useState<string>(() => ymd(new Date()));
   const [disconnecting, setDisconnecting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -82,6 +82,10 @@ export default function CalendarView({ initialEmail, hasGoogle = false }: { init
     if (view === "year") {
       return { min: new Date(cursor.getFullYear(), 0, 1), max: new Date(cursor.getFullYear() + 1, 0, 1) };
     }
+    if (view === "day") {
+      const min = new Date(selected + "T00:00:00"); const max = new Date(min); max.setDate(max.getDate() + 1);
+      return { min, max };
+    }
     if (view === "week") {
       const min = new Date(weekAnchor); const max = new Date(weekAnchor); max.setDate(max.getDate() + 7);
       return { min, max };
@@ -96,7 +100,7 @@ export default function CalendarView({ initialEmail, hasGoogle = false }: { init
     const gridStart = mondayOf(first);
     const gridEnd = new Date(gridStart); gridEnd.setDate(gridStart.getDate() + 42);
     return { min: gridStart, max: gridEnd };
-  }, [view, cursor, weekAnchor]);
+  }, [view, cursor, weekAnchor, selected]);
 
   // Bewusst breiteres Fenster laden als sichtbar (±1 Monat bzw. ganzes Jahr),
   // damit Blättern/Umschalten meist sofort aus dem gemeinsamen Cache kommt.
@@ -148,6 +152,7 @@ export default function CalendarView({ initialEmail, hasGoogle = false }: { init
   // Titel + Navigation je nach Ansicht.
   function shift(delta: number) {
     if (view === "year") setCursor((c) => new Date(c.getFullYear() + delta, 0, 1));
+    else if (view === "day") setSelected((value) => { const n = new Date(value + "T00:00:00"); n.setDate(n.getDate() + delta); return ymd(n); });
     else if (view === "week") setWeekAnchor((w) => { const n = new Date(w); n.setDate(n.getDate() + delta * 7); return n; });
     else setCursor((c) => new Date(c.getFullYear(), c.getMonth() + delta, 1));
   }
@@ -160,6 +165,7 @@ export default function CalendarView({ initialEmail, hasGoogle = false }: { init
     ? new Date(sources.icloud.lastSyncedAt).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" })
     : null;
   const title = view === "year" ? String(cursor.getFullYear())
+    : view === "day" ? new Date(selected + "T00:00:00").toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long", year: "numeric" })
     : view === "week"
       ? (() => { const e = new Date(weekAnchor); e.setDate(e.getDate() + 6); return `${weekAnchor.getDate()}.–${e.getDate()}. ${MON[e.getMonth()]} ${e.getFullYear()}`; })()
       : `${MON[cursor.getMonth()]} ${cursor.getFullYear()}`;
@@ -176,9 +182,9 @@ export default function CalendarView({ initialEmail, hasGoogle = false }: { init
         <div className="cal-right">
           {initialEmail && <span className="cal-acct">{initialEmail}</span>}
           <div className="cal-viewswitch">
-            {(["week", "month", "year", "agenda"] as View[]).map((v) => (
+            {(["day", "week", "month", "year", "agenda"] as View[]).map((v) => (
               <button key={v} className={"cal-vbtn" + (view === v ? " on" : "")} onClick={() => setView(v)}>
-                {v === "week" ? "Woche" : v === "month" ? "Monat" : v === "year" ? "Jahr" : "Agenda"}
+                {v === "day" ? "Tag" : v === "week" ? "Woche" : v === "month" ? "Monat" : v === "year" ? "Jahr" : "Agenda"}
               </button>
             ))}
           </div>
@@ -198,7 +204,8 @@ export default function CalendarView({ initialEmail, hasGoogle = false }: { init
       {taskSyncError && <div className="cal-note bad">{taskSyncError}</div>}
 
       {view === "month" && <MonthView cursor={cursor} byDay={byDay} todayKey={todayKey} selected={selected} setSelected={setSelected} loading={loading} />}
-      {view === "week" && <WeekView anchor={weekAnchor} byDay={byDay} todayKey={todayKey} loading={loading} />}
+      {view === "day" && <TimelineView anchor={new Date(selected + "T00:00:00")} dayCount={1} byDay={byDay} todayKey={todayKey} loading={loading} />}
+      {view === "week" && <TimelineView anchor={weekAnchor} dayCount={7} byDay={byDay} todayKey={todayKey} loading={loading} />}
       {view === "year" && <YearView year={cursor.getFullYear()} byDay={byDay} todayKey={todayKey} onPick={(m: number) => { setCursor(new Date(cursor.getFullYear(), m, 1)); setView("month"); }} />}
       {view === "agenda" && <AgendaView events={events} todayKey={todayKey} loading={loading} />}
     </div>
@@ -257,18 +264,19 @@ const HOURS = Array.from({ length: 24 }, (_, i) => i);
 // Minuten, die ein Termin an einem bestimmten Tag belegt. Mehrtägige Termine
 // werden auf den Tag beschnitten; sehr kurze bekommen eine Mindestdauer, damit
 // sie im Raster sichtbar bleiben.
-function daySlot(e: Ev, dayKey: string): { from: number; to: number } | null {
+export function daySlot(e: Ev, dayKey: string): { from: number; to: number } | null {
   if (e.allDay) return null;
-  const dayStart = new Date(dayKey + "T00:00:00").getTime();
-  if (!isFinite(dayStart)) return null;
-  const dayEnd = dayStart + 86400000;
-  const s = new Date(e.start).getTime();
-  if (!isFinite(s)) return null;
-  const raw = e.end ? new Date(e.end).getTime() : s + 3600000;
-  const t = isFinite(raw) ? Math.max(raw, s + 900000) : s + 3600000;
-  const from = Math.max(s, dayStart), to = Math.min(t, dayEnd);
-  if (to <= from) return null;
-  return { from: (from - dayStart) / 60000, to: (to - dayStart) / 60000 };
+  const dayStart = new Date(dayKey + "T00:00:00");
+  if (!Number.isFinite(dayStart.getTime())) return null;
+  const nextDay = new Date(dayStart); nextDay.setDate(nextDay.getDate() + 1);
+  const start = new Date(e.start);
+  if (!Number.isFinite(start.getTime())) return null;
+  const parsedEnd = e.end ? new Date(e.end) : new Date(start.getTime() + 3600000);
+  const end = Number.isFinite(parsedEnd.getTime()) ? parsedEnd : new Date(start.getTime() + 3600000);
+  if (end <= dayStart || start >= nextDay) return null;
+  const from = start <= dayStart ? 0 : start.getHours() * 60 + start.getMinutes() + start.getSeconds() / 60;
+  const to = end >= nextDay ? 1440 : end.getHours() * 60 + end.getMinutes() + end.getSeconds() / 60;
+  return { from: Math.max(0, from), to: Math.min(1440, Math.max(to, from + 15)) };
 }
 
 type Slot = { e: Ev; from: number; to: number };
@@ -320,17 +328,20 @@ function EventBlock({ p, hourHeight }: { p: Packed; hourHeight: number }) {
       <span className="cal-tgev-s">{e.title}</span>
     </>
   );
-  return e.htmlLink
-    ? <a className="cal-tgev" style={style} title={label} href={e.htmlLink} target="_blank" rel="noopener noreferrer">{inner}</a>
+  const href = e.htmlLink || (e.taskId ? "/tasks?open=" + encodeURIComponent(e.taskId) : null);
+  return href
+    ? <a className="cal-tgev" style={style} title={label} href={href} target={e.htmlLink ? "_blank" : undefined} rel={e.htmlLink ? "noopener noreferrer" : undefined}>{inner}</a>
     : <div className="cal-tgev" style={style} title={label}>{inner}</div>;
 }
 
-function WeekView({ anchor, byDay, todayKey, loading }: any) {
+export function TimelineView({ anchor, dayCount, byDay, todayKey, loading }: any) {
+  const anchorTime = anchor.getTime();
   const days = useMemo(() => {
     const out: Date[] = [];
-    for (let i = 0; i < 7; i++) { const d = new Date(anchor); d.setDate(anchor.getDate() + i); out.push(d); }
+    const base = new Date(anchorTime);
+    for (let i = 0; i < dayCount; i++) { const d = new Date(anchorTime); d.setDate(base.getDate() + i); out.push(d); }
     return out;
-  }, [anchor]);
+  }, [anchorTime, dayCount]);
 
   const [hourHeight, setHourHeight] = useState<number>(() => {
     try {
@@ -409,7 +420,7 @@ function WeekView({ anchor, byDay, todayKey, loading }: any) {
   }, []);
 
   // Beim Wochenwechsel wird die Startposition neu bestimmt.
-  useEffect(() => { userScrolled.current = false; placedFor.current = null; }, [anchor]);
+  useEffect(() => { userScrolled.current = false; placedFor.current = null; }, [anchorTime]);
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || userScrolled.current || placedFor.current === earliestMin) return;
@@ -438,8 +449,11 @@ function WeekView({ anchor, byDay, todayKey, loading }: any) {
 
   const hasAllDay = days.some((d) => ((byDay[ymd(d)] || []) as Ev[]).some((e) => e.allDay));
 
+  const hasEarly = earliestMin < 6 * 60;
+  const gridStyle = { "--cal-days": dayCount } as React.CSSProperties;
+
   return (
-    <div className="cal-tg">
+    <div className={"cal-tg" + (dayCount === 1 ? " day" : "")} style={gridStyle}>
       <div className="cal-tg-top">
         <div className="cal-tg-gutter" />
         {days.map((d) => {
@@ -462,7 +476,7 @@ function WeekView({ anchor, byDay, todayKey, loading }: any) {
             return (
               <div key={k} className="cal-tg-adcol">
                 {evs.map((e) => (
-                  <span key={e.id} className="cal-tg-adev" style={{ background: e.color, color: e.textColor }} title={e.title}>{e.title}</span>
+                  e.htmlLink || e.taskId ? <a key={e.id} className="cal-tg-adev" style={{ background: e.color, color: e.textColor }} title={e.title} href={e.htmlLink || ("/tasks?open=" + encodeURIComponent(e.taskId!))} target={e.htmlLink ? "_blank" : undefined} rel={e.htmlLink ? "noopener noreferrer" : undefined}>{e.title}</a> : <span key={e.id} className="cal-tg-adev" style={{ background: e.color, color: e.textColor }} title={e.title}>{e.title}</span>
                 ))}
               </div>
             );
@@ -497,7 +511,9 @@ function WeekView({ anchor, byDay, todayKey, loading }: any) {
       </div>
 
       <div className="cal-tg-hint">
-        <span>Mausrad über dem Kalender skaliert die Zeit · Shift + Mausrad scrollt · neben dem Kalender scrollt die Seite</span>
+        <span>{hasEarly ? "Ein Termin beginnt vor 06:00 Uhr; die Nachtstunden wurden automatisch eingeblendet." : "Standardzeitraum 06:00–24:00 Uhr"}</span>
+        <button type="button" className="cal-night-toggle" onClick={() => { userScrolled.current = true; if (scrollRef.current) scrollRef.current.scrollTop = 0; }}>Nacht zeigen</button>
+        <button type="button" className="cal-night-toggle" onClick={() => { userScrolled.current = true; if (scrollRef.current) scrollRef.current.scrollTop = 6 * hourHeight; }}>Ab 06:00</button>
         <span className="cal-tg-zoom">
           <button type="button" onClick={() => setHourHeight((h) => Math.max(HOUR_MIN, Math.round(h / 1.25)))} aria-label="Zeitskala verkleinern">−</button>
           <button type="button" onClick={() => setHourHeight(HOUR_DEFAULT)}>Standard</button>

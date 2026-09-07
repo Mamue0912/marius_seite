@@ -2,8 +2,9 @@
 import { PROVIDERS } from "@/lib/mailProviders";
 import CalendarTile from "@/components/CalendarTile";
 import Icon from "@/components/Icon";
+import { calendarTaskIsInFocus, calendarTaskReason } from "@/lib/calendarFocus";
 
-type Task = { id: string; title: string; note?: string | null; due_at?: string | null; priority?: string; status?: string; source?: string };
+type Task = { id: string; title: string; note?: string | null; due_at?: string | null; priority?: string; status?: string; source?: string; category?: string | null; calendar_name?: string | null; all_day?: boolean; starts_at?: string | null; ends_at?: string | null };
 
 function greeting() {
   const h = new Date().getHours();
@@ -25,7 +26,7 @@ function dueLabel(value?: string | null) {
 
 export default function Overview({ accounts, summary, newestUnread = [], needsReplyList, appStats, tasks = [], loadErrors = {} }: any) {
   const dateStr = new Date().toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" });
-  const openTasks: Task[] = [...tasks].filter((task) => task.status !== "erledigt").sort((a, b) => {
+  const openTasks: Task[] = [...tasks].filter((task) => task.status !== "erledigt" && calendarTaskIsInFocus(task)).sort((a, b) => {
     const aDue = a.due_at ? new Date(a.due_at).getTime() : Number.MAX_SAFE_INTEGER;
     const bDue = b.due_at ? new Date(b.due_at).getTime() : Number.MAX_SAFE_INTEGER;
     const priorityRank = (priority?: string) => priority === "dringend" ? 3 : priority === "hoch" ? 2 : priority === "normal" ? 1 : 0;
@@ -34,7 +35,7 @@ export default function Overview({ accounts, summary, newestUnread = [], needsRe
   const focusTask = openTasks[0];
   const focusMail = needsReplyList[0];
   const focus = focusTask
-    ? { eyebrow: focusTask.due_at && dayStart(focusTask.due_at) < dayStart() ? "Überfällige Aufgabe" : "Nächster Schritt", title: focusTask.title, detail: focusTask.note || `${dueLabel(focusTask.due_at)}${focusTask.priority === "dringend" ? " · dringend" : focusTask.priority === "hoch" ? " · hohe Priorität" : ""}`, href: `/tasks?open=${focusTask.id}`, icon: "tasks" }
+    ? { eyebrow: focusTask.due_at && dayStart(focusTask.due_at) < dayStart() ? "Überfällige Aufgabe" : "Nächster Schritt", title: focusTask.title, detail: focusTask.source === "icloud_calendar" ? calendarTaskReason(focusTask) : (focusTask.note || dueLabel(focusTask.due_at) + (focusTask.priority === "dringend" ? " · dringend" : focusTask.priority === "hoch" ? " · hohe Priorität" : "")), href: "/tasks?open=" + focusTask.id, icon: "tasks" }
     : appStats?.next
       ? { eyebrow: "Nächster Bewerbungsschritt", title: appStats.next.text, detail: "Bewerbungsprojekt öffnen und weiterarbeiten", href: `/applications?open=${appStats.next.id}`, icon: "briefcase" }
       : focusMail

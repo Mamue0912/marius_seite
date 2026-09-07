@@ -139,6 +139,7 @@ export interface CalendarEvent {
   recurring?: boolean;
   // Einzelne Instanz einer Serie (im Gegensatz zum Serien-Master).
   recurrenceInstance?: boolean;
+  recurrenceRule?: string | null;
   description?: string | null;
   source?: "google" | "icloud";
   taskId?: string | null;
@@ -201,6 +202,9 @@ export async function fetchGoogleEvents(
         color,
         textColor: readableText(color),
         htmlLink: ev.htmlLink || null,
+        recurring: !!ev.recurringEventId || !!ev.recurrence?.length,
+        recurrenceInstance: !!ev.recurringEventId,
+        recurrenceRule: Array.isArray(ev.recurrence) ? ev.recurrence.join(";") : null,
         description: ev.description || null,
         source: "google"
       });

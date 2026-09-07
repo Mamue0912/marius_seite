@@ -339,7 +339,7 @@ function Overview({ apps, onOpen, onNav, onNew }: any) {
 }
 
 // ============================ Neue Stelle ============================
-function NewJob({ onCreated, onAnalyzeTimeout, accounts }: any) {
+export function NewJob({ onCreated, onAnalyzeTimeout, accounts }: any) {
   const [mode, setMode] = useState<"stelle" | "website">("stelle");
   const [tab, setTab] = useState<"url" | "text" | "datei" | "email">("url");
   const [url, setUrl] = useState("");
@@ -369,7 +369,12 @@ function NewJob({ onCreated, onAnalyzeTimeout, accounts }: any) {
     setBusy(false);
     if (r.ok) { onCreated(r.data.applicationId, r.data.duplicate); return; }
     if (r.timedOut && onAnalyzeTimeout && await onAnalyzeTimeout()) return;
-    if (r.data?.error === "fetch_failed") setShowFallback(true);
+    if (r.data?.error === "fetch_failed" || (typeof r.data?.fallbackText === "string" && r.data.fallbackText.trim().length >= 40)) {
+      setShowFallback(true);
+      setTab("text");
+      if (typeof r.data.fallbackText === "string" && r.data.fallbackText.trim().length >= 40) setText(r.data.fallbackText);
+      if (typeof r.data.normalizedUrl === "string") setUrl(r.data.normalizedUrl);
+    }
     setError(errText(r, "Die Stellenanzeige konnte nicht verarbeitet werden."));
   }
   async function analyzeFile(file: File) {
@@ -423,7 +428,7 @@ function NewJob({ onCreated, onAnalyzeTimeout, accounts }: any) {
           </button>
           {busy && <button className="ac-btn" onClick={() => ctrlRef.current?.abort()}>Abbrechen</button>}
         </div>
-        <div className="ac-hint">Kann die Seite nicht automatisch gelesen werden, nutze eine der Alternativen unten.</div>
+        <div className="ac-hint">Weiterleitungen und strukturierte Jobdaten werden automatisch ausgewertet. Kann eine Seite nicht gelesen werden, bleibt bereits erkannter Text unten erhalten.</div>
 
         <div className={"ac-tabs" + (showFallback ? " ac-tabs-glow" : "")}>
           {(["text", "datei", "email"] as const).map((t) => (
@@ -435,6 +440,7 @@ function NewJob({ onCreated, onAnalyzeTimeout, accounts }: any) {
 
         {tab === "text" && (
           <div className="ac-fallback">
+            {showFallback && text.trim().length >= 40 && <div className="ac-note ok">Der bereits lesbare Teil der Anzeige wurde übernommen. Du kannst ihn ergänzen und erneut analysieren.</div>}
             <textarea className="ac-textarea" placeholder="Text der Stellenanzeige hier einfügen…" value={text} onChange={(e) => setText(e.target.value)} disabled={busy} />
             <button className="ac-btn primary" disabled={busy || text.trim().length < 40} onClick={() => analyzeJson({ mode: "text", text })}>{busy ? <><span className="spin" /> Analysiere…</> : "Text analysieren"}</button>
           </div>

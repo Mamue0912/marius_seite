@@ -9,6 +9,7 @@ import { calendarEventTaskRecord, staleExternalIds, isTaskWorthyEvent, classifyC
 import { safeInternalPath } from "../lib/safeNavigation";
 import { isPrivateAddress, resolvePublicNetworkEndpoint } from "../lib/safeRemote";
 import { taskDueDate, taskNote, taskPriorityRank, taskTitle, validTaskPriority, validTaskStatus } from "../lib/taskValidation";
+import { calendarFocusSignature, classifyCalendarFocus, manualFocusCategory, calendarTaskIsInFocus } from "../lib/calendarFocus";
 
 test("Aufgaben ohne Datum sind nie überfällig", () => {
  assert.equal(dayDistance(null, new Date("2026-09-04T12:00:00")), null);
@@ -316,8 +317,27 @@ test("Aussortierte Termine verschwinden nicht, sondern werden ausgeblendet", () 
 test("Zurueckgeholte Serien bleiben Aufgaben, Feiertage nicht", () => {
  // Serie: Standard ist ausgeblendet, ein vorhandener Status des Nutzers gewinnt.
  const serie = { id: "s1", title: "Lutz Feedbackbogen", recurring: true } as any;
- assert.equal(classifyCalendarEvent(serie), "ignoredSoft");
+ assert.equal(classifyCalendarEvent(serie), "task");
  // Feiertag: setzt sich immer durch, auch gegen einen alten Status.
  const feiertag = { id: "f1", title: "Reformationstag" } as any;
  assert.equal(classifyCalendarEvent(feiertag), "ignoredHard");
+});
+
+test("Mein Fokus unterscheidet Handlung, Routine, Reise und Unsicherheit", () => {
+ const ev = (title: string, extra: any = {}) => ({
+  id:"icloud:test:"+title,title,start:"2026-10-03",end:null,allDay:true,location:null,
+  calendar:"Privat",color:"#fff",textColor:"#000",htmlLink:null,...extra
+ }) as any;
+ assert.equal(classifyCalendarFocus(ev("Sommerferien 2026 Hamburg")).kind,"holiday");
+ assert.equal(classifyCalendarFocus(ev("Skiurlaub")).focus,false);
+ assert.equal(classifyCalendarFocus(ev("Normales Karatetraining",{recurring:true,recurrenceRule:"RRULE:FREQ=DAILY"})).kind,"training");
+ assert.equal(classifyCalendarFocus(ev("Punica")).kind,"important_event");
+ assert.equal(classifyCalendarFocus(ev("Lutz Feedbackbogen",{recurring:true,recurrenceRule:"RRULE:FREQ=MONTHLY"})).kind,"deadline");
+ assert.equal(classifyCalendarFocus(ev("Kadertraining")).kind,"important_event");
+ assert.equal(classifyCalendarFocus(ev("Block A")).kind,"possible");
+});
+test("Manuelle Fokuskorrekturen besitzen eine stabile Ähnlichkeitssignatur", () => {
+ assert.equal(calendarFocusSignature("Lutz Feedbackbogen 01.09.2026","Privat"),calendarFocusSignature("Lutz Feedbackbogen 01.10.2026","Privat"));
+ assert.equal(calendarTaskIsInFocus({source:"icloud_calendar",status:"offen",category:manualFocusCategory("important_event")}),true);
+ assert.equal(calendarTaskIsInFocus({source:"icloud_calendar",status:"ignoriert",category:manualFocusCategory("hidden")}),false);
 });
