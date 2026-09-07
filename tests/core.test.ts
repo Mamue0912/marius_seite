@@ -208,3 +208,33 @@ test("iCloud ignoriert leere 404-Platzhalter und greift nicht auf das ganze Doku
  const missing = '<multistatus xmlns="DAV:"><response><href>/123/principal/</href><propstat><prop/></propstat></response></multistatus>';
  assert.equal(hrefInside(missing, "calendar-home-set"), null);
 });
+
+test("iCloud faellt bei 403 auf die Abfrage ohne <expand> zurueck", async () => {
+ const original = globalThis.fetch;
+ const bodies: string[] = [];
+ const dav = (xml: string) => new Response(xml, { status: 207, headers: { "content-type": "application/xml" } });
+ globalThis.fetch = (async (input: any, init: any) => {
+  const url = String(input);
+  const body = String(init?.body || "");
+  if (url === "https://caldav.icloud.com/") {
+   return dav('<multistatus xmlns="DAV:"><response><href>/</href><propstat><prop><current-user-principal><href>/9/principal/</href></current-user-principal></prop></propstat></response></multistatus>');
+  }
+  if (url.endsWith("/9/principal/")) {
+   return dav('<multistatus xmlns="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav"><response><href>/9/principal/</href><propstat><prop><C:calendar-home-set><href>https://p1-caldav.icloud.com/9/calendars/</href></C:calendar-home-set></prop></propstat></response></multistatus>');
+  }
+  if (url === "https://p1-caldav.icloud.com/9/calendars/") {
+   return dav('<multistatus xmlns="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav"><response><href>/9/calendars/privat/</href><propstat><prop><resourcetype><collection/><C:calendar/></resourcetype><displayname>Privat</displayname><C:supported-calendar-component-set><C:comp name="VEVENT"/></C:supported-calendar-component-set></prop></propstat></response></multistatus>');
+  }
+  // REPORT auf den Kalender: Apple verweigert <expand> mit 403.
+  bodies.push(body);
+  if (body.includes("expand")) return new Response("forbidden", { status: 403 });
+  return dav('<multistatus xmlns="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav"><response><href>/9/calendars/privat/a.ics</href><propstat><prop><C:calendar-data>BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:x-1\r\nDTSTART:20260907T100000Z\r\nDTEND:20260907T110000Z\r\nSUMMARY:Training\r\nEND:VEVENT\r\nEND:VCALENDAR</C:calendar-data></prop></propstat></response></multistatus>');
+ }) as any;
+ try {
+  const result = await verifyIcloud("person@icloud.com", "abcd-efgh-ijkl-mnop");
+  assert.equal(result.calendars, 1);
+  // Beide Varianten wurden versucht: erst mit, dann ohne Erweiterung.
+  assert.ok(bodies.some((b) => b.includes("expand")), "erst mit expand");
+  assert.ok(bodies.some((b) => !b.includes("expand")), "dann ohne expand");
+ } finally { globalThis.fetch = original; }
+});

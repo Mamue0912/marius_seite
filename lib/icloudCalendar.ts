@@ -362,12 +362,14 @@ async function fetchCalendarEvents(
   const start = calDavStamp(timeMin), end = calDavStamp(timeMax);
   let xml: string;
   try {
-    xml = await davRequest(cal.url, "REPORT", auth, "1", calendarQuery(start, end, true));
-  } catch (error) {
-    if (error instanceof IcloudAuthError) throw error;
-    // Manche Apple-Kalender lehnen die Erweiterung wiederkehrender Termine ab.
-    // Die normale Abfrage liefert weiterhin Einzeltermine und Serien-Master.
-    xml = await davRequest(cal.url, "REPORT", auth, "1", calendarQuery(start, end, false));
+    xml = await davRequest(cal.url, "REPORT", auth, "1", calendarQuery(start, end, true), "Termine abrufen");
+  } catch {
+    // Apple lehnt die Erweiterung wiederkehrender Termine (<C:expand>) je nach
+    // Kalender ab – und zwar mit 403. Das ist KEIN Zugangsproblem: Die Abfrage
+    // ohne Erweiterung funktioniert weiterhin. Deshalb wird hier bewusst jeder
+    // Fehler des ersten Versuchs überbrückt. Sind die Zugangsdaten wirklich
+    // ungültig, scheitert auch der zweite Versuch und meldet das sauber.
+    xml = await davRequest(cal.url, "REPORT", auth, "1", calendarQuery(start, end, false), "Termine abrufen");
   }
 
   const text = readableText(cal.color);
