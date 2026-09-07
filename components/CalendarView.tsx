@@ -280,58 +280,107 @@ export function daySlot(e: Ev, dayKey: string): { from: number; to: number } | n
 }
 
 type Slot = { e: Ev; from: number; to: number };
-type Packed = Slot & { depth: number };
+type Packed = Slot & { depth: number; column: number; columns: number };
 
-const MAX_DEPTH = 4;
-
-// Überlappende Termine werden übereinander gelegt statt nebeneinander: Der
-// längere Termin liegt hinten und behält seine volle Breite, der kürzere liegt
-// darüber und ist leicht eingerückt. So bleibt der lange Termin als Zeitraum
-// sichtbar und der kurze ist trotzdem klar erkennbar.
-export function packDay(items: Slot[]): Packed[] {
-  // Längster zuerst – dadurch liegen kürzere Termine automatisch weiter oben.
-  const sorted = [...items].sort((a, b) => (b.to - b.from) - (a.to - a.from) || a.from - b.from);
-  const placed: Packed[] = [];
-  for (const item of sorted) {
-    // Einrückung ergibt sich aus der Zahl der bereits liegenden Termine, die
-    // sich zeitlich mit diesem überschneiden.
-    const depth = placed.filter((p) => p.from < item.to && item.from < p.to).length;
-    placed.push({ ...item, depth: Math.min(depth, MAX_DEPTH) });
-  }
-  return placed;
+function overlaps(a: Slot, b: Slot): boolean {
+  return a.from < b.to && b.from < a.to;
+}
+function strictlyContains(outer: Slot, inner: Slot): boolean {
+  return outer.from <= inner.from && outer.to >= inner.to
+    && (outer.from < inner.from || outer.to > inner.to);
+}
+function partialOverlap(a: Slot, b: Slot): boolean {
+  return overlaps(a, b) && !strictlyContains(a, b) && !strictlyContains(b, a);
 }
 
-function EventBlock({ p, hourHeight }: { p: Packed; hourHeight: number }) {
+// Teilweise Überschneidungen erhalten getrennte Spalten. Umschließt ein Termin
+// den anderen vollständig, bleiben beide in derselben Spalte und liegen
+// eingerückt übereinander.
+export function packDay(items: Slot[]): Packed[] {
+  const sorted = [...items].sort((a, b) => a.from - b.from || b.to - a.to);
+  const column = new Map<Slot, number>();
+  const placed: Slot[] = [];
+
+  for (const item of sorted) {
+    let candidate = 0;
+    while (placed.some((other) => column.get(other) === candidate && partialOverlap(other, item))) candidate++;
+    column.set(item, candidate);
+    placed.push(item);
+  }
+
+  const neighbours = new Map<Slot, Slot[]>(items.map((item) => [item, []]));
+  for (let a = 0; a < items.length; a++) {
+    for (let b = a + 1; b < items.length; b++) {
+      if (!partialOverlap(items[a], items[b])) continue;
+      neighbours.get(items[a])!.push(items[b]);
+      neighbours.get(items[b])!.push(items[a]);
+    }
+  }
+
+  const columns = new Map<Slot, number>();
+  const seen = new Set<Slot>();
+  for (const item of items) {
+    if (seen.has(item)) continue;
+    const component: Slot[] = [];
+    const queue = [item];
+    seen.add(item);
+    while (queue.length) {
+      const current = queue.shift()!;
+      component.push(current);
+      for (const next of neighbours.get(current) || []) {
+        if (!seen.has(next)) { seen.add(next); queue.push(next); }
+      }
+    }
+    const count = Math.max(1, ...component.map((entry) => (column.get(entry) || 0) + 1));
+    for (const entry of component) columns.set(entry, count);
+  }
+
+  return sorted.map((item) => ({
+    ...item,
+    depth: Math.min(items.filter((other) => other !== item && strictlyContains(other, item)).length, 4),
+    column: column.get(item) || 0,
+    columns: columns.get(item) || 1
+  }));
+}
+
+function EventBlock({ p, hourHeight, startMinute }: { p: Packed; hourHeight: number; startMinute: number }) {
   const e = p.e;
-  const height = Math.max(15, ((p.to - p.from) / 60) * hourHeight - 2);
-  // Einrückung je Überlappungsebene: Der darunterliegende, längere Termin
-  // bleibt am linken Rand sichtbar.
-  const inset = p.depth * 14;
+  const visibleFrom = Math.max(p.from, startMinute);
+  const visibleTo = Math.min(p.to, 24 * 60);
+  if (visibleTo <= visibleFrom) return null;
+  const height = Math.max(20, ((visibleTo - visibleFrom) / 60) * hourHeight - 2);
+  const compact = height < 32;
+  const laneWidth = 100 / p.columns;
+  const inset = p.depth * 10;
   const style: React.CSSProperties = {
-    top: (p.from / 60) * hourHeight,
+    top: ((visibleFrom - startMinute) / 60) * hourHeight,
     height,
-    left: inset + 2,
-    width: `calc(100% - ${inset + 6}px)`,
-    // Leicht durchscheinend, damit die Stundenlinien und ein darunterliegender
-    // Termin sichtbar bleiben.
-    background: `color-mix(in srgb, ${e.color} 74%, transparent)`,
-    borderColor: `color-mix(in srgb, ${e.color} 92%, transparent)`,
+    left: `calc(${laneWidth * p.column}% + ${inset + 2}px)`,
+    width: `calc(${laneWidth}% - ${inset + 5}px)`,
+    background: `color-mix(in srgb, ${e.color} 82%, var(--surface))`,
+    borderColor: `color-mix(in srgb, ${e.color} 94%, transparent)`,
     color: e.textColor,
     zIndex: 2 + p.depth
   };
   const from = new Date(e.start).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
   const to = e.end ? new Date(e.end).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) : "";
   const label = `${from}${to ? "–" + to : ""} · ${e.title}${e.location ? " · " + e.location : ""}`;
-  const inner = (
+  const inner = compact ? (
+    <>
+      <span className="cal-tgev-s">{e.title}</span>
+      <span className="cal-tgev-t">{from}</span>
+    </>
+  ) : (
     <>
       <span className="cal-tgev-t">{from}</span>
       <span className="cal-tgev-s">{e.title}</span>
     </>
   );
   const href = e.htmlLink || (e.taskId ? "/tasks?open=" + encodeURIComponent(e.taskId) : null);
+  const className = "cal-tgev" + (compact ? " compact" : "");
   return href
-    ? <a className="cal-tgev" style={style} title={label} href={href} target={e.htmlLink ? "_blank" : undefined} rel={e.htmlLink ? "noopener noreferrer" : undefined}>{inner}</a>
-    : <div className="cal-tgev" style={style} title={label}>{inner}</div>;
+    ? <a className={className} style={style} title={label} href={href} target={e.htmlLink ? "_blank" : undefined} rel={e.htmlLink ? "noopener noreferrer" : undefined}>{inner}</a>
+    : <div className={className} style={style} title={label}>{inner}</div>;
 }
 
 export function TimelineView({ anchor, dayCount, byDay, todayKey, loading }: any) {
@@ -350,55 +399,36 @@ export function TimelineView({ anchor, dayCount, byDay, todayKey, loading }: any
     } catch { /* Speicherzugriff kann blockiert sein */ }
     return HOUR_DEFAULT;
   });
+  const [startHour, setStartHour] = useState<0 | 6>(6);
   const scrollRef = useRef<HTMLDivElement>(null);
   const hhRef = useRef(hourHeight);
-  // Sobald der Nutzer selbst scrollt, wird die Startposition nicht mehr gesetzt.
-  const userScrolled = useRef(false);
-  const placedFor = useRef<number | null>(null);
+  const startHourRef = useRef(startHour);
+
   useEffect(() => {
     hhRef.current = hourHeight;
     try { localStorage.setItem("calHourHeight", String(hourHeight)); } catch { /* egal */ }
   }, [hourHeight]);
+  useEffect(() => { startHourRef.current = startHour; }, [startHour]);
 
-  // Strg/Cmd + Mausrad skaliert die Zeitachse; der Punkt unter dem Zeiger
-  // bleibt dabei stehen. Das blanke Mausrad scrollt ganz normal, damit die
-  // Stunden oberhalb des Sichtbereichs erreichbar bleiben. Der Listener wird
-  // bewusst selbst registriert (passive: false), weil React Rad-Ereignisse
-  // sonst passiv behandelt und preventDefault wirkungslos bliebe.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const onWheel = (ev: WheelEvent) => {
-      // Über dem Kalender skaliert das Mausrad die Zeitachse. Neben dem
-      // Kalender scrollt die Seite wie gewohnt – dieser Listener hängt nur am
-      // Raster, außerhalb wird nichts abgefangen.
-      // Shift + Rad bleibt als Weg zum Scrollen innerhalb des Rasters.
-      if (ev.shiftKey) { userScrolled.current = true; return; }
+      if (ev.shiftKey) return;
       ev.preventDefault();
       const h = hhRef.current;
       const next = Math.min(HOUR_MAX, Math.max(HOUR_MIN, Math.round(ev.deltaY < 0 ? h * 1.12 : h / 1.12)));
       if (next === h) return;
       const y = ev.clientY - el.getBoundingClientRect().top;
-      const minutes = ((el.scrollTop + y) / h) * 60;
+      const startMinutes = startHourRef.current * 60;
+      const minutes = startMinutes + ((el.scrollTop + y) / h) * 60;
       setHourHeight(next);
-      requestAnimationFrame(() => { el.scrollTop = Math.max(0, (minutes / 60) * next - y); });
+      requestAnimationFrame(() => { el.scrollTop = Math.max(0, ((minutes - startMinutes) / 60) * next - y); });
     };
-    // Auch Ziehen an der Bildlaufleiste oder Tastaturscrollen zählt als
-    // eigene Entscheidung des Nutzers.
-    const markManual = () => { userScrolled.current = true; };
     el.addEventListener("wheel", onWheel, { passive: false });
-    el.addEventListener("pointerdown", markManual, { passive: true });
-    el.addEventListener("keydown", markManual);
-    return () => {
-      el.removeEventListener("wheel", onWheel);
-      el.removeEventListener("pointerdown", markManual);
-      el.removeEventListener("keydown", markManual);
-    };
+    return () => el.removeEventListener("wheel", onWheel);
   }, []);
 
-  // Startposition: der Tag beginnt sichtbar um 6 Uhr. Liegt in der Woche ein
-  // Termin früher, wird so weit nach oben gerückt, dass auch dieser zu sehen
-  // ist – nichts soll oberhalb des Sichtbereichs verborgen bleiben.
   const earliestMin = useMemo(() => {
     let earliest = 6 * 60;
     for (const d of days) {
@@ -411,36 +441,6 @@ export function TimelineView({ anchor, dayCount, byDay, todayKey, loading }: any
     return Math.max(0, earliest);
   }, [days, byDay]);
 
-  // Ein Durchlauf nach dem ersten Layout: erst dann hat der Scrollbereich eine
-  // Höhe und lässt sich überhaupt positionieren.
-  const [layoutReady, setLayoutReady] = useState(false);
-  useEffect(() => {
-    const raf = requestAnimationFrame(() => setLayoutReady(true));
-    return () => cancelAnimationFrame(raf);
-  }, []);
-
-  // Beim Wochenwechsel wird die Startposition neu bestimmt.
-  useEffect(() => { userScrolled.current = false; placedFor.current = null; }, [anchorTime]);
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el || userScrolled.current || placedFor.current === earliestMin) return;
-    // Etwas Luft über dem frühesten Eintrag, damit er nicht am Rand klebt.
-    const target = Math.max(0, (earliestMin / 60) * hourHeight - 8);
-    // Vor dem ersten Layout ist der Bereich noch nicht scrollbar; ein Setzen
-    // von scrollTop würde dann auf 0 zurückfallen und – weil die Position als
-    // erledigt vermerkt wäre – nie wiederholt. Deshalb wird erst nach dem
-    // Layout gesetzt und nur bei tatsächlichem Erfolg vermerkt.
-    const apply = () => {
-      if (!el || userScrolled.current) return;
-      el.scrollTop = target;
-      if (Math.abs(el.scrollTop - target) < 2) placedFor.current = earliestMin;
-    };
-    apply();
-    const raf1 = requestAnimationFrame(() => { apply(); });
-    const raf2 = requestAnimationFrame(() => { apply(); });
-    return () => { cancelAnimationFrame(raf1); cancelAnimationFrame(raf2); };
-  }, [earliestMin, hourHeight, layoutReady]);
-
   const [nowMin, setNowMin] = useState(() => { const n = new Date(); return n.getHours() * 60 + n.getMinutes(); });
   useEffect(() => {
     const t = setInterval(() => { const n = new Date(); setNowMin(n.getHours() * 60 + n.getMinutes()); }, 60000);
@@ -448,9 +448,14 @@ export function TimelineView({ anchor, dayCount, byDay, todayKey, loading }: any
   }, []);
 
   const hasAllDay = days.some((d) => ((byDay[ymd(d)] || []) as Ev[]).some((e) => e.allDay));
-
   const hasEarly = earliestMin < 6 * 60;
+  const startMinute = startHour * 60;
+  const visibleHours = HOURS.slice(startHour);
   const gridStyle = { "--cal-days": dayCount } as React.CSSProperties;
+  const setVisibleStart = (hour: 0 | 6) => {
+    setStartHour(hour);
+    requestAnimationFrame(() => { if (scrollRef.current) scrollRef.current.scrollTop = 0; });
+  };
 
   return (
     <div className={"cal-tg" + (dayCount === 1 ? " day" : "")} style={gridStyle}>
@@ -485,9 +490,9 @@ export function TimelineView({ anchor, dayCount, byDay, todayKey, loading }: any
       )}
 
       <div className="cal-tg-scroll" ref={scrollRef}>
-        <div className="cal-tg-body" style={{ height: 24 * hourHeight }}>
+        <div className="cal-tg-body" style={{ height: (24 - startHour) * hourHeight }}>
           <div className="cal-tg-axis">
-            {HOURS.map((h) => (
+            {visibleHours.map((h) => (
               <div key={h} className="cal-tg-hour" style={{ height: hourHeight }}>
                 <span>{String(h).padStart(2, "0")}:00</span>
               </div>
@@ -496,14 +501,14 @@ export function TimelineView({ anchor, dayCount, byDay, todayKey, loading }: any
           {days.map((d) => {
             const k = ymd(d);
             const slots = ((byDay[k] || []) as Ev[])
-              .map((e) => { const s = daySlot(e, k); return s ? { e, from: s.from, to: s.to } : null; })
+              .map((e) => { const s = daySlot(e, k); return s && s.to > startMinute ? { e, from: s.from, to: s.to } : null; })
               .filter((x): x is Slot => x !== null);
             const packed = packDay(slots);
             return (
               <div key={k} className={"cal-tg-col" + (k === todayKey ? " today" : "")}>
-                {HOURS.map((h) => <div key={h} className="cal-tg-line" style={{ top: h * hourHeight }} />)}
-                {k === todayKey && <div className="cal-tg-now" style={{ top: (nowMin / 60) * hourHeight }} />}
-                {!loading && packed.map((p) => <EventBlock key={p.e.id} p={p} hourHeight={hourHeight} />)}
+                {visibleHours.map((h) => <div key={h} className="cal-tg-line" style={{ top: (h - startHour) * hourHeight }} />)}
+                {k === todayKey && nowMin >= startMinute && <div className="cal-tg-now" style={{ top: ((nowMin - startMinute) / 60) * hourHeight }} />}
+                {!loading && packed.map((p) => <EventBlock key={p.e.id} p={p} hourHeight={hourHeight} startMinute={startMinute} />)}
               </div>
             );
           })}
@@ -511,9 +516,9 @@ export function TimelineView({ anchor, dayCount, byDay, todayKey, loading }: any
       </div>
 
       <div className="cal-tg-hint">
-        <span>{hasEarly ? "Ein Termin beginnt vor 06:00 Uhr; die Nachtstunden wurden automatisch eingeblendet." : "Standardzeitraum 06:00–24:00 Uhr"}</span>
-        <button type="button" className="cal-night-toggle" onClick={() => { userScrolled.current = true; if (scrollRef.current) scrollRef.current.scrollTop = 0; }}>Nacht zeigen</button>
-        <button type="button" className="cal-night-toggle" onClick={() => { userScrolled.current = true; if (scrollRef.current) scrollRef.current.scrollTop = 6 * hourHeight; }}>Ab 06:00</button>
+        <span>{startHour === 0 ? "Nachtstunden 00:00–24:00 Uhr sichtbar." : hasEarly ? "Ein Termin beginnt vor 06:00 Uhr. Über „Nacht zeigen“ bleibt er erreichbar." : "Sichtbarer Zeitraum 06:00–24:00 Uhr."}</span>
+        <button type="button" className="cal-night-toggle" aria-pressed={startHour === 0} onClick={() => setVisibleStart(0)}>Nacht zeigen</button>
+        <button type="button" className="cal-night-toggle" aria-pressed={startHour === 6} onClick={() => setVisibleStart(6)}>Ab 06:00</button>
         <span className="cal-tg-zoom">
           <button type="button" onClick={() => setHourHeight((h) => Math.max(HOUR_MIN, Math.round(h / 1.25)))} aria-label="Zeitskala verkleinern">−</button>
           <button type="button" onClick={() => setHourHeight(HOUR_DEFAULT)}>Standard</button>
