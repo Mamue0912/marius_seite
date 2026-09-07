@@ -4,7 +4,7 @@ import { dayDistance, taskBucket } from "../lib/taskDates";
 import { mapLimit } from "../lib/concurrency";
 import { messageContentKey } from "../lib/mailKeys";
 import { requestJson } from "../lib/http";
-import { extractCalendarData, parseIcsEvents, normalizeColor, readableText, verifyIcloud, IcloudAuthError } from "../lib/icloudCalendar";
+import { extractCalendarData, parseIcsEvents, normalizeColor, readableText, verifyIcloud, IcloudAuthError, hrefInside } from "../lib/icloudCalendar";
 import { calendarEventTaskRecord, staleExternalIds } from "../lib/calendarTaskSync";
 import { safeInternalPath } from "../lib/safeNavigation";
 import { isPrivateAddress, resolvePublicNetworkEndpoint } from "../lib/safeRemote";
@@ -189,4 +189,22 @@ test("iCloud weicht auf /.well-known/caldav aus, wenn der Stamm 403 liefert", as
   assert.equal(result.calendars, 1);
   assert.ok(seen.includes("https://caldav.icloud.com/.well-known/caldav"), "Fallback-Pfad muss versucht werden");
  } finally { globalThis.fetch = original; }
+});
+
+test("iCloud ignoriert leere 404-Platzhalter und greift nicht auf das ganze Dokument zurück", () => {
+ // Apple liefert nicht gefundene Eigenschaften als leere Platzhalter in einem
+ // eigenen propstat. Frueher fing das Muster diesen Platzhalter mit ein bzw.
+ // fiel auf das ganze Dokument zurueck - und lieferte dann die Principal-URL
+ // aus dem <response>-href. Ein Depth-1-PROPFIND darauf ergibt bei Apple 403.
+ const xml = [
+  '<multistatus xmlns="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">',
+  '<response><href>/123/principal/</href>',
+  '<propstat><prop><C:calendar-home-set/></prop><status>HTTP/1.1 404 Not Found</status></propstat>',
+  '<propstat><prop><C:calendar-home-set><href>https://p52-caldav.icloud.com/123/calendars/</href></C:calendar-home-set></prop><status>HTTP/1.1 200 OK</status></propstat>',
+  '</response></multistatus>'
+ ].join("");
+ assert.equal(hrefInside(xml, "calendar-home-set"), "https://p52-caldav.icloud.com/123/calendars/");
+ // Fehlt die Eigenschaft ganz, darf NICHT die Antwort-URL zurueckkommen.
+ const missing = '<multistatus xmlns="DAV:"><response><href>/123/principal/</href><propstat><prop/></propstat></response></multistatus>';
+ assert.equal(hrefInside(missing, "calendar-home-set"), null);
 });

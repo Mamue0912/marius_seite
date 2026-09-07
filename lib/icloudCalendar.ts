@@ -107,15 +107,29 @@ export function decodeDavEntities(s: string): string {
     .replace(/&amp;/g, "&");
 }
 
-// Ersten <href> innerhalb des Elements, dessen Name `contains` enthält.
-function hrefInside(xml: string, contains: string): string | null {
-  const block = new RegExp(
-    `<[^>]*${contains}[^>]*>([\\s\\S]*?)</[^>]*${contains}[^>]*>`,
-    "i"
-  ).exec(xml);
-  const scope = block ? block[1] : xml;
-  const href = /<[^>]*href[^>]*>([\s\S]*?)<\/[^>]*href>/i.exec(scope);
-  return href ? decodeDavEntities(href[1].trim()) : null;
+// Ersten <href> innerhalb des Elements `contains` liefern.
+//
+// Zwei Fallstricke, die hier bewusst vermieden werden:
+//  - Apple schickt im 404-Teil der Antwort leere Platzhalter (<C:calendar-home-set/>).
+//    Ein Muster wie <[^>]*name[^>]*> matcht diese mit und fängt dadurch einen
+//    viel zu großen Bereich ein. Deshalb werden nur Elemente MIT Inhalt gesucht.
+//  - Findet sich das Element nicht, darf NICHT auf das ganze Dokument
+//    ausgewichen werden: Sonst gewinnt der <href> des <response>-Elements
+//    (die angefragte URL selbst) und wir folgen der falschen Adresse.
+export function hrefInside(xml: string, contains: string): string | null {
+  const re = new RegExp(
+    `<(?:[a-z_][\\w.-]*:)?${contains}\\b[^>]*(?<!/)>([\\s\\S]*?)</(?:[a-z_][\\w.-]*:)?${contains}\\s*>`,
+    "gi"
+  );
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(xml))) {
+    const href = /<[^>]*href[^>]*>([\s\S]*?)<\/[^>]*href>/i.exec(match[1]);
+    if (href) {
+      const value = decodeDavEntities(href[1].trim());
+      if (value) return value;
+    }
+  }
+  return null;
 }
 
 // Ein Multistatus-Dokument in einzelne <response>-Blöcke zerlegen.
@@ -167,7 +181,14 @@ async function discoverHome(appleId: string, appPassword: string): Promise<strin
   );
   const homeHref = hrefInside(homeXml, "calendar-home-set");
   if (!homeHref) throw new Error("Apple hat keinen Kalenderbereich (calendar-home-set) zurückgegeben.");
-  return new URL(homeHref, principalUrl).toString();
+  const homeUrl = new URL(homeHref, principalUrl).toString();
+  // Sicherung: Zeigt das Ergebnis wieder auf den Principal, wurde die falsche
+  // Adresse gelesen. Ein Depth-1-PROPFIND darauf beantwortet Apple mit 403 –
+  // das wäre als "Zugriff gesperrt" missverständlich.
+  if (homeUrl.replace(/\/$/, "") === principalUrl.replace(/\/$/, "")) {
+    throw new Error("Kalenderbereich konnte nicht bestimmt werden (Antwort verwies auf das Benutzerkonto).");
+  }
+  return homeUrl;
 }
 
 interface CalCollection {
@@ -185,7 +206,8 @@ async function listCalendars(homeUrl: string, auth: string): Promise<CalCollecti
     "1",
     `<?xml version="1.0" encoding="utf-8"?><d:propfind ${NS_D} ${NS_C} ${NS_A}><d:prop>` +
       `<d:resourcetype/><d:displayname/><a:calendar-color/><c:supported-calendar-component-set/>` +
-      `</d:prop></d:propfind>`
+      `</d:prop></d:propfind>`,
+    "Kalenderliste abrufen"
   );
   const out: CalCollection[] = [];
   for (const r of responses(xml)) {
