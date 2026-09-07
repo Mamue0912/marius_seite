@@ -272,46 +272,44 @@ function daySlot(e: Ev, dayKey: string): { from: number; to: number } | null {
 }
 
 type Slot = { e: Ev; from: number; to: number };
-type Packed = Slot & { col: number; cols: number };
+type Packed = Slot & { depth: number };
 
-// Überlappende Termine nebeneinander legen: zusammenhängende Gruppen bilden und
-// innerhalb jeder Gruppe Spalten vergeben.
-function packDay(items: Slot[]): Packed[] {
-  const sorted = [...items].sort((a, b) => a.from - b.from || a.to - b.to);
-  const out: Packed[] = [];
-  let group: Slot[] = [];
-  let groupEnd = -1;
-  const flush = () => {
-    if (!group.length) return;
-    const ends: number[] = [];
-    const placed = group.map((it) => {
-      let col = ends.findIndex((end) => end <= it.from);
-      if (col === -1) { col = ends.length; ends.push(it.to); } else ends[col] = it.to;
-      return { ...it, col };
-    });
-    for (const p of placed) out.push({ ...p, cols: ends.length });
-    group = []; groupEnd = -1;
-  };
-  for (const it of sorted) {
-    if (group.length && it.from >= groupEnd) flush();
-    group.push(it);
-    groupEnd = Math.max(groupEnd, it.to);
+const MAX_DEPTH = 4;
+
+// Überlappende Termine werden übereinander gelegt statt nebeneinander: Der
+// längere Termin liegt hinten und behält seine volle Breite, der kürzere liegt
+// darüber und ist leicht eingerückt. So bleibt der lange Termin als Zeitraum
+// sichtbar und der kurze ist trotzdem klar erkennbar.
+export function packDay(items: Slot[]): Packed[] {
+  // Längster zuerst – dadurch liegen kürzere Termine automatisch weiter oben.
+  const sorted = [...items].sort((a, b) => (b.to - b.from) - (a.to - a.from) || a.from - b.from);
+  const placed: Packed[] = [];
+  for (const item of sorted) {
+    // Einrückung ergibt sich aus der Zahl der bereits liegenden Termine, die
+    // sich zeitlich mit diesem überschneiden.
+    const depth = placed.filter((p) => p.from < item.to && item.from < p.to).length;
+    placed.push({ ...item, depth: Math.min(depth, MAX_DEPTH) });
   }
-  flush();
-  return out;
+  return placed;
 }
 
 function EventBlock({ p, hourHeight }: { p: Packed; hourHeight: number }) {
   const e = p.e;
-  const width = 100 / p.cols;
   const height = Math.max(15, ((p.to - p.from) / 60) * hourHeight - 2);
+  // Einrückung je Überlappungsebene: Der darunterliegende, längere Termin
+  // bleibt am linken Rand sichtbar.
+  const inset = p.depth * 14;
   const style: React.CSSProperties = {
     top: (p.from / 60) * hourHeight,
     height,
-    left: `calc(${p.col * width}% + 2px)`,
-    width: `calc(${width}% - 4px)`,
-    background: e.color,
-    color: e.textColor
+    left: inset + 2,
+    width: `calc(100% - ${inset + 6}px)`,
+    // Leicht durchscheinend, damit die Stundenlinien und ein darunterliegender
+    // Termin sichtbar bleiben.
+    background: `color-mix(in srgb, ${e.color} 74%, transparent)`,
+    borderColor: `color-mix(in srgb, ${e.color} 92%, transparent)`,
+    color: e.textColor,
+    zIndex: 2 + p.depth
   };
   const from = new Date(e.start).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
   const to = e.end ? new Date(e.end).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) : "";
