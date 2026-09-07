@@ -146,3 +146,25 @@ input::placeholder, textarea::placeholder { color: var(--faint); }
 }
 
 @media (max-width: 760px) { .settings-rule-form { grid-template-columns: 1fr !important; } .folder-edit, .folder-create { flex-wrap: wrap; } .folder-edit .fe-name, .folder-create .fe-name { flex: 1 1 100%; } }
+
+
+/* Gemeinsame Ansicht für Aufgaben, Fristen und synchronisierte Termine */
+.task-add-unified { grid-template-columns: minmax(260px, 1.7fr) 145px 110px 145px 120px; }
+.task-add-unified .task-copy-fields { grid-column: span 2; }
+.task-no-date { align-self: end; min-height: 40px; justify-content: center; }
+.task-filter-unified input[type="search"] { min-width: min(100%, 280px); flex: 1 1 280px; }
+.task-filter-unified select { min-width: 145px; }
+.task.imported { border-left: 3px solid var(--accent); }
+.task.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.task-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.task-meta span + span::before { content: "·"; margin-right: 10px; color: var(--faint); }
+@media (max-width: 900px) {
+  .task-add-unified { grid-template-columns: 1fr 1fr; }
+  .task-add-unified .task-copy-fields { grid-column: 1 / -1; }
+}
+@media (max-width: 620px) {
+  .task-add-unified { grid-template-columns: 1fr; }
+  .task-add-unified .task-copy-fields { grid-column: auto; }
+  .task-filter-unified > * { width: 100%; }
+  .task { align-items: flex-start; }
+}

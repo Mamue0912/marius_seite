@@ -1,12 +1,13 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { calStore, calCovered, calFetchWindow } from "@/lib/calendarStore";
+import { calStore, calCovered, calFetchWindow, calInvalidate, CalSourceState } from "@/lib/calendarStore";
 import { requestJson } from "@/lib/http";
 
 interface Ev {
   id: string; title: string; start: string; end: string | null;
   allDay: boolean; location: string | null; calendar: string;
   color: string; textColor: string; htmlLink: string | null;
+  description?: string | null; source?: "google" | "icloud"; taskId?: string | null;
 }
 type View = "month" | "week" | "year" | "agenda";
 
@@ -53,7 +54,7 @@ function mondayOf(d: Date): Date {
   const m = new Date(d); m.setDate(d.getDate() - off); m.setHours(0, 0, 0, 0); return m;
 }
 
-export default function CalendarView({ initialEmail }: { initialEmail?: string | null }) {
+export default function CalendarView({ initialEmail, hasGoogle = false }: { initialEmail?: string | null; hasGoogle?: boolean }) {
   const [cursor, setCursor] = useState(() => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), 1); });
   const [weekAnchor, setWeekAnchor] = useState(() => mondayOf(new Date()));
   // Aus dem seitenübergreifenden Cache initialisieren → sofortige Anzeige,
@@ -65,6 +66,9 @@ export default function CalendarView({ initialEmail }: { initialEmail?: string |
   const [view, setView] = useState<View>("month");
   const [selected, setSelected] = useState<string>(() => ymd(new Date()));
   const [disconnecting, setDisconnecting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [sources, setSources] = useState<Record<string, CalSourceState>>({});
+  const [taskSyncError, setTaskSyncError] = useState<string | null>(null);
 
   async function disconnect() {
     if (disconnecting || !confirm("Google-Kalender wirklich trennen?")) return;
@@ -103,16 +107,18 @@ export default function CalendarView({ initialEmail }: { initialEmail?: string |
     return { min, max };
   }
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
     const visMin = range.min.getTime(), visMax = range.max.getTime();
     // Bereits im Cache → sofort anzeigen, kein Netzwerk, kein Spinner.
-    if (calCovered(visMin, visMax)) { setEvents(calStore().events as Ev[]); setLoading(false); return; }
+    if (!force && calCovered(visMin, visMax)) { setEvents(calStore().events as Ev[]); setLoading(false); return; }
     const win = windowFor();
     // Stale-while-revalidate: vorhandene Termine sichtbar lassen; Spinner nur,
     // wenn noch gar nichts geladen ist.
     if (!calStore().events.length) setLoading(true);
     setError(null); setNeedsReauth(false);
     const r = await calFetchWindow(win.min, win.max);
+    if (r.sources) setSources(r.sources);
+    setTaskSyncError(r.taskSyncError || null);
     if (r.needsReauth) setNeedsReauth(true);
     else if (r.error) setError(r.error);
     setEvents(calStore().events as Ev[]);
@@ -120,7 +126,14 @@ export default function CalendarView({ initialEmail }: { initialEmail?: string |
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range, view, cursor]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
+
+  async function refresh() {
+    setRefreshing(true);
+    calInvalidate();
+    try { await load(true); }
+    finally { setRefreshing(false); }
+  }
 
   const byDay = useMemo(() => {
     const m: Record<string, Ev[]> = {};
@@ -143,6 +156,9 @@ export default function CalendarView({ initialEmail }: { initialEmail?: string |
     setCursor(new Date(n.getFullYear(), n.getMonth(), 1));
     setWeekAnchor(mondayOf(n)); setSelected(ymd(n));
   }
+  const icloudLastSync = sources.icloud?.lastSyncedAt
+    ? new Date(sources.icloud.lastSyncedAt).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" })
+    : null;
   const title = view === "year" ? String(cursor.getFullYear())
     : view === "week"
       ? (() => { const e = new Date(weekAnchor); e.setDate(e.getDate() + 6); return `${weekAnchor.getDate()}.–${e.getDate()}. ${MON[e.getMonth()]} ${e.getFullYear()}`; })()
@@ -166,12 +182,19 @@ export default function CalendarView({ initialEmail }: { initialEmail?: string |
               </button>
             ))}
           </div>
-          <button className="cal-disc" onClick={disconnect} disabled={disconnecting}>{disconnecting ? "…" : "Trennen"}</button>
+          <button type="button" className="cal-today" onClick={() => void refresh()} disabled={refreshing}>{refreshing ? "Aktualisiert…" : "Aktualisieren"}</button>
+          {hasGoogle && <button type="button" className="cal-disc" onClick={disconnect} disabled={disconnecting}>{disconnecting ? "…" : "Google trennen"}</button>}
         </div>
       </div>
 
+      {loading && initialEmail && <div className="cal-note">Verbindung wird geprüft und Termine werden synchronisiert…</div>}
       {needsReauth && <div className="cal-note bad">Die Google-Verbindung ist abgelaufen. <a href="/api/auth/google">Erneut verbinden</a></div>}
       {error && <div className="cal-note bad">Kalender konnte nicht geladen werden: {error}</div>}
+      {sources.icloud?.state === "connected" && <div className="cal-note ok">iCloud erfolgreich synchronisiert · {sources.icloud.events || 0} Termine aus {sources.icloud.selectedCalendars || 0} Kalendern im geladenen Zeitraum{icloudLastSync ? ` · Stand ${icloudLastSync}` : ""}.</div>}
+      {sources.icloud?.state === "empty" && <div className="cal-note">iCloud ist verbunden. Im gewählten Zeitraum wurden keine Termine gefunden{icloudLastSync ? ` · Stand ${icloudLastSync}` : ""}.</div>}
+      {sources.icloud?.state === "no_calendars" && <div className="cal-note bad">iCloud ist verbunden, aber es ist kein Kalender für die Synchronisierung ausgewählt.</div>}
+      {sources.icloud?.state === "needs_reauth" && <div className="cal-note bad">Die iCloud-Zugangsdaten oder Berechtigung sind nicht mehr gültig. Bitte iCloud unten erneut verbinden.</div>}
+      {taskSyncError && <div className="cal-note bad">{taskSyncError}</div>}
 
       {view === "month" && <MonthView cursor={cursor} byDay={byDay} todayKey={todayKey} selected={selected} setSelected={setSelected} loading={loading} />}
       {view === "week" && <WeekView anchor={weekAnchor} byDay={byDay} todayKey={todayKey} loading={loading} />}
@@ -334,7 +357,7 @@ function EventRow({ e }: { e: Ev }) {
       </span>
     </>
   );
-  return e.htmlLink
-    ? <a className="cal-ev" href={e.htmlLink} target="_blank" rel="noopener noreferrer">{body}</a>
-    : <div className="cal-ev">{body}</div>;
+  if (e.htmlLink) return <a className="cal-ev" href={e.htmlLink} target="_blank" rel="noopener noreferrer">{body}</a>;
+  if (e.taskId) return <a className="cal-ev" href={`/tasks?open=${encodeURIComponent(e.taskId)}`}>{body}</a>;
+  return <div className="cal-ev">{body}</div>;
 }

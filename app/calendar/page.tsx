@@ -17,7 +17,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
   const admin = supabaseAdmin();
   const [googleResult, icloudResult] = await Promise.all([
     admin.from("google_accounts").select("email,status").eq("user_id", user.id).maybeSingle(),
-    admin.from("icloud_accounts").select("apple_id,status").eq("user_id", user.id).maybeSingle()
+    admin.from("icloud_accounts").select("*").eq("user_id", user.id).maybeSingle()
   ]);
   const gAcc = googleResult.data;
   const iAcc = icloudResult.data;
@@ -44,7 +44,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
 
           {anyConnected ? (
             <>
-              <CalendarView initialEmail={gAcc?.email || iAcc?.apple_id} />
+              <CalendarView initialEmail={gAcc?.email || iAcc?.apple_id} hasGoogle={gConnected} />
 
               <div className="bucket" style={{ marginTop: 16 }}>
                 <div className="bh"><span className="bt">Kalenderquellen</span></div>
@@ -53,7 +53,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
                 ) : (
                   configured && <div className="mail"><a className="btn small" href="/api/auth/google">Google-Kalender verbinden</a></div>
                 )}
-                <IcloudConnect connected={iConnected} appleId={iAcc?.apple_id} compact />
+                <IcloudConnect connected={iConnected && iAcc?.status === "connected"} appleId={iAcc?.apple_id} compact />
               </div>
             </>
           ) : (

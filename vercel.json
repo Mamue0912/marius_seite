@@ -1,11 +1,27 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "crons": [
-    { "path": "/api/cron/mail-sync", "schedule": "0 5 * * *" }
+    {
+      "path": "/api/cron/mail-sync",
+      "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/cron/calendar-sync",
+      "schedule": "15 5 * * *"
+    }
   ],
   "functions": {
-    "app/api/mail/connect/route.ts": { "maxDuration": 60 },
-    "app/api/mail/sync/route.ts": { "maxDuration": 60 },
-    "app/api/cron/mail-sync/route.ts": { "maxDuration": 60 }
+    "app/api/mail/connect/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/mail/sync/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/cron/mail-sync/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/cron/calendar-sync/route.ts": {
+      "maxDuration": 60
+    }
   }
 }

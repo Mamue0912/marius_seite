@@ -42,7 +42,11 @@ export async function POST(req: NextRequest) {
     if (e instanceof IcloudAuthError) {
       return NextResponse.json({ error: e.message }, { status: 400 });
     }
-    return NextResponse.json({ error: `Verbindung fehlgeschlagen: ${(e as Error).message}` }, { status: 502 });
+    const message = (e as Error).message;
+    const safe = message.includes("keine Kalender") || message.includes("keinen Kalender")
+      ? message
+      : "Apple-Kalender konnten nicht gelesen werden. Bitte App-Passwort und Kalenderberechtigung prüfen.";
+    return NextResponse.json({ error: safe }, { status: 502 });
   }
 
   const { error } = await supabaseAdmin()

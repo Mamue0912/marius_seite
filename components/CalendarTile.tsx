@@ -20,7 +20,7 @@ function upcoming(): CalEvent[] {
 }
 
 export default function CalendarTile() {
-  const [state, setState] = useState<"loading" | "connected" | "off" | "reauth">(() => calStore().events.length ? "connected" : "loading");
+  const [state, setState] = useState<"loading" | "connected" | "off" | "reauth" | "error">(() => calStore().events.length ? "connected" : "loading");
   const [events, setEvents] = useState<CalEvent[]>(() => upcoming());
 
   useEffect(() => {
@@ -28,8 +28,9 @@ export default function CalendarTile() {
     calFetchWindow(win.min, win.max).then((r) => {
       if (!r.connected) setState("off");
       else if (r.needsReauth) setState("reauth");
+      else if (r.error && !calStore().events.length) setState("error");
       else { setState("connected"); setEvents(upcoming()); }
-    }).catch(() => setState("off"));
+    }).catch(() => setState("error"));
   }, []);
 
   return (
@@ -37,7 +38,8 @@ export default function CalendarTile() {
       <div className="tile-h"><span className="tile-ic"><Icon name="calendar" /></span><span className="tile-t">Kalender</span><span className="tile-go"><Icon name="arrow" size={16} /></span></div>
       {state === "loading" && <div className="tile-empty">lädt…</div>}
       {state === "off" && <div className="tile-empty">Kalender verbinden (Google oder iCloud), um Termine hier zu sehen.</div>}
-      {state === "reauth" && <div className="tile-empty">Google-Verbindung abgelaufen – neu verbinden.</div>}
+      {state === "reauth" && <div className="tile-empty">Kalender-Verbindung abgelaufen – neu verbinden.</div>}
+      {state === "error" && <div className="tile-empty">Termine konnten nicht aktualisiert werden. Im Kalender stehen Details und eine erneute Aktualisierung bereit.</div>}
       {state === "connected" && (events.length === 0
         ? <div className="tile-empty">Keine anstehenden Termine.</div>
         : events.map((e) => (

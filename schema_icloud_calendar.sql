@@ -9,6 +9,8 @@ create table if not exists public.icloud_accounts (
   calendar_home_url text,                    -- via CalDAV-Discovery ermittelt (Cache)
   status text not null default 'connected',  -- connected | needs_reauth
   last_error text,
+  last_synced_at timestamptz,
+  excluded_calendar_keys text[] not null default '{}',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (user_id)
@@ -20,3 +22,6 @@ alter table public.icloud_accounts enable row level security;
 drop policy if exists icloud_accounts_owner on public.icloud_accounts;
 create policy icloud_accounts_owner on public.icloud_accounts
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+alter table public.icloud_accounts add column if not exists last_synced_at timestamptz;
+alter table public.icloud_accounts add column if not exists excluded_calendar_keys text[] not null default '{}';

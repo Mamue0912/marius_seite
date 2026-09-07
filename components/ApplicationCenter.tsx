@@ -110,23 +110,63 @@ export default function ApplicationCenter({ accounts, sendEnabled, initialSectio
     { key: "dokumente", label: "Erstellte Dokumente", ic: "document" }
   ];
 
-  function go(key: any) {
+  async function go(key: any) {
     if (key === "chat") {
-      const target = openId || (apps[0] && apps[0].id);
-      if (target) { setOpenId(target); }
-      else { setSection("neu"); }
+      const target = openId || apps[0]?.id;
+      if (target) {
+        openApp(target);
+        return;
+      }
+      // Ein Klick während des initialen Ladens darf eine vorübergehend leere
+      // Liste nicht als "keine Bewerbungen" interpretieren.
+      const loaded = await loadApps();
+      if (loaded?.[0]?.id) { openApp(loaded[0].id); return; }
+      // Ohne Bewerbung gibt es keinen Chat-Kontext. Das wird erklärt, statt den
+      // Nutzer kommentarlos auf eine andere Seite zu schicken.
+      nav("aktiv");
+      notify("Der Bewerbungs-Chat bezieht sich immer auf eine Stelle. Lege zuerst eine Bewerbung an.");
       return;
     }
-    setSection(key); setListFilter("all"); setOpenId(null);
+    nav(key);
   }
-  // Direkte Navigation aus der Mitte (Kachel-Klick).
-  function nav(sec: any, filter = "all") { setSection(sec); setListFilter(filter); setOpenId(null); }
-  function openApp(id: string) { setOpenId(id); }
+  function updateLocation(nextOpenId: string | null, nextSection: string) {
+    const params = new URLSearchParams();
+    if (nextOpenId) params.set("open", nextOpenId);
+    else if (nextSection !== "uebersicht") params.set("view", nextSection);
+    const next = "/applications" + (params.size ? "?" + params.toString() : "");
+    window.history.pushState({}, "", next);
+  }
+  // Direkte Navigation aus der Mitte, inklusive Zurück-/Vorwärtsnavigation.
+  function nav(sec: any, filter = "all") { setSection(sec); setListFilter(filter); setOpenId(null); updateLocation(null, sec); }
+  function openApp(id: string) { setOpenId(id); updateLocation(id, "chat"); }
+  useEffect(() => {
+    const onPop = () => {
+      const params = new URLSearchParams(window.location.search);
+      const id = params.get("open");
+      const next = params.get("view") || "uebersicht";
+      setOpenId(id);
+      if (["uebersicht", "suche", "neu", "aktiv", "unterlagen", "dokumente"].includes(next)) setSection(next as any);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+  const initialChatHandled = useRef(false);
+  useEffect(() => {
+    if (initialChatHandled.current || initialSection !== "chat" || initialOpenId) return;
+    initialChatHandled.current = true;
+    void (async () => {
+      const list = apps.length ? apps : await loadApps();
+      if (list?.[0]?.id) openApp(list[0].id);
+      else nav("aktiv");
+    })();
+    // Nur die initiale URL auswerten.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Nach dem Anlegen: bei erkannter Dublette Auswahl anbieten, sonst öffnen.
   async function handleCreated(id: string, duplicate?: any) {
     await loadApps();
     if (duplicate && duplicate.id && duplicate.id !== id) setMergePrompt({ newId: id, existing: duplicate });
-    else setOpenId(id);
+    else openApp(id);
   }
   // Fällt der Client in ein Zeitlimit, hat der Server die Bewerbung oft trotzdem
   // angelegt. Dann die Liste neu laden und die gerade erstellte öffnen, statt
@@ -138,7 +178,7 @@ export default function ApplicationCenter({ accounts, sendEnabled, initialSectio
     const recent = list
       .filter((a: any) => a.created_at && now - new Date(a.created_at).getTime() < 120000)
       .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-    if (recent[0]) { setOpenId(recent[0].id); return true; }
+    if (recent[0]) { openApp(recent[0].id); return true; }
     return false;
   }
   async function doMerge() {
@@ -152,7 +192,7 @@ export default function ApplicationCenter({ accounts, sendEnabled, initialSectio
       return;
     }
     await loadApps();
-    setOpenId(result.data.applicationId || existing.id);
+    openApp(result.data.applicationId || existing.id);
   }
 
   return (
@@ -161,7 +201,7 @@ export default function ApplicationCenter({ accounts, sendEnabled, initialSectio
         <div className="ac-side-head"><span className="ac-mark" /> Bewerbungen</div>
         <nav className="ac-nav">
           {NAV.map((n) => (
-            <button key={n.key} className={"ac-nav-item" + ((!openId && section === n.key) || (openId && n.key === "chat") ? " on" : "")} onClick={() => go(n.key)}>
+            <button key={n.key} className={"ac-nav-item" + ((!openId && section === n.key) || (openId && n.key === "chat") ? " on" : "")} onClick={() => { void go(n.key); }}>
               <span className="ac-nav-ic"><Icon name={n.ic} size={17} /></span><span>{n.label}</span>
             </button>
           ))}
@@ -181,16 +221,16 @@ export default function ApplicationCenter({ accounts, sendEnabled, initialSectio
         {loading ? <div className="ac-empty"><span className="spin" /></div>
           : openId ? <Workspace id={openId} apps={apps} onOpen={openApp} accounts={accounts} sendEnabled={sendEnabled} docs={docs} onBack={() => nav("uebersicht")} onChanged={loadApps} onDeleted={async () => { nav("uebersicht"); await loadApps(); }} onDiag={() => setDiag(true)} />
           : section === "uebersicht" ? <Overview apps={apps} onOpen={openApp} onNav={nav} onNew={() => nav("neu")} />
-          : section === "suche" ? <JobSearch onOpenApp={async (id: string) => { await loadApps(); setOpenId(id); }} />
+          : section === "suche" ? <JobSearch onOpenApp={async (id: string) => { await loadApps(); openApp(id); }} />
           : section === "neu" ? <NewJob onCreated={handleCreated} onAnalyzeTimeout={recoverRecent} accounts={accounts} />
-          : section === "aktiv" ? <AppList apps={apps} filter={listFilter} onFilter={setListFilter} onOpen={openApp} onNew={() => setSection("neu")} onReload={loadApps} />
+          : section === "aktiv" ? <AppList apps={apps} filter={listFilter} onFilter={setListFilter} onOpen={openApp} onNew={() => nav("neu")} onReload={loadApps} />
           : section === "unterlagen" ? <Documents docs={docs} reload={loadDocs} onDiag={() => setDiag(true)} />
           : <GeneratedDocsAll apps={apps} onOpen={openApp} onReloadApps={loadApps} />}
       </main>
 
       {diag && <DiagModal onClose={() => setDiag(false)} />}
       {mergePrompt && (
-        <div className="ac-modal-scrim" onClick={() => { const id = mergePrompt.newId; setMergePrompt(null); setOpenId(id); }}>
+        <div className="ac-modal-scrim" onClick={() => { const id = mergePrompt.newId; setMergePrompt(null); openApp(id); }}>
           <div className="ac-modal" style={{ width: 480 }} onClick={(e) => e.stopPropagation()}>
             <div className="ac-modal-h"><h3>Gleiche Stelle erkannt</h3></div>
             <div className="ac-modal-b">
@@ -207,7 +247,7 @@ export default function ApplicationCenter({ accounts, sendEnabled, initialSectio
             </div>
             <div className="ac-modal-f">
               <button className="ac-btn primary" onClick={doMerge}>Zusammenführen</button>
-              <button className="ac-btn" onClick={() => { const id = mergePrompt.newId; setMergePrompt(null); setOpenId(id); }}>Beide behalten</button>
+              <button className="ac-btn" onClick={() => { const id = mergePrompt.newId; setMergePrompt(null); openApp(id); }}>Beide behalten</button>
             </div>
           </div>
         </div>
@@ -830,16 +870,16 @@ function DocumentsChat({ onDiag }: any) {
       <div className="ac-panel-h" style={{ position: "static" }}>Unterlagen-Chat</div>
       <div className="ac-hint" style={{ marginTop: 0, marginBottom: 10 }}>Frag zu deinen Dokumenten, korrigiere Missverständnisse oder beantworte Rückfragen der KI. Die KI nutzt nur deine hochgeladenen Unterlagen.</div>
       <div className="ac-docchat-scroll">
-        {!msgs.length && <div className="ac-suggests">{suggestions.map((s) => <button key={s} className="ac-suggest" onClick={() => send(s)}>{s}</button>)}</div>}
+        {!msgs.length && <div className="ac-suggests">{suggestions.map((s) => <button type="button" key={s} className="ac-suggest" onClick={() => void send(s)}>{s}</button>)}</div>}
         {msgs.map((m) => <div key={m.id} className={"ac-msg " + m.role}><div className="ac-msg-b">{m.role === "assistant" ? <Markdown text={m.content} /> : m.content}</div></div>)}
-        {busy && <div className="ac-msg assistant"><div className="ac-msg-b"><span className="spin" /> denkt nach…{ctrlRef.current && <button className="ac-diaglink" onClick={() => ctrlRef.current?.abort()}>Abbrechen</button>}</div></div>}
+        {busy && <div className="ac-msg assistant"><div className="ac-msg-b"><span className="spin" /> denkt nach…{ctrlRef.current && <button type="button" className="ac-diaglink" onClick={() => ctrlRef.current?.abort()}>Abbrechen</button>}</div></div>}
         <div ref={endRef} />
       </div>
       {error && <div className="ac-note bad">{error} <button className="ac-diaglink" onClick={() => void loadMessages()}>Neu laden</button> {onDiag && <button className="ac-diaglink" onClick={onDiag}>Diagnose</button>}</div>}
       <div className="ac-chat-input" style={{ position: "static" }}>
         <textarea className="ac-chat-ta" placeholder="Nachricht an den Unterlagen-Chat…" value={input} disabled={busy}
-          onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(input); } }} />
-        <button className="ac-btn primary" disabled={busy || !input.trim()} onClick={() => send(input)}>Senden</button>
+          maxLength={12000} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(input); } }} />
+        <button type="button" className="ac-btn primary" disabled={busy || !input.trim()} onClick={() => void send(input)}>Senden</button>
       </div>
     </div>
   );
@@ -1269,13 +1309,24 @@ function ChatPanel({ app, messages, onReload, onDiag }: any) {
   async function send(text: string) {
     if (!text.trim() || busy) return;
     setError(null); setInput("");
-    const optimistic = { id: "tmp", role: "user", content: text };
+    const optimisticId = "tmp-" + Date.now();
+    const optimistic = { id: optimisticId, role: "user", content: text };
     setMsgs((m) => [...m, optimistic]); setBusy(true);
     const ctrl = new AbortController(); ctrlRef.current = ctrl;
     const r = await aj("/api/applications/chat", { json: { applicationId: app.id, message: text }, timeoutMs: 60000, signal: ctrl.signal });
     setBusy(false);
-    if (r.ok) { setMsgs((m) => [...m.filter((x) => x.id !== "tmp"), { id: "u" + Date.now(), role: "user", content: text }, r.data.message]); onReload(); }
-    else { setMsgs((m) => m.filter((x) => x.id !== "tmp")); setError(errText(r, "Antwort konnte nicht erstellt werden.")); }
+    if (r.ok) {
+      setMsgs((current) => [...current.filter((item) => item.id !== optimisticId), r.data.userMessage || { id: "u-" + Date.now(), role: "user", content: text }, r.data.message]);
+      void onReload();
+    } else if (r.data?.userMessageSaved) {
+      setMsgs((current) => current.map((item) => item.id === optimisticId ? (r.data.userMessage || { ...item, id: "saved-" + Date.now() }) : item));
+      setError(errText(r, "Deine Nachricht wurde gespeichert, aber die Antwort konnte nicht erstellt werden."));
+      void onReload();
+    } else {
+      setMsgs((current) => current.filter((item) => item.id !== optimisticId));
+      setInput(text);
+      setError(errText(r, "Nachricht konnte nicht gesendet werden."));
+    }
   }
 
   const suggestions = ["Fass mir die Stelle zusammen.", "Welche Punkte aus meinem Lebenslauf passen besonders gut?", "Was fehlt mir für diese Stelle?", "Schreib mir ein Anschreiben.", "Erstelle eine kurze Bewerbungsmail.", "Bereite mich auf das Vorstellungsgespräch vor.", "Welche Rückfragen sollte ich stellen?"];
@@ -1290,18 +1341,18 @@ function ChatPanel({ app, messages, onReload, onDiag }: any) {
         {!msgs.length && (
           <div className="ac-chat-intro">
             <p>Dieser Chat kennt die Stelle und deine <b>bestätigten</b> Unterlagen. Frag zum Beispiel:</p>
-            <div className="ac-suggests">{suggestions.map((s) => <button key={s} className="ac-suggest" onClick={() => send(s)}>{s}</button>)}</div>
+            <div className="ac-suggests">{suggestions.map((s) => <button type="button" key={s} className="ac-suggest" onClick={() => void send(s)}>{s}</button>)}</div>
           </div>
         )}
         {msgs.map((m) => <div key={m.id} className={"ac-msg " + m.role}><div className="ac-msg-b">{m.role === "assistant" ? <Markdown text={m.content} /> : m.content}</div></div>)}
-        {busy && <div className="ac-msg assistant"><div className="ac-msg-b"><span className="spin" /> denkt nach…{ctrlRef.current && <button className="ac-diaglink" onClick={() => ctrlRef.current?.abort()}>Abbrechen</button>}</div></div>}
+        {busy && <div className="ac-msg assistant"><div className="ac-msg-b"><span className="spin" /> denkt nach…{ctrlRef.current && <button type="button" className="ac-diaglink" onClick={() => ctrlRef.current?.abort()}>Abbrechen</button>}</div></div>}
         <div ref={endRef} />
       </OverlayScroll>
       {error && <div className="ac-note bad ac-chat-err">{error} <button className="ac-diaglink" onClick={onDiag}>Diagnose</button></div>}
       <div className="ac-chat-input">
         <textarea className="ac-chat-ta" placeholder="Nachricht an den Bewerbungs-Chat…" value={input} disabled={busy}
-          onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(input); } }} />
-        <button className="ac-btn primary" disabled={busy || !input.trim()} onClick={() => send(input)}>Senden</button>
+          maxLength={12000} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(input); } }} />
+        <button type="button" className="ac-btn primary" disabled={busy || !input.trim()} onClick={() => void send(input)}>Senden</button>
       </div>
     </div>
   );

@@ -2,7 +2,6 @@
 import { PROVIDERS } from "@/lib/mailProviders";
 import CalendarTile from "@/components/CalendarTile";
 import Icon from "@/components/Icon";
-import { Notice } from "@/components/Feedback";
 
 type Task = { id: string; title: string; note?: string | null; due_at?: string | null; priority?: string; status?: string; source?: string };
 
@@ -16,7 +15,7 @@ function greeting() {
 }
 function dayStart(value: Date | string = new Date()) { const d = typeof value === "string" ? new Date(value) : new Date(value.getTime()); d.setHours(0, 0, 0, 0); return d.getTime(); }
 function dueLabel(value?: string | null) {
-  if (!value) return "Ohne Frist";
+  if (!value) return "Ohne Datum";
   const date = new Date(value), diff = Math.round((dayStart(date) - dayStart()) / 864e5);
   if (diff < 0) return "Überfällig";
   if (diff === 0) return "Heute";
@@ -24,7 +23,7 @@ function dueLabel(value?: string | null) {
   return date.toLocaleDateString("de-DE", { day: "2-digit", month: "short" });
 }
 
-export default function Overview({ accounts, summary, newestUnread = [], needsReplyList, deadlineList, appStats, tasks = [], initialError = null }: any) {
+export default function Overview({ accounts, summary, newestUnread = [], needsReplyList, appStats, tasks = [], loadErrors = {} }: any) {
   const dateStr = new Date().toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" });
   const openTasks: Task[] = [...tasks].filter((task) => task.status !== "erledigt").sort((a, b) => {
     const aDue = a.due_at ? new Date(a.due_at).getTime() : Number.MAX_SAFE_INTEGER;
@@ -35,7 +34,7 @@ export default function Overview({ accounts, summary, newestUnread = [], needsRe
   const focusTask = openTasks[0];
   const focusMail = needsReplyList[0];
   const focus = focusTask
-    ? { eyebrow: focusTask.due_at && dayStart(focusTask.due_at) < dayStart() ? "Überfällige Aufgabe" : "Nächster Schritt", title: focusTask.title, detail: focusTask.note || `${dueLabel(focusTask.due_at)}${focusTask.priority === "dringend" ? " · dringend" : focusTask.priority === "hoch" ? " · hohe Priorität" : ""}`, href: "/tasks", icon: "tasks" }
+    ? { eyebrow: focusTask.due_at && dayStart(focusTask.due_at) < dayStart() ? "Überfällige Aufgabe" : "Nächster Schritt", title: focusTask.title, detail: focusTask.note || `${dueLabel(focusTask.due_at)}${focusTask.priority === "dringend" ? " · dringend" : focusTask.priority === "hoch" ? " · hohe Priorität" : ""}`, href: `/tasks?open=${focusTask.id}`, icon: "tasks" }
     : appStats?.next
       ? { eyebrow: "Nächster Bewerbungsschritt", title: appStats.next.text, detail: "Bewerbungsprojekt öffnen und weiterarbeiten", href: `/applications?open=${appStats.next.id}`, icon: "briefcase" }
       : focusMail
@@ -57,16 +56,14 @@ export default function Overview({ accounts, summary, newestUnread = [], needsRe
           <p className="ov-sum">{dayLine}</p>
         </div>
         <nav className="ov-quick-actions" aria-label="Schnellaktionen">
-          <a href="/tasks"><Icon name="plus" size={16} /> Aufgabe</a>
+          <a href="/tasks"><Icon name="plus" size={16} /> Aufgabe &amp; Frist</a>
           <a href="/mail"><Icon name="edit" size={16} /> E-Mail</a>
           <a className="primary" href="/applications?view=neu"><Icon name="briefcase" size={16} /> Neue Stelle</a>
         </nav>
       </header>
 
-      {initialError && <Notice>{initialError}</Notice>}
-
       <section className="ov-metrics" aria-label="Tagesstatus">
-        <a href="/tasks" className={summary.overdueTasks ? "attention" : ""}><span className="ov-metric-label">Offene Aufgaben</span><strong>{openTasks.length}</strong><small>{summary.overdueTasks ? `${summary.overdueTasks} überfällig` : "im Plan"}</small></a>
+        <a href="/tasks" className={summary.overdueTasks ? "attention" : ""}><span className="ov-metric-label">Aufgaben &amp; Fristen</span><strong>{openTasks.length}</strong><small>{summary.overdueTasks ? `${summary.overdueTasks} überfällig` : "im Plan"}</small></a>
         <a href="/mail?unread=1"><span className="ov-metric-label">Ungelesen</span><strong>{summary.totalUnread}</strong><small>{summary.unreadImportant} wichtig</small></a>
         <a href="/mail"><span className="ov-metric-label">Antworten</span><strong>{summary.needsReply}</strong><small>noch ausstehend</small></a>
         <a href="/applications"><span className="ov-metric-label">Bewerbungen</span><strong>{appStats?.active || 0}</strong><small>{appStats?.waiting || 0} warten</small></a>
@@ -75,6 +72,7 @@ export default function Overview({ accounts, summary, newestUnread = [], needsRe
       <div className="ov-priority-grid">
         <section className="ov-focus-panel">
           <div className="ov-section-head"><span>Mein Fokus</span><span className="ov-live"><i /> automatisch priorisiert</span></div>
+          {loadErrors.tasks && <div className="ov-panel-error" role="alert">{loadErrors.tasks} Die übrigen Bereiche bleiben verfügbar.</div>}
           <a className="ov-focus-card" href={focus.href}>
             <span className="ov-focus-icon"><Icon name={focus.icon} size={22} /></span>
             <span className="ov-focus-copy"><small>{focus.eyebrow}</small><strong>{focus.title}</strong><span>{focus.detail}</span></span>
@@ -82,26 +80,20 @@ export default function Overview({ accounts, summary, newestUnread = [], needsRe
           </a>
           <div className="ov-agenda-list">
             {openTasks.slice(focusTask ? 1 : 0, focusTask ? 4 : 3).map((task) => (
-              <a href="/tasks" className="ov-agenda-row" key={task.id}>
+              <a href={`/tasks?open=${task.id}`} className="ov-agenda-row" key={task.id}>
                 <span className={"ov-agenda-dot " + (task.priority === "hoch" ? "high" : "task")} />
-                <span className="ov-agenda-main"><strong>{task.title}</strong><small>Aufgabe · {dueLabel(task.due_at)}</small></span>
+                <span className="ov-agenda-main"><strong>{task.title}</strong><small>{task.source === "icloud_calendar" ? "iCloud-Kalender" : task.source === "mail" ? "E-Mail-Frist" : task.source === "bewerbung" ? "Bewerbungsfrist" : "Aufgabe"} · {dueLabel(task.due_at)}</small></span>
                 <Icon name="chevron" size={15} />
               </a>
             ))}
-            {deadlineList.slice(0, Math.max(0, 3 - openTasks.length)).map((item: any) => (
-              <a href="/deadlines" className="ov-agenda-row" key={item.id}>
-                <span className="ov-agenda-dot deadline" />
-                <span className="ov-agenda-main"><strong>{item.subject || item.from_name || "Frist"}</strong><small>Frist · {dueLabel(item.deadline_at)}</small></span>
-                <Icon name="chevron" size={15} />
-              </a>
-            ))}
-            {!openTasks.length && !deadlineList.length && <div className="ov-quiet"><Icon name="check" size={18} /> Keine weiteren dringenden Punkte.</div>}
+            {!openTasks.length && <div className="ov-quiet"><Icon name="check" size={18} /> Keine weiteren dringenden Punkte.</div>}
           </div>
-          <a className="ov-panel-link" href="/tasks">Alle Aufgaben <Icon name="arrow" size={14} /></a>
+          <a className="ov-panel-link" href="/tasks">Alle Aufgaben &amp; Fristen <Icon name="arrow" size={14} /></a>
         </section>
 
         <section className="ov-inbox-panel">
           <div className="ov-section-head"><span>Neu im Posteingang</span><a href="/mail">Alle anzeigen</a></div>
+          {loadErrors.mail && <div className="ov-panel-error" role="alert">{loadErrors.mail} Bitte das Postfach erneut synchronisieren.</div>}
           <div className="ov-mail-list">
             {newestUnread.length ? newestUnread.slice(0, 4).map((mail: any) => (
               <a className="ov-mail-row" href={`/mail?open=${mail.id}`} key={mail.id}>
@@ -118,6 +110,7 @@ export default function Overview({ accounts, summary, newestUnread = [], needsRe
       <div className="ov-secondary-grid">
         <section className="ov-app-panel">
           <div className="ov-section-head"><span>Bewerbungen</span><a href="/applications">Manager öffnen</a></div>
+          {loadErrors.applications && <div className="ov-panel-error" role="alert">{loadErrors.applications} Bitte den Bewerbungsmanager erneut öffnen.</div>}
           <div className="ov-app-summary">
             <div><strong>{appStats?.active || 0}</strong><span>aktiv</span></div>
             <div><strong>{appStats?.prep || 0}</strong><span>in Vorbereitung</span></div>

@@ -17,7 +17,7 @@ function prefetchData(href: string) {
 const NAV = [
  {href:"/",label:"Übersicht",icon:"overview"}, {href:"/mail",label:"E-Mails",icon:"mail"},
  {href:"/applications",label:"Bewerbungen",icon:"briefcase"}, {href:"/calendar",label:"Kalender",icon:"calendar"},
- {href:"/tasks",label:"Aufgaben",icon:"tasks"}, {href:"/deadlines",label:"Fristen",icon:"clock"},
+ {href:"/tasks",label:"Aufgaben & Fristen",icon:"tasks"},
  {href:"/settings",label:"Einstellungen",icon:"settings"}
 ];
 

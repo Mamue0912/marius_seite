@@ -135,6 +135,9 @@ export interface CalendarEvent {
   color: string;      // Hintergrundfarbe (Hex) – wie im Google-Kalender
   textColor: string;  // gut lesbare Textfarbe (Hex)
   htmlLink: string | null;
+  description?: string | null;
+  source?: "google" | "icloud";
+  taskId?: string | null;
 }
 
 // Guten Kontrast-Text (schwarz/weiß) zu einer Hex-Hintergrundfarbe wählen.
@@ -193,7 +196,9 @@ export async function fetchGoogleEvents(
         calendar: cal.summaryOverride || cal.summary || "Kalender",
         color,
         textColor: readableText(color),
-        htmlLink: ev.htmlLink || null
+        htmlLink: ev.htmlLink || null,
+        description: ev.description || null,
+        source: "google"
       });
     }
   }));

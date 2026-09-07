@@ -6,13 +6,16 @@ export interface CalEvent {
   id: string; title: string; start: string; end: string | null;
   allDay: boolean; location: string | null; calendar: string;
   color: string; textColor: string; htmlLink: string | null;
+  description?: string | null; source?: "google" | "icloud"; taskId?: string | null;
 }
-export interface CalResult { connected: boolean; needsReauth?: boolean; error?: string; email?: string | null }
+export interface CalSourceState { state: "connected" | "empty" | "no_calendars" | "error" | "needs_reauth"; events?: number; calendars?: number; selectedCalendars?: number; lastSyncedAt?: string | null }
+export interface CalResult { connected: boolean; needsReauth?: boolean; error?: string; taskSyncError?: string; email?: string | null; sources?: Record<string, CalSourceState> }
 
 const store = { events: [] as CalEvent[], loaded: [] as Array<[number, number]>, email: null as string | null };
 const inflight = new Map<string, Promise<CalResult>>();
 
 export function calStore() { return store; }
+export function calInvalidate() { store.loaded = []; }
 export function calCovered(min: number, max: number) { return store.loaded.some(([a, b]) => a <= min && b >= max); }
 
 function addInterval(min: number, max: number) {
@@ -33,9 +36,9 @@ export function calFetchWindow(min: Date, max: Date): Promise<CalResult> {
       const q = new URLSearchParams({ timeMin: min.toISOString(), timeMax: max.toISOString() });
       const res = await fetch(`/api/calendar/events?${q.toString()}`, { cache: "no-store" });
       const data = await res.json();
-      if (data.needsReauth) return { connected: true, needsReauth: true };
+      if (!res.ok) return { connected: true, error: data.message || "Kalender konnte nicht geladen werden." };
+      if (data.needsReauth) return { connected: true, needsReauth: true, sources: data.sources };
       if (!data.connected) return { connected: false };
-      if (data.error) return { connected: true, error: data.error };
       const winMin = min.getTime(), winMax = max.getTime();
       const incoming: CalEvent[] = data.events || [];
       const kept = store.events.filter((e) => { const t = new Date(e.start).getTime(); return isNaN(t) || t < winMin || t >= winMax; });
@@ -43,9 +46,12 @@ export function calFetchWindow(min: Date, max: Date): Promise<CalResult> {
       for (const e of kept) byId.set(e.id, e);
       for (const e of incoming) byId.set(e.id, e);
       store.events = Array.from(byId.values());
-      addInterval(winMin, winMax);
+      // Teilweise geladene Termine bleiben sichtbar. Bei einem Fehler wird das
+      // Fenster nicht als vollständig markiert, damit ein erneuter Versuch folgt.
+      if (!data.error) addInterval(winMin, winMax);
       if (data.email) store.email = data.email;
-      return { connected: true, email: data.email };
+      if (data.error) return { connected: true, error: data.error, taskSyncError: data.taskSyncError, email: data.email, sources: data.sources };
+      return { connected: true, taskSyncError: data.taskSyncError, email: data.email, sources: data.sources };
     } catch (e) {
       return { connected: true, error: (e as Error).message };
     } finally {

@@ -28,7 +28,7 @@ export default async function Home() {
       .eq("user_id", user.id),
     admin
       .from("tasks")
-      .select("id,title,note,priority,due_at,status,source")
+      .select("*")
       .eq("user_id", user.id)
       .neq("status", "erledigt")
       .order("due_at", { ascending: true, nullsFirst: false })
@@ -38,6 +38,14 @@ export default async function Home() {
   const rows = inboxResult.data || [];
   const appRows = applicationResult.data || [];
   const taskRows = taskResult.data || [];
+  const loadErrors = {
+    mail: inboxResult.error ? "E-Mails konnten nicht geladen werden." : null,
+    applications: applicationResult.error ? "Bewerbungen konnten nicht geladen werden." : null,
+    tasks: taskResult.error ? "Aufgaben & Fristen konnten nicht geladen werden." : null
+  };
+  if (inboxResult.error) console.error("Cockpit messages query failed", inboxResult.error);
+  if (applicationResult.error) console.error("Cockpit applications query failed", applicationResult.error);
+  if (taskResult.error) console.error("Cockpit tasks query failed", taskResult.error);
   const now = Date.now();
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
@@ -71,9 +79,9 @@ export default async function Home() {
       provider: accountById[message.mail_account_id]?.provider || "",
       email: accountById[message.mail_account_id]?.email || ""
     }));
-  const deadlines = rows.filter(
-    (message) => message.deadline_at && new Date(message.deadline_at).getTime() >= now - 864e5
-  );
+  const deadlines = taskRows
+    .filter((task) => task.due_at && new Date(task.due_at).getTime() >= now - 864e5)
+    .sort((a, b) => new Date(a.due_at as string).getTime() - new Date(b.due_at as string).getTime());
   const overdueTasks = taskRows.filter(
     (task) => task.due_at && new Date(task.due_at).getTime() < todayStart.getTime()
   ).length;
@@ -157,10 +165,9 @@ export default async function Home() {
         }}
         newestUnread={newestUnread}
         needsReplyList={needsReply.slice(0, 5)}
-        deadlineList={deadlines.slice(0, 5)}
         appStats={appStats}
         tasks={taskRows}
-        initialError={inboxResult.error || applicationResult.error || taskResult.error ? "Einige Cockpit-Daten konnten nicht geladen werden. Bitte die Seite neu laden." : null}
+        loadErrors={loadErrors}
       />
     </AppShell>
   );

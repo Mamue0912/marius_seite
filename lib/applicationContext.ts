@@ -50,14 +50,15 @@ export async function generatedDocsContext(userId: string, applicationId: string
   return data.map((d) => `[${d.kind}] ${d.title || ""}\n${String(d.body).slice(0, 1200)}`).join("\n\n---\n\n");
 }
 
-export async function chatHistory(userId: string, applicationId: string, limit = 20): Promise<{ role: "user" | "assistant"; content: string }[]> {
-  const { data, error } = await supabaseAdmin()
+export async function chatHistory(userId: string, applicationId: string, limit = 20, excludeId?: string): Promise<{ role: "user" | "assistant"; content: string }[]> {
+  let query = supabaseAdmin()
     .from("application_messages")
     .select("role,content,created_at")
-    .eq("user_id", userId).eq("application_id", applicationId)
-    .order("created_at", { ascending: true }).limit(limit);
+    .eq("user_id", userId).eq("application_id", applicationId);
+  if (excludeId) query = query.neq("id", excludeId);
+  const { data, error } = await query.order("created_at", { ascending: false }).limit(limit);
   if (error) throw new Error("Chatverlauf konnte nicht geladen werden.");
-  return (data || []).map((m) => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content }));
+  return [...(data || [])].reverse().map((m) => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content }));
 }
 
 // Owner-geprüftes Laden einer Bewerbung.

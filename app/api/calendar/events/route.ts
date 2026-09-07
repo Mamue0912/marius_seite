@@ -2,78 +2,126 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabaseServer";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { getValidGoogleToken, fetchGoogleEvents, GoogleAccount, CalendarEvent } from "@/lib/googleCalendar";
-import { fetchIcloudEvents, IcloudAccount } from "@/lib/icloudCalendar";
+import { fetchIcloudSnapshot, IcloudAccount, IcloudAuthError } from "@/lib/icloudCalendar";
+import { syncIcloudTasks } from "@/lib/calendarTaskSync";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 30;
+export const maxDuration = 60;
 
-// Liefert Kalender-Termine im angefragten Zeitfenster – zusammengeführt aus
-// Google-Kalender und iCloud-Kalender (CalDAV). Fällt eine Quelle aus, werden
-// die Termine der anderen trotzdem geliefert.
+function safeIcloudError(error: unknown): string {
+  if (error instanceof IcloudAuthError) return "Zugangsdaten oder Berechtigung sind ungültig. Bitte iCloud erneut verbinden.";
+  const message = error instanceof Error ? error.message : "";
+  if (message.includes("keine Kalender") || message.includes("Keine iCloud-Kalender")) return message;
+  return "Die Synchronisierung mit Apple ist fehlgeschlagen. Bitte erneut versuchen.";
+}
+
 export async function GET(req: NextRequest) {
   const user = await requireUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const admin = supabaseAdmin();
-  const [{ data: gAcc }, { data: iAcc }] = await Promise.all([
+  const [googleResult, icloudResult] = await Promise.all([
     admin.from("google_accounts").select("*").eq("user_id", user.id).maybeSingle(),
     admin.from("icloud_accounts").select("*").eq("user_id", user.id).maybeSingle()
   ]);
-
+  const gAcc = googleResult.data;
+  const iAcc = icloudResult.data;
   const connected = !!gAcc || !!iAcc;
-  if (!connected) return NextResponse.json({ connected: false, events: [] });
+  if (!connected) return NextResponse.json({ connected: false, events: [], sources: {} });
 
   const url = new URL(req.url);
   const now = new Date();
   const defMin = new Date(now.getFullYear(), now.getMonth(), 1);
   const defMax = new Date(now.getFullYear(), now.getMonth() + 2, 0);
-  const timeMin = url.searchParams.get("timeMin") || defMin.toISOString();
-  const timeMax = url.searchParams.get("timeMax") || defMax.toISOString();
+  const minDate = new Date(url.searchParams.get("timeMin") || defMin.toISOString());
+  const maxDate = new Date(url.searchParams.get("timeMax") || defMax.toISOString());
+  if (!Number.isFinite(minDate.getTime()) || !Number.isFinite(maxDate.getTime()) || minDate >= maxDate || maxDate.getTime() - minDate.getTime() > 730 * 864e5) {
+    return NextResponse.json({ error: "bad_range", message: "Der Kalenderzeitraum ist ungültig." }, { status: 400 });
+  }
+  const timeMin = minDate.toISOString();
+  const timeMax = maxDate.toISOString();
 
   const events: CalendarEvent[] = [];
   const errors: string[] = [];
+  const sources: Record<string, Record<string, unknown>> = {};
   let needsReauth = false;
+  let taskSyncError: string | undefined;
 
-  // Google
   if (gAcc) {
-    if ((gAcc as any).status === "needs_reauth") {
+    if ((gAcc as GoogleAccount).status === "needs_reauth") {
       needsReauth = true;
+      sources.google = { state: "needs_reauth", events: 0 };
     } else {
       try {
         const token = await getValidGoogleToken(gAcc as GoogleAccount);
-        events.push(...(await fetchGoogleEvents(token, timeMin, timeMax)));
-      } catch (e: any) {
-        if (e?.oauthError === "invalid_grant") needsReauth = true;
-        else errors.push(`Google: ${(e as Error).message}`);
+        const googleEvents = await fetchGoogleEvents(token, timeMin, timeMax);
+        events.push(...googleEvents);
+        sources.google = { state: googleEvents.length ? "connected" : "empty", events: googleEvents.length };
+      } catch (error: any) {
+        if (error?.oauthError === "invalid_grant") {
+          needsReauth = true;
+          sources.google = { state: "needs_reauth", events: 0 };
+        } else {
+          errors.push("Google: Synchronisierung fehlgeschlagen.");
+          sources.google = { state: "error", events: 0 };
+        }
       }
     }
   }
 
-  // iCloud (CalDAV)
   if (iAcc) {
     try {
-      events.push(...(await fetchIcloudEvents(iAcc as IcloudAccount, timeMin, timeMax)));
-    } catch (e) {
-      errors.push(`iCloud: ${(e as Error).message}`);
-      await admin.from("icloud_accounts")
-        .update({ last_error: (e as Error).message, updated_at: new Date().toISOString() })
-        .eq("id", (iAcc as any).id);
+      const snapshot = await fetchIcloudSnapshot(iAcc as IcloudAccount, timeMin, timeMax);
+      const icloudEvents = snapshot.events;
+      let taskIds = new Map<string, string>();
+      try {
+        if (snapshot.selectedCalendarCount > 0) {
+          const sync = await syncIcloudTasks(user.id, icloudEvents, timeMin, timeMax);
+          taskIds = sync.taskIds;
+        }
+      } catch {
+        taskSyncError = "Kalendertermine werden angezeigt, konnten aber nicht mit Aufgaben & Fristen verknüpft werden. Bitte die Datenmigration ausführen.";
+      }
+      for (const event of icloudEvents) event.taskId = taskIds.get(event.id) || null;
+      events.push(...icloudEvents);
+      const state = snapshot.selectedCalendarCount === 0 ? "no_calendars" : icloudEvents.length ? "connected" : "empty";
+      const syncedAt = new Date().toISOString();
+      sources.icloud = {
+        state,
+        events: icloudEvents.length,
+        calendars: snapshot.calendarCount,
+        selectedCalendars: snapshot.selectedCalendarCount,
+        lastSyncedAt: syncedAt
+      };
+      await admin.from("icloud_accounts").update({
+        status: "connected",
+        last_error: null,
+        last_synced_at: syncedAt,
+        updated_at: new Date().toISOString()
+      }).eq("id", (iAcc as IcloudAccount).id);
+    } catch (error) {
+      const message = safeIcloudError(error);
+      const authFailed = error instanceof IcloudAuthError;
+      errors.push(`iCloud: ${message}`);
+      sources.icloud = { state: authFailed ? "needs_reauth" : "error", events: 0, lastSyncedAt: (iAcc as IcloudAccount).last_synced_at || null };
+      await admin.from("icloud_accounts").update({
+        status: authFailed ? "needs_reauth" : "error",
+        last_error: message,
+        updated_at: new Date().toISOString()
+      }).eq("id", (iAcc as IcloudAccount).id);
     }
   }
 
   events.sort((a, b) => a.start.localeCompare(b.start));
-  const email = (gAcc as any)?.email || (iAcc as any)?.apple_id || null;
-
-  // needsReauth nur melden, wenn Google die einzige (betroffene) Quelle ist –
-  // sonst zeigen wir die iCloud-Termine ganz normal an.
-  if (needsReauth && !iAcc) {
-    return NextResponse.json({ connected: true, needsReauth: true, events: [] });
-  }
+  const email = (gAcc as GoogleAccount | null)?.email || (iAcc as IcloudAccount | null)?.apple_id || null;
+  if (needsReauth && !iAcc) return NextResponse.json({ connected: true, needsReauth: true, events: [], sources });
   return NextResponse.json({
     connected: true,
     email,
     events,
+    sources,
+    taskSyncError,
     error: errors.length ? errors.join(" · ") : undefined
   });
 }

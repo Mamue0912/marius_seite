@@ -1,6 +1,6 @@
 export const TASK_PRIORITIES = ["niedrig", "normal", "hoch", "dringend"] as const;
 export const TASK_STATUSES = ["offen", "warten", "erledigt"] as const;
-export const TASK_SOURCES = ["manuell", "mail", "bewerbung", "apple", "apple_erinnerungen"] as const;
+export const TASK_SOURCES = ["manuell", "mail", "bewerbung", "apple", "apple_erinnerungen", "icloud_calendar"] as const;
 
 export function taskPriorityRank(value: string | null | undefined): number {
   return value === "dringend" ? 4 : value === "hoch" ? 3 : value === "normal" ? 2 : value === "niedrig" ? 1 : 0;

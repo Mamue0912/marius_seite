@@ -1,5 +1,5 @@
 export type TaskLike = { due_at?: string | null; status?: string };
-export const TASK_BUCKETS = ["Überfällig", "Heute", "Diese Woche", "Später", "Ohne Frist", "Warten auf Rückmeldung", "Erledigt"];
+export const TASK_BUCKETS = ["Überfällig", "Heute", "Diese Woche", "Später", "Ohne Datum", "Warten auf Rückmeldung", "Erledigt"];
 // Calendar-day comparisons remain correct over daylight-saving transitions.
 export function dayDistance(value: string | null | undefined, now = new Date()): number | null {
   if (!value) return null;
@@ -11,6 +11,6 @@ export function taskBucket(task: TaskLike, now = new Date()): string {
   if (task.status === "erledigt") return "Erledigt";
   if (task.status === "warten") return "Warten auf Rückmeldung";
   const days = dayDistance(task.due_at, now);
-  if (days === null) return "Ohne Frist";
+  if (days === null) return "Ohne Datum";
   return days < 0 ? "Überfällig" : days === 0 ? "Heute" : days <= 7 ? "Diese Woche" : "Später";
 }

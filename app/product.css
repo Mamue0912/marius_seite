@@ -187,6 +187,16 @@ input:not([type=checkbox]):not([type=radio]):focus, select:focus, textarea:focus
 }
 .ov-section-head > a, .ov-panel-link { color: var(--muted); font-size: 12px; font-weight: 560; }
 .ov-section-head > a:hover, .ov-panel-link:hover { color: var(--accent-ink); }
+.ov-panel-error {
+  margin: -2px 0 14px;
+  padding: 9px 11px;
+  border: 1px solid rgba(238, 112, 112, .22);
+  border-radius: 10px;
+  background: rgba(238, 112, 112, .08);
+  color: var(--urgent);
+  font-size: 12px;
+  line-height: 1.45;
+}
 .ov-live { display: inline-flex; align-items: center; gap: 6px; color: var(--faint); font-size: 11px; font-weight: 520; }
 .ov-live i { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px var(--low-soft); }
 .ov-focus-card {

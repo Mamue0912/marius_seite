@@ -4,14 +4,15 @@ import { dayDistance, taskBucket } from "../lib/taskDates";
 import { mapLimit } from "../lib/concurrency";
 import { messageContentKey } from "../lib/mailKeys";
 import { requestJson } from "../lib/http";
-import { parseIcsEvents, normalizeColor, readableText } from "../lib/icloudCalendar";
+import { extractCalendarData, parseIcsEvents, normalizeColor, readableText } from "../lib/icloudCalendar";
+import { calendarEventTaskRecord, staleExternalIds } from "../lib/calendarTaskSync";
 import { safeInternalPath } from "../lib/safeNavigation";
 import { isPrivateAddress, resolvePublicNetworkEndpoint } from "../lib/safeRemote";
 import { taskDueDate, taskNote, taskPriorityRank, taskTitle, validTaskPriority, validTaskStatus } from "../lib/taskValidation";
 
 test("Aufgaben ohne Datum sind nie überfällig", () => {
  assert.equal(dayDistance(null, new Date("2026-09-04T12:00:00")), null);
- assert.equal(taskBucket({status:"offen",due_at:null}, new Date("2026-09-04T12:00:00")), "Ohne Frist");
+ assert.equal(taskBucket({status:"offen",due_at:null}, new Date("2026-09-04T12:00:00")), "Ohne Datum");
 });
 test("Datumsgruppen vergleichen Kalendertage", () => {
  const now=new Date("2026-03-29T12:00:00+02:00");
@@ -50,6 +51,12 @@ test("iCloud-ICS: UTC-Termin, ganztägig und gefaltete Zeilen", () => {
   "DTSTART;VALUE=DATE:20260905",
   "DTEND;VALUE=DATE:20260906",
   "SUMMARY:Ganztägig",
+  "END:VEVENT",
+  "BEGIN:VEVENT",
+  "UID:abc-3",
+  "DTSTART:20260906T120000Z",
+  "STATUS:CANCELLED",
+  "SUMMARY:Abgesagt",
   "END:VEVENT",
   "END:VCALENDAR"
  ].join("\r\n");
@@ -100,4 +107,27 @@ test("Task input and priorities are validated consistently", () => {
  assert.ok(taskPriorityRank("dringend") > taskPriorityRank("hoch"));
  assert.throws(() => taskTitle("   "));
  assert.throws(() => taskDueDate("kein-datum"));
+});
+
+
+test("iCloud-CalDAV extrahiert escaped XML und CDATA", () => {
+  const escaped = "<d:response><c:calendar-data>BEGIN:VCALENDAR&amp;END:VCALENDAR</c:calendar-data></d:response>";
+  const cdata = "<d:response><c:calendar-data><![CDATA[BEGIN:VCALENDAR\r\nEND:VCALENDAR]]></c:calendar-data></d:response>";
+  assert.deepEqual(extractCalendarData(escaped), ["BEGIN:VCALENDAR&END:VCALENDAR"]);
+  assert.deepEqual(extractCalendarData(cdata), ["BEGIN:VCALENDAR\r\nEND:VCALENDAR"]);
+});
+
+
+test("iCloud-Serieninstanzen behalten ihre Wiederholungskennung", () => {
+  const events = parseIcsEvents(["BEGIN:VCALENDAR","BEGIN:VEVENT","UID:serie-1","RECURRENCE-ID;TZID=Europe/Berlin:20260907T180000","DTSTART;TZID=Europe/Berlin:20260907T190000","DTEND;TZID=Europe/Berlin:20260907T200000","SUMMARY:Training","DESCRIPTION:Kata","END:VEVENT","END:VCALENDAR"].join("\r\n"));
+  assert.equal(events[0].recurrenceId, "2026-09-07T16:00:00.000Z");
+  assert.equal(events[0].start, "2026-09-07T17:00:00.000Z");
+  assert.equal(events[0].description, "Kata");
+});
+
+test("Kalenderaufgaben bewahren Ganztagsdatum und ermitteln Löschkandidaten", () => {
+  const row = calendarEventTaskRecord("user-1", { id:"icloud:cal:uid:master", title:"Ganztag", start:"2026-09-07", end:"2026-09-08", allDay:true, location:null, calendar:"Privat", color:"#fff", textColor:"#000", htmlLink:null, source:"icloud" });
+  assert.equal(row.starts_at, "2026-09-07T12:00:00.000Z");
+  assert.equal(row.source, "icloud_calendar");
+  assert.deepEqual(staleExternalIds([{external_id:"a"},{external_id:"b"}], ["b","c"]), ["a"]);
 });
