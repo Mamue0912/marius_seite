@@ -12,7 +12,9 @@ import type { CalendarEvent } from "./googleCalendar";
 // Das app-spezifische Passwort liegt verschlüsselt in public.icloud_accounts.
 
 const ROOT = "https://caldav.icloud.com";
-const UA = "Cockpit/1.0 (CalDAV; nur Lesen)";
+// Schlichter, konventioneller User-Agent. Freitext mit Sonderzeichen kann von
+// Schutzmechanismen auf Serverseite abgelehnt werden (403).
+const UA = "Cockpit/1.0";
 const NS_D = 'xmlns:d="DAV:"';
 const NS_C = 'xmlns:c="urn:ietf:params:xml:ns:caldav"';
 const NS_A = 'xmlns:a="http://apple.com/ns/ical/"';
@@ -67,9 +69,17 @@ async function davRequest(
       target = new URL(location, target).toString();
       continue;
     }
-    if (res.status === 401 || res.status === 403) {
+    // 401 und 403 bedeuten Unterschiedliches und führen zu unterschiedlichen
+    // Schritten: 401 = Anmeldung abgelehnt (Passwort), 403 = angemeldet, aber
+    // Zugriff gesperrt. Deshalb getrennt melden, jeweils mit Stufe und Status.
+    if (res.status === 401) {
       throw new IcloudAuthError(
-        "Apple hat den Zugriff abgelehnt. Bitte ein neues app-spezifisches Passwort erzeugen und erneut verbinden."
+        `${stage}: Apple hat die Anmeldung abgelehnt (401). Bitte ein neues app-spezifisches Passwort erzeugen und die vollständige Apple-ID verwenden.`
+      );
+    }
+    if (res.status === 403) {
+      throw new IcloudAuthError(
+        `${stage}: Apple hat den Zugriff verweigert (403). Die Anmeldung war gültig, aber der Kalenderzugriff ist gesperrt.`
       );
     }
     if (res.status !== 207 && res.status !== 200) {
@@ -134,13 +144,16 @@ async function discoverHome(appleId: string, appPassword: string): Promise<strin
       const xml = await davRequest(candidate, "PROPFIND", auth, "0", principalBody, "Anmeldung bei Apple");
       const found = hrefInside(xml, "current-user-principal");
       if (found) { principalHref = found; principalBase = candidate; break; }
+      lastError = new Error("Anmeldung bei Apple: Antwort enthielt kein Benutzerkonto (Principal).");
     } catch (error) {
-      if (error instanceof IcloudAuthError) throw error;
+      // Auch 401/403 nicht sofort aufgeben: Apple lehnt den Serverstamm für
+      // manche Konten ab, während der Standard-Discovery-Pfad funktioniert.
+      // Erst wenn alle Wege scheitern, wird der letzte Fehler gemeldet.
       lastError = error as Error;
     }
   }
   if (!principalHref) {
-    throw new Error(lastError?.message || "Apple hat kein Benutzerkonto (Principal) zurückgegeben.");
+    throw lastError || new Error("Apple hat kein Benutzerkonto (Principal) zurückgegeben.");
   }
   const principalUrl = new URL(principalHref, principalBase).toString();
 

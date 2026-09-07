@@ -166,3 +166,27 @@ test("iCloud meldet fehlende Berechtigung (403) als Zugangsproblem", async () =>
   await assert.rejects(() => verifyIcloud("person@icloud.com", "abcd"), (error: unknown) => error instanceof IcloudAuthError);
  } finally { globalThis.fetch = original; }
 });
+
+test("iCloud weicht auf /.well-known/caldav aus, wenn der Stamm 403 liefert", async () => {
+ const original = globalThis.fetch;
+ const seen: string[] = [];
+ const dav = (xml: string) => new Response(xml, { status: 207, headers: { "content-type": "application/xml" } });
+ globalThis.fetch = (async (input: any) => {
+  const url = String(input);
+  seen.push(url);
+  // Apple lehnt den Serverstamm ab, erlaubt aber den Discovery-Pfad.
+  if (url === "https://caldav.icloud.com/") return new Response("forbidden", { status: 403 });
+  if (url === "https://caldav.icloud.com/.well-known/caldav") {
+   return dav('<multistatus xmlns="DAV:"><response><href>/</href><propstat><prop><current-user-principal><href>/77/principal/</href></current-user-principal></prop></propstat></response></multistatus>');
+  }
+  if (url.endsWith("/77/principal/")) {
+   return dav('<multistatus xmlns="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav"><response><href>/77/principal/</href><propstat><prop><C:calendar-home-set><href>https://p11-caldav.icloud.com/77/calendars/</href></C:calendar-home-set></prop></propstat></response></multistatus>');
+  }
+  return dav('<multistatus xmlns="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav"><response><href>/77/calendars/privat/</href><propstat><prop><resourcetype><collection/><C:calendar/></resourcetype><displayname>Privat</displayname><C:supported-calendar-component-set><C:comp name="VEVENT"/></C:supported-calendar-component-set></prop></propstat></response></multistatus>');
+ }) as any;
+ try {
+  const result = await verifyIcloud("person@icloud.com", "abcd-efgh-ijkl-mnop");
+  assert.equal(result.calendars, 1);
+  assert.ok(seen.includes("https://caldav.icloud.com/.well-known/caldav"), "Fallback-Pfad muss versucht werden");
+ } finally { globalThis.fetch = original; }
+});
