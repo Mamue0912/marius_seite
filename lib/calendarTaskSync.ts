@@ -69,6 +69,11 @@ export async function syncIcloudTasks(
   timeMax: string
 ): Promise<CalendarTaskSyncResult> {
   const admin = supabaseAdmin();
+  // Serientermine (tägliches/wöchentliches Training, feste Wochenrhythmen) sind
+  // keine Aufgaben und keine Fristen. Sie bleiben im Kalender sichtbar, werden
+  // hier aber nicht übernommen. Da ihre IDs damit nicht mehr im Eingang stehen,
+  // räumt der Löschabgleich unten bereits angelegte Einträge selbsttätig weg.
+  events = events.filter((event) => !event.recurring);
   const incomingIds = events.map((event) => event.id);
   const existingById = new Map<string, ExistingCalendarTask>();
 

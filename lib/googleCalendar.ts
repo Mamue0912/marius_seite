@@ -135,6 +135,8 @@ export interface CalendarEvent {
   color: string;      // Hintergrundfarbe (Hex) – wie im Google-Kalender
   textColor: string;  // gut lesbare Textfarbe (Hex)
   htmlLink: string | null;
+  // Serientermin: gehoert in den Kalender, aber nicht in Aufgaben & Fristen.
+  recurring?: boolean;
   description?: string | null;
   source?: "google" | "icloud";
   taskId?: string | null;

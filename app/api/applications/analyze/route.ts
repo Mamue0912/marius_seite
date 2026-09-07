@@ -25,25 +25,54 @@ function htmlToText(html: string): string {
     .replace(/\s+/g, " ").trim();
 }
 
-async function fetchJobPage(url: string): Promise<string | null> {
+// Ergebnis mit Grund: Eine Sammelmeldung ("konnte nicht geladen werden") sagt
+// dem Nutzer nicht, was er tun soll. Jeder Grund hat einen eigenen Hinweis.
+type JobPageResult =
+  | { ok: true; text: string }
+  | { ok: false; reason: "blocked" | "notfound" | "notHtml" | "tooShort" | "unreachable" };
+
+const JOB_PAGE_HINT: Record<string, string> = {
+  blocked: "Diese Seite blockiert automatische Zugriffe (z. B. StepStone, LinkedIn, Indeed). Bitte den Anzeigentext kopieren und unter „Text einfügen“ verwenden.",
+  notfound: "Unter diesem Link war nichts zu finden. Bitte den Link prüfen – Stellenanzeigen werden oft nach kurzer Zeit entfernt.",
+  notHtml: "Der Link zeigt keine Webseite, sondern eine Datei (z. B. ein PDF). Bitte die Datei unter „Datei hochladen“ verwenden.",
+  tooShort: "Diese Seite lädt ihre Inhalte erst im Browser nach, deshalb ist der Text hier leer. Bitte den Anzeigentext kopieren und unter „Text einfügen“ verwenden.",
+  unreachable: "Die Stellenanzeige konnte nicht automatisch geladen werden. Bitte Text einfügen, PDF/Screenshot hochladen oder eine E-Mail übernehmen."
+};
+
+async function fetchJobPage(url: string): Promise<JobPageResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
   try {
     const response = await fetchPublicResource(url, {
       signal: controller.signal,
-      headers: { "user-agent": "Mozilla/5.0 (compatible; CockpitBewerbung/1.0)", accept: "text/html,application/xhtml+xml" }
+      headers: {
+        // Eine öffentliche Seite, die der Nutzer selbst eingefügt hat. Viele
+        // Stellenbörsen liefern an offensichtliche Automaten gar nichts aus,
+        // deshalb ein gebräuchlicher Browser-Kopf statt eines Bot-Kennzeichens.
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "accept-language": "de-DE,de;q=0.9,en;q=0.8"
+      }
     });
-    const contentType = (response.headers.get("content-type") || "").toLowerCase();
-    if (!response.ok || (contentType && !contentType.includes("html") && !contentType.includes("xml"))) {
+    if (!response.ok) {
+      const status = response.status;
       await response.body?.cancel();
-      return null;
+      if (status === 401 || status === 403 || status === 429) return { ok: false, reason: "blocked" };
+      if (status === 404 || status === 410) return { ok: false, reason: "notfound" };
+      return { ok: false, reason: "unreachable" };
+    }
+    const contentType = (response.headers.get("content-type") || "").toLowerCase();
+    if (contentType && !contentType.includes("html") && !contentType.includes("xml")) {
+      await response.body?.cancel();
+      return { ok: false, reason: "notHtml" };
     }
     const html = await readTextLimited(response, 2 * 1024 * 1024);
-    if (!html) return null;
+    if (!html) return { ok: false, reason: "unreachable" };
     const text = htmlToText(html);
-    return text.length > 200 ? text.slice(0, 14000) : null;
+    if (text.length <= 200) return { ok: false, reason: "tooShort" };
+    return { ok: true, text: text.slice(0, 14000) };
   } catch {
-    return null;
+    return { ok: false, reason: "unreachable" };
   } finally {
     clearTimeout(timer);
   }
@@ -88,9 +117,17 @@ export async function POST(req: NextRequest) {
       mode = body.mode || "text";
       if (mode === "url") {
         jobUrl = String(body.url || "").trim();
-        if (!/^https?:\/\//i.test(jobUrl)) return NextResponse.json({ error: "bad_url", message: "Bitte einen gültigen Link (http/https) einfügen." }, { status: 400 });
-        const text = await fetchJobPage(jobUrl);
-        if (!text) return NextResponse.json({ error: "fetch_failed", message: "Die Stellenanzeige konnte nicht automatisch geladen werden. Bitte Text einfügen, PDF/Screenshot hochladen oder eine E-Mail übernehmen." }, { status: 422 });
+        // Kopierte Links kommen häufig ohne Schema ("www.stepstone.de/…") oder
+        // mit umschließenden Zeichen aus E-Mails. Beides wird ergänzt bzw.
+        // entfernt, statt die Eingabe abzulehnen.
+        jobUrl = jobUrl.replace(/^[<("'\s]+|[>)"'\s.,]+$/g, "");
+        if (jobUrl && !/^https?:\/\//i.test(jobUrl)) jobUrl = "https://" + jobUrl;
+        if (!/^https?:\/\/[^\s.]+\.[^\s]+/i.test(jobUrl)) {
+          return NextResponse.json({ error: "bad_url", message: "Das sieht nicht nach einem Link aus. Bitte die vollständige Adresse der Stellenanzeige einfügen." }, { status: 400 });
+        }
+        const page = await fetchJobPage(jobUrl);
+        if (!page.ok) return NextResponse.json({ error: "fetch_failed", message: JOB_PAGE_HINT[page.reason] }, { status: 422 });
+        const text = page.text;
         content = text; jobText = text;
       } else if (mode === "text") {
         jobText = String(body.text || "").trim();

@@ -28,7 +28,14 @@ async function fetchHtml(url: string, timeoutMs = 12000): Promise<string | null>
   try {
     const response = await fetchPublicResource(url, {
       signal: controller.signal,
-      headers: { "user-agent": "Mozilla/5.0 (compatible; CockpitBewerbung/1.0)", accept: "text/html,application/xhtml+xml" }
+      headers: {
+        // Gebräuchlicher Browser-Kopf: viele Unternehmensseiten liefern an
+        // offensichtliche Automaten nichts aus. Geladen wird ausschließlich
+        // eine öffentliche Seite, die der Nutzer selbst eingefügt hat.
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "accept-language": "de-DE,de;q=0.9,en;q=0.8"
+      }
     });
     const contentType = (response.headers.get("content-type") || "").toLowerCase();
     if (!response.ok || (contentType && !contentType.includes("html") && !contentType.includes("xml"))) {
@@ -78,6 +85,9 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json().catch(() => ({}));
   let url = String(body.url || "").trim();
+  // Aus E-Mails oder Chats kopierte Links tragen oft Klammern, Anführungs-
+  // zeichen oder einen Satzpunkt mit. Das wird entfernt statt abgelehnt.
+  url = url.replace(/^[<("'\s]+|[>)"'\s.,]+$/g, "");
   if (url && !/^https?:\/\//i.test(url)) url = "https://" + url; // ohne Schema erlauben
   if (!/^https?:\/\/[^\s.]+\.[^\s]+/i.test(url)) return NextResponse.json({ error: "bad_url", message: "Bitte einen gültigen Website-Link einfügen." }, { status: 400 });
 

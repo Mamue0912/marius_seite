@@ -265,3 +265,12 @@ test("iCloud ueberspringt gesperrte Einzelkalender statt komplett zu scheitern",
   assert.deepEqual(result.skipped, ["Geburtstage"]);
  } finally { globalThis.fetch = original; }
 });
+
+test("Serientermine werden erkannt und nicht zu Aufgaben", () => {
+ const serie = parseIcsEvents(["BEGIN:VCALENDAR","BEGIN:VEVENT","UID:karate","DTSTART:20260907T160000Z","DTEND:20260907T173000Z","RRULE:FREQ=WEEKLY;BYDAY=MO","SUMMARY:Karate-Training","END:VEVENT","END:VCALENDAR"].join("\r\n"));
+ assert.equal(serie[0].recurring, true);
+ const instanz = parseIcsEvents(["BEGIN:VCALENDAR","BEGIN:VEVENT","UID:karate","RECURRENCE-ID:20260914T160000Z","DTSTART:20260914T170000Z","SUMMARY:Karate-Training","END:VEVENT","END:VCALENDAR"].join("\r\n"));
+ assert.equal(instanz[0].recurring, true);
+ const einmalig = parseIcsEvents(["BEGIN:VCALENDAR","BEGIN:VEVENT","UID:abgabe","DTSTART:20260910T090000Z","SUMMARY:Abgabe Referat","END:VEVENT","END:VCALENDAR"].join("\r\n"));
+ assert.equal(einmalig[0].recurring, false);
+});

@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { calStore, calCovered, calFetchWindow, calInvalidate, CalSourceState } from "@/lib/calendarStore";
 import { requestJson } from "@/lib/http";
 
@@ -251,39 +251,208 @@ function MonthView({ cursor, byDay, todayKey, selected, setSelected, loading }: 
   );
 }
 
+const HOUR_MIN = 18, HOUR_MAX = 160, HOUR_DEFAULT = 48;
+const HOURS = Array.from({ length: 24 }, (_, i) => i);
+
+// Minuten, die ein Termin an einem bestimmten Tag belegt. Mehrtägige Termine
+// werden auf den Tag beschnitten; sehr kurze bekommen eine Mindestdauer, damit
+// sie im Raster sichtbar bleiben.
+function daySlot(e: Ev, dayKey: string): { from: number; to: number } | null {
+  if (e.allDay) return null;
+  const dayStart = new Date(dayKey + "T00:00:00").getTime();
+  if (!isFinite(dayStart)) return null;
+  const dayEnd = dayStart + 86400000;
+  const s = new Date(e.start).getTime();
+  if (!isFinite(s)) return null;
+  const raw = e.end ? new Date(e.end).getTime() : s + 3600000;
+  const t = isFinite(raw) ? Math.max(raw, s + 900000) : s + 3600000;
+  const from = Math.max(s, dayStart), to = Math.min(t, dayEnd);
+  if (to <= from) return null;
+  return { from: (from - dayStart) / 60000, to: (to - dayStart) / 60000 };
+}
+
+type Slot = { e: Ev; from: number; to: number };
+type Packed = Slot & { col: number; cols: number };
+
+// Überlappende Termine nebeneinander legen: zusammenhängende Gruppen bilden und
+// innerhalb jeder Gruppe Spalten vergeben.
+function packDay(items: Slot[]): Packed[] {
+  const sorted = [...items].sort((a, b) => a.from - b.from || a.to - b.to);
+  const out: Packed[] = [];
+  let group: Slot[] = [];
+  let groupEnd = -1;
+  const flush = () => {
+    if (!group.length) return;
+    const ends: number[] = [];
+    const placed = group.map((it) => {
+      let col = ends.findIndex((end) => end <= it.from);
+      if (col === -1) { col = ends.length; ends.push(it.to); } else ends[col] = it.to;
+      return { ...it, col };
+    });
+    for (const p of placed) out.push({ ...p, cols: ends.length });
+    group = []; groupEnd = -1;
+  };
+  for (const it of sorted) {
+    if (group.length && it.from >= groupEnd) flush();
+    group.push(it);
+    groupEnd = Math.max(groupEnd, it.to);
+  }
+  flush();
+  return out;
+}
+
+function EventBlock({ p, hourHeight }: { p: Packed; hourHeight: number }) {
+  const e = p.e;
+  const width = 100 / p.cols;
+  const height = Math.max(15, ((p.to - p.from) / 60) * hourHeight - 2);
+  const style: React.CSSProperties = {
+    top: (p.from / 60) * hourHeight,
+    height,
+    left: `calc(${p.col * width}% + 2px)`,
+    width: `calc(${width}% - 4px)`,
+    background: e.color,
+    color: e.textColor
+  };
+  const from = new Date(e.start).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+  const to = e.end ? new Date(e.end).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) : "";
+  const label = `${from}${to ? "–" + to : ""} · ${e.title}${e.location ? " · " + e.location : ""}`;
+  const inner = (
+    <>
+      <span className="cal-tgev-t">{from}</span>
+      <span className="cal-tgev-s">{e.title}</span>
+    </>
+  );
+  return e.htmlLink
+    ? <a className="cal-tgev" style={style} title={label} href={e.htmlLink} target="_blank" rel="noopener noreferrer">{inner}</a>
+    : <div className="cal-tgev" style={style} title={label}>{inner}</div>;
+}
+
 function WeekView({ anchor, byDay, todayKey, loading }: any) {
   const days = useMemo(() => {
     const out: Date[] = [];
     for (let i = 0; i < 7; i++) { const d = new Date(anchor); d.setDate(anchor.getDate() + i); out.push(d); }
     return out;
   }, [anchor]);
+
+  const [hourHeight, setHourHeight] = useState<number>(() => {
+    try {
+      const stored = Number(localStorage.getItem("calHourHeight"));
+      if (stored >= HOUR_MIN && stored <= HOUR_MAX) return stored;
+    } catch { /* Speicherzugriff kann blockiert sein */ }
+    return HOUR_DEFAULT;
+  });
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const hhRef = useRef(hourHeight);
+  useEffect(() => {
+    hhRef.current = hourHeight;
+    try { localStorage.setItem("calHourHeight", String(hourHeight)); } catch { /* egal */ }
+  }, [hourHeight]);
+
+  // Mausrad skaliert die Zeitachse; der Punkt unter dem Zeiger bleibt stehen.
+  // Shift + Rad scrollt weiterhin normal. Der Listener wird bewusst selbst
+  // registriert (passive: false), weil React Rad-Ereignisse sonst passiv
+  // behandelt und preventDefault wirkungslos bliebe.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onWheel = (ev: WheelEvent) => {
+      if (ev.shiftKey) return;
+      ev.preventDefault();
+      const h = hhRef.current;
+      const next = Math.min(HOUR_MAX, Math.max(HOUR_MIN, Math.round(ev.deltaY < 0 ? h * 1.12 : h / 1.12)));
+      if (next === h) return;
+      const y = ev.clientY - el.getBoundingClientRect().top;
+      const minutes = ((el.scrollTop + y) / h) * 60;
+      setHourHeight(next);
+      requestAnimationFrame(() => { el.scrollTop = Math.max(0, (minutes / 60) * next - y); });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
+  // Beim ersten Öffnen auf den Morgen scrollen statt auf Mitternacht.
+  const didScroll = useRef(false);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || didScroll.current) return;
+    el.scrollTop = 7 * hourHeight;
+    didScroll.current = true;
+  }, [hourHeight]);
+
+  const [nowMin, setNowMin] = useState(() => { const n = new Date(); return n.getHours() * 60 + n.getMinutes(); });
+  useEffect(() => {
+    const t = setInterval(() => { const n = new Date(); setNowMin(n.getHours() * 60 + n.getMinutes()); }, 60000);
+    return () => clearInterval(t);
+  }, []);
+
+  const hasAllDay = days.some((d) => ((byDay[ymd(d)] || []) as Ev[]).some((e) => e.allDay));
+
   return (
-    <div className="cal-week">
-      {days.map((d) => {
-        const k = ymd(d);
-        const evs: Ev[] = byDay[k] || [];
-        return (
-          <div key={k} className={"cal-wcol" + (k === todayKey ? " today" : "")}>
-            <div className="cal-wcol-h">
+    <div className="cal-tg">
+      <div className="cal-tg-top">
+        <div className="cal-tg-gutter" />
+        {days.map((d) => {
+          const k = ymd(d);
+          return (
+            <div key={k} className={"cal-tg-head" + (k === todayKey ? " today" : "")}>
               <span className="cal-wcol-wd">{WD[(d.getDay() + 6) % 7]}</span>
               <span className="cal-wcol-d">{d.getDate()}</span>
             </div>
-            <div className="cal-wcol-body">
-              {loading ? <div className="cal-empty sm">…</div>
-                : evs.length === 0 ? <div className="cal-wcol-empty" />
-                : evs.map((e) => (
-                  e.htmlLink
-                    ? <a key={e.id} className="cal-wev" href={e.htmlLink} target="_blank" rel="noopener noreferrer" style={{ background: e.color, color: e.textColor }} title={e.title}>
-                        {!e.allDay && <span className="cal-wev-t">{timeLabel(e)}</span>}{e.title}
-                      </a>
-                    : <div key={e.id} className="cal-wev" style={{ background: e.color, color: e.textColor }} title={e.title}>
-                        {!e.allDay && <span className="cal-wev-t">{timeLabel(e)}</span>}{e.title}
-                      </div>
+          );
+        })}
+      </div>
+
+      {hasAllDay && (
+        <div className="cal-tg-allday">
+          <div className="cal-tg-gutter"><span>ganztägig</span></div>
+          {days.map((d) => {
+            const k = ymd(d);
+            const evs = ((byDay[k] || []) as Ev[]).filter((e) => e.allDay);
+            return (
+              <div key={k} className="cal-tg-adcol">
+                {evs.map((e) => (
+                  <span key={e.id} className="cal-tg-adev" style={{ background: e.color, color: e.textColor }} title={e.title}>{e.title}</span>
                 ))}
-            </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="cal-tg-scroll" ref={scrollRef}>
+        <div className="cal-tg-body" style={{ height: 24 * hourHeight }}>
+          <div className="cal-tg-axis">
+            {HOURS.map((h) => (
+              <div key={h} className="cal-tg-hour" style={{ height: hourHeight }}>
+                <span>{String(h).padStart(2, "0")}:00</span>
+              </div>
+            ))}
           </div>
-        );
-      })}
+          {days.map((d) => {
+            const k = ymd(d);
+            const slots = ((byDay[k] || []) as Ev[])
+              .map((e) => { const s = daySlot(e, k); return s ? { e, from: s.from, to: s.to } : null; })
+              .filter((x): x is Slot => x !== null);
+            const packed = packDay(slots);
+            return (
+              <div key={k} className={"cal-tg-col" + (k === todayKey ? " today" : "")}>
+                {HOURS.map((h) => <div key={h} className="cal-tg-line" style={{ top: h * hourHeight }} />)}
+                {k === todayKey && <div className="cal-tg-now" style={{ top: (nowMin / 60) * hourHeight }} />}
+                {!loading && packed.map((p) => <EventBlock key={p.e.id} p={p} hourHeight={hourHeight} />)}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="cal-tg-hint">
+        <span>Mausrad über dem Raster skaliert die Zeit · Shift + Mausrad scrollt</span>
+        <span className="cal-tg-zoom">
+          <button type="button" onClick={() => setHourHeight((h) => Math.max(HOUR_MIN, Math.round(h / 1.25)))} aria-label="Zeitskala verkleinern">−</button>
+          <button type="button" onClick={() => setHourHeight(HOUR_DEFAULT)}>Standard</button>
+          <button type="button" onClick={() => setHourHeight((h) => Math.min(HOUR_MAX, Math.round(h * 1.25)))} aria-label="Zeitskala vergrößern">+</button>
+        </span>
+      </div>
     </div>
   );
 }

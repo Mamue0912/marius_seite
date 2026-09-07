@@ -1253,3 +1253,51 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--mat); }
 .ac-fact-badge.todo:hover { filter: brightness(1.1); }
 .ac-fact-del { width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--muted); cursor: pointer; flex: none; }
 .ac-fact-del:hover { color: var(--urgent); border-color: rgba(255,105,97,.35); background: var(--urgent-soft); }
+
+/* ---- Wochenansicht als Zeitraster (Stundenachse links) ------------------ */
+.cal-tg { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.cal-tg-top, .cal-tg-allday { display: grid; grid-template-columns: 58px repeat(7, minmax(0, 1fr)); }
+.cal-tg-top { border-bottom: 1px solid var(--line-2); }
+.cal-tg-gutter { display: flex; align-items: center; justify-content: flex-end; padding: 4px 8px; }
+.cal-tg-gutter span { font-size: 10px; color: var(--faint); }
+.cal-tg-head { display: flex; align-items: baseline; gap: 6px; justify-content: center; padding: 8px 4px; border-left: 1px solid var(--line-2); }
+.cal-tg-head.today .cal-wcol-d { background: var(--accent); color: var(--on-accent); border-radius: var(--r-pill); padding: 1px 8px; }
+.cal-tg-allday { border-bottom: 1px solid var(--line-2); min-height: 30px; }
+.cal-tg-adcol { border-left: 1px solid var(--line-2); padding: 4px; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.cal-tg-adev { font-size: 10.5px; font-weight: 600; padding: 2px 7px; border-radius: var(--r-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-tg-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.cal-tg-body { display: grid; grid-template-columns: 58px repeat(7, minmax(0, 1fr)); position: relative; }
+.cal-tg-axis { position: relative; }
+.cal-tg-hour { position: relative; }
+.cal-tg-hour span {
+  position: absolute; top: -7px; right: 8px; font-size: 10.5px; color: var(--faint);
+  font-variant-numeric: tabular-nums; background: var(--mat-thin); padding: 0 2px;
+}
+.cal-tg-hour:first-child span { top: 0; }
+.cal-tg-col { position: relative; border-left: 1px solid var(--line-2); min-width: 0; }
+.cal-tg-col.today { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.cal-tg-line { position: absolute; left: 0; right: 0; height: 1px; background: var(--line-2); pointer-events: none; }
+.cal-tg-now { position: absolute; left: 0; right: 0; height: 2px; background: var(--urgent); z-index: 3; pointer-events: none; }
+.cal-tg-now::before { content: ""; position: absolute; left: -4px; top: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--urgent); }
+.cal-tgev {
+  position: absolute; z-index: 2; overflow: hidden; border-radius: var(--r-xs);
+  padding: 2px 6px; font-size: 11px; line-height: 1.25; text-decoration: none;
+  display: flex; flex-direction: column; box-shadow: var(--shadow-sm);
+}
+.cal-tgev-t { font-size: 9.5px; opacity: .85; font-variant-numeric: tabular-nums; }
+.cal-tgev-s { font-weight: 620; overflow: hidden; text-overflow: ellipsis; }
+.cal-tg-hint {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 7px 10px; border-top: 1px solid var(--line-2); font-size: 11px; color: var(--faint);
+}
+.cal-tg-zoom { margin-left: auto; display: inline-flex; gap: 4px; }
+.cal-tg-zoom button {
+  border: 1px solid var(--line); background: var(--surface-2); color: var(--ink-2);
+  font-size: 11.5px; font-weight: 600; padding: 3px 10px; border-radius: var(--r-xs); cursor: pointer;
+}
+.cal-tg-zoom button:hover { border-color: var(--accent); color: var(--ink); }
+@media (max-width: 780px) {
+  .cal-tg-top, .cal-tg-allday, .cal-tg-body { grid-template-columns: 42px repeat(7, minmax(0, 1fr)); }
+  .cal-tgev-s { font-size: 10px; }
+  .cal-tg-hint span:first-child { display: none; }
+}

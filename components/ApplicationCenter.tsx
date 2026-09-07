@@ -62,8 +62,8 @@ type Account = { id: string; email: string; provider: string };
 
 // ============================ Hauptkomponente ============================
 export default function ApplicationCenter({ accounts, sendEnabled, initialSection, initialOpenId }: { accounts: Account[]; sendEnabled: boolean; initialSection?: string; initialOpenId?: string | null }) {
-  const validSection = ["uebersicht", "suche", "neu", "aktiv", "unterlagen", "dokumente"].includes(initialSection || "") ? (initialSection as any) : "uebersicht";
-  const [section, setSection] = useState<"uebersicht" | "suche" | "neu" | "aktiv" | "unterlagen" | "dokumente">(validSection);
+  const validSection = ["uebersicht", "suche", "neu", "aktiv", "chat", "unterlagen", "dokumente"].includes(initialSection || "") ? (initialSection as any) : "uebersicht";
+  const [section, setSection] = useState<"uebersicht" | "suche" | "neu" | "aktiv" | "chat" | "unterlagen" | "dokumente">(validSection);
   // Aus dem seitenübergreifenden Cache initialisieren → sofortige Anzeige, wenn
   // beim Hovern über „Bewerbungen" bereits vorgeladen wurde.
   const [apps, setApps] = useState<any[]>(() => getAppsCache() || []);
@@ -124,9 +124,10 @@ export default function ApplicationCenter({ accounts, sendEnabled, initialSectio
       // Ohne Bewerbung gibt es keinen Chat-Kontext (der Chat gehört immer zu
       // einer Stelle). Ein Ladefehler wird davon klar unterschieden, damit
       // "keine Bewerbungen" nicht fälschlich behauptet wird.
-      nav("aktiv");
+      // Der Chat bleibt erreichbar und erklärt sich selbst, statt den Nutzer
+      // auf eine andere Seite umzuleiten.
+      nav("chat");
       if (loaded === null) notify("Bewerbungen konnten nicht geladen werden. Bitte erneut versuchen.", true);
-      else notify("Der Bewerbungs-Chat gehört immer zu einer Stelle. Lege zuerst über „Neue Stelle“ eine Bewerbung an – danach öffnet sich der Chat automatisch.");
       return;
     }
     nav(key);
@@ -147,7 +148,7 @@ export default function ApplicationCenter({ accounts, sendEnabled, initialSectio
       const id = params.get("open");
       const next = params.get("view") || "uebersicht";
       setOpenId(id);
-      if (["uebersicht", "suche", "neu", "aktiv", "unterlagen", "dokumente"].includes(next)) setSection(next as any);
+      if (["uebersicht", "suche", "neu", "aktiv", "chat", "unterlagen", "dokumente"].includes(next)) setSection(next as any);
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
@@ -226,6 +227,7 @@ export default function ApplicationCenter({ accounts, sendEnabled, initialSectio
           : section === "suche" ? <JobSearch onOpenApp={async (id: string) => { await loadApps(); openApp(id); }} />
           : section === "neu" ? <NewJob onCreated={handleCreated} onAnalyzeTimeout={recoverRecent} accounts={accounts} />
           : section === "aktiv" ? <AppList apps={apps} filter={listFilter} onFilter={setListFilter} onOpen={openApp} onNew={() => nav("neu")} onReload={loadApps} />
+          : section === "chat" ? <ChatWithoutJob onNew={() => nav("neu")} onRetry={async () => { const list = await loadApps(); if (list?.[0]?.id) openApp(list[0].id); else notify("Es ist weiterhin keine Bewerbung vorhanden."); }} />
           : section === "unterlagen" ? <Documents docs={docs} reload={loadDocs} onDiag={() => setDiag(true)} />
           : <GeneratedDocsAll apps={apps} onOpen={openApp} onReloadApps={loadApps} />}
       </main>
@@ -1293,6 +1295,31 @@ function JobPanel({ app, docs, onPatch, onReload, embedded }: any) {
 }
 function Sec({ title, items, tone }: any) { if (!items || !items.length) return null; return <div className="ac-sec"><div className="ac-sec-t">{title}</div><ul className={"ac-ul " + (tone || "")}>{items.map((x: string, i: number) => <li key={i}>{x}</li>)}</ul></div>; }
 function MatchCol({ title, items, tone }: any) { return <div className={"ac-matchcol " + tone}><div className="ac-matchcol-t">{title}</div>{(items && items.length) ? <ul>{items.map((x: string, i: number) => <li key={i}>{x}</li>)}</ul> : <div className="ac-mod-empty sm">—</div>}</div>; }
+
+// Bewerbungs-Chat ohne vorhandene Stelle: erklären statt umleiten.
+function ChatWithoutJob({ onNew, onRetry }: { onNew: () => void; onRetry: () => void }) {
+  return (
+    <div className="ac-view">
+      <div className="ac-view-head"><h1>Bewerbungs-Chat</h1></div>
+      <div className="ac-card ac-empty2">
+        <p style={{ margin: 0 }}>
+          Der Bewerbungs-Chat bezieht sich immer auf eine konkrete Stelle: Er kennt die
+          Stellenanzeige und deine bestätigten Unterlagen und antwortet darauf. Aktuell ist
+          noch <b>keine Bewerbung angelegt</b>, deshalb fehlt ihm der Bezug.
+        </p>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
+          <button type="button" className="ac-btn primary lg" onClick={onNew}>＋ Neue Stelle anlegen</button>
+          <button type="button" className="ac-btn" onClick={onRetry}>Erneut prüfen</button>
+        </div>
+        <p className="ac-hint" style={{ marginTop: 16 }}>
+          Sobald eine Stelle vorhanden ist, öffnet sich der Chat hier automatisch. Fragen zu
+          deinen Unterlagen ohne Stellenbezug beantwortet der <b>Unterlagen-Chat</b> unter
+          „Meine Unterlagen“.
+        </p>
+      </div>
+    </div>
+  );
+}
 
 function ChatPanel({ app, messages, onReload, onDiag }: any) {
   const [msgs, setMsgs] = useState<any[]>(messages || []);
