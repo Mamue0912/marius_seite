@@ -400,7 +400,7 @@ async function fetchCalendarEvents(
 // ---- Öffentliche API ------------------------------------------------------
 
 // Zugangsdaten prüfen und Kalender-Home ermitteln (für den Verbinden-Flow).
-export async function verifyIcloud(appleId: string, appPassword: string): Promise<{ home: string; calendars: number }> {
+export async function verifyIcloud(appleId: string, appPassword: string): Promise<{ home: string; calendars: number; readable: number; skipped: string[] }> {
   const home = await discoverHome(appleId, appPassword);
   const auth = authHeader(appleId, appPassword);
   const cals = await listCalendars(home, auth);
@@ -408,8 +408,16 @@ export async function verifyIcloud(appleId: string, appPassword: string): Promis
   const now = new Date();
   const min = new Date(now); min.setDate(min.getDate() - 1);
   const max = new Date(now); max.setDate(max.getDate() + 1);
-  await Promise.all(cals.map((cal) => fetchCalendarEvents(cal, auth, min.toISOString(), max.toISOString())));
-  return { home, calendars: cals.length };
+  const probe = await Promise.allSettled(
+    cals.map((cal) => fetchCalendarEvents(cal, auth, min.toISOString(), max.toISOString()))
+  );
+  const skipped = cals.filter((_, i) => probe[i].status === "rejected").map((c) => c.name);
+  // Ein gesperrter Einzelkalender darf das Verbinden nicht verhindern.
+  if (skipped.length === cals.length) {
+    const failure = probe.find((p) => p.status === "rejected") as PromiseRejectedResult | undefined;
+    throw failure?.reason instanceof Error ? failure.reason : new Error("Kein iCloud-Kalender konnte gelesen werden.");
+  }
+  return { home, calendars: cals.length, readable: cals.length - skipped.length, skipped };
 }
 
 // Termine im Zeitfenster [timeMin, timeMax) über alle VEVENT-Kalender holen.
@@ -417,6 +425,10 @@ export interface IcloudSnapshot {
   events: CalendarEvent[];
   calendarCount: number;
   selectedCalendarCount: number;
+  // Kalender, die Apple für die Terminabfrage sperrt (z. B. Geburtstage oder
+  // abonnierte Kalender). Sie werden übersprungen, aber benannt – nicht
+  // stillschweigend verschluckt.
+  skippedCalendars: string[];
 }
 
 export async function fetchIcloudSnapshot(
@@ -431,13 +443,25 @@ export async function fetchIcloudSnapshot(
   if (!cals.length) throw new Error("Keine iCloud-Kalender mit Terminen gefunden.");
   const excluded = new Set(account.excluded_calendar_keys || []);
   const selected = cals.filter((calendar) => !excluded.has(calendar.key));
-  if (!selected.length) return { events: [], calendarCount: cals.length, selectedCalendarCount: 0 };
-  // Nur ein vollständiger Abruf darf den späteren Löschabgleich auslösen.
-  const chunks = await Promise.all(selected.map((calendar) => fetchCalendarEvents(calendar, auth, timeMin, timeMax)));
+  if (!selected.length) return { events: [], calendarCount: cals.length, selectedCalendarCount: 0, skippedCalendars: [] };
+  // Einzelne Kalender (Geburtstage, abonnierte Kalender) beantwortet Apple mit
+  // 403. Ein solcher Kalender darf nicht den gesamten Abruf verhindern – er
+  // wird übersprungen und benannt. Nur wenn KEIN Kalender lesbar ist, liegt
+  // ein echtes Problem vor und der Fehler wird gemeldet.
+  const results = await Promise.allSettled(
+    selected.map((calendar) => fetchCalendarEvents(calendar, auth, timeMin, timeMax))
+  );
+  const skippedCalendars = selected.filter((_, i) => results[i].status === "rejected").map((c) => c.name);
+  if (skippedCalendars.length === selected.length) {
+    const failure = results.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined;
+    throw failure?.reason instanceof Error ? failure.reason : new Error("Kein iCloud-Kalender konnte gelesen werden.");
+  }
   const byId = new Map<string, CalendarEvent>();
-  for (const event of chunks.flat()) byId.set(event.id, event);
+  for (const result of results) {
+    if (result.status === "fulfilled") for (const event of result.value) byId.set(event.id, event);
+  }
   const events = [...byId.values()].sort((a, b) => a.start.localeCompare(b.start));
-  return { events, calendarCount: cals.length, selectedCalendarCount: selected.length };
+  return { events, calendarCount: cals.length, selectedCalendarCount: selected.length, skippedCalendars };
 }
 
 export async function fetchIcloudEvents(account: IcloudAccount, timeMin: string, timeMax: string): Promise<CalendarEvent[]> {

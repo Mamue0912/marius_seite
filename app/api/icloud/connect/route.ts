@@ -36,8 +36,10 @@ export async function POST(req: NextRequest) {
 
   let home: string;
   let calendars: number;
+  let readable = 0;
+  let skipped: string[] = [];
   try {
-    ({ home, calendars } = await verifyIcloud(appleId, appPassword));
+    ({ home, calendars, readable, skipped } = await verifyIcloud(appleId, appPassword));
   } catch (e) {
     if (e instanceof IcloudAuthError) {
       return NextResponse.json({ error: e.message }, { status: 400 });
@@ -70,5 +72,5 @@ export async function POST(req: NextRequest) {
   if (error) {
     return NextResponse.json({ error: `Speichern fehlgeschlagen: ${error.message}` }, { status: 500 });
   }
-  return NextResponse.json({ ok: true, calendars });
+  return NextResponse.json({ ok: true, calendars, readable, skipped });
 }

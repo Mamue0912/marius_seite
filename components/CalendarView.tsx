@@ -193,6 +193,7 @@ export default function CalendarView({ initialEmail, hasGoogle = false }: { init
       {sources.icloud?.state === "connected" && <div className="cal-note ok">iCloud erfolgreich synchronisiert · {sources.icloud.events || 0} Termine aus {sources.icloud.selectedCalendars || 0} Kalendern im geladenen Zeitraum{icloudLastSync ? ` · Stand ${icloudLastSync}` : ""}.</div>}
       {sources.icloud?.state === "empty" && <div className="cal-note">iCloud ist verbunden. Im gewählten Zeitraum wurden keine Termine gefunden{icloudLastSync ? ` · Stand ${icloudLastSync}` : ""}.</div>}
       {sources.icloud?.state === "no_calendars" && <div className="cal-note bad">iCloud ist verbunden, aber es ist kein Kalender für die Synchronisierung ausgewählt.</div>}
+      {!!sources.icloud?.skippedCalendars?.length && <div className="cal-note">Von Apple gesperrt und daher übersprungen: {sources.icloud.skippedCalendars.join(", ")}. Das betrifft meist Geburtstage und abonnierte Kalender.</div>}
       {sources.icloud?.state === "needs_reauth" && <div className="cal-note bad">Die iCloud-Zugangsdaten oder Berechtigung sind nicht mehr gültig. Bitte iCloud unten erneut verbinden.</div>}
       {taskSyncError && <div className="cal-note bad">{taskSyncError}</div>}
 

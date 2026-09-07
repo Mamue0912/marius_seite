@@ -8,7 +8,7 @@ export interface CalEvent {
   color: string; textColor: string; htmlLink: string | null;
   description?: string | null; source?: "google" | "icloud"; taskId?: string | null;
 }
-export interface CalSourceState { state: "connected" | "empty" | "no_calendars" | "error" | "needs_reauth"; events?: number; calendars?: number; selectedCalendars?: number; lastSyncedAt?: string | null }
+export interface CalSourceState { state: "connected" | "empty" | "no_calendars" | "error" | "needs_reauth"; events?: number; calendars?: number; selectedCalendars?: number; skippedCalendars?: string[]; lastSyncedAt?: string | null }
 export interface CalResult { connected: boolean; needsReauth?: boolean; error?: string; taskSyncError?: string; email?: string | null; sources?: Record<string, CalSourceState> }
 
 const store = { events: [] as CalEvent[], loaded: [] as Array<[number, number]>, email: null as string | null };

@@ -92,6 +92,7 @@ export async function GET(req: NextRequest) {
         events: icloudEvents.length,
         calendars: snapshot.calendarCount,
         selectedCalendars: snapshot.selectedCalendarCount,
+        skippedCalendars: snapshot.skippedCalendars,
         lastSyncedAt: syncedAt
       };
       await admin.from("icloud_accounts").update({
