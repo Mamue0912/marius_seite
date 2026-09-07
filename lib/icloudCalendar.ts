@@ -39,26 +39,47 @@ async function davRequest(
   method: "PROPFIND" | "REPORT",
   auth: string,
   depth: "0" | "1",
-  body: string
+  body: string,
+  stage = "CalDAV"
 ): Promise<string> {
-  const res = await fetch(url, {
-    method,
-    headers: {
-      authorization: auth,
-      depth,
-      "content-type": "application/xml; charset=utf-8",
-      "user-agent": UA
-    },
-    body,
-    cache: "no-store",
-    signal: AbortSignal.timeout(20_000)
-  });
-  if (res.status === 401) throw new IcloudAuthError("Apple-ID oder app-spezifisches Passwort ist ungültig.");
-  if (res.status !== 207 && res.status !== 200) {
-    const t = await res.text().catch(() => "");
-    throw new Error(`CalDAV ${method} ${res.status}: ${t.slice(0, 180)}`);
+  // Apple leitet caldav.icloud.com auf einen Shard-Host (pNN-caldav.icloud.com)
+  // um. Beim automatischen Folgen entfernt fetch den Authorization-Header, weil
+  // der Zielhost ein anderer ist – Apple antwortet dann mit 401. Deshalb folgen
+  // wir der Weiterleitung selbst und senden die Anmeldung erneut mit.
+  let target = url;
+  for (let hop = 0; hop < 4; hop++) {
+    const res = await fetch(target, {
+      method,
+      headers: {
+        authorization: auth,
+        depth,
+        "content-type": "application/xml; charset=utf-8",
+        "user-agent": UA
+      },
+      body,
+      cache: "no-store",
+      redirect: "manual",
+      signal: AbortSignal.timeout(20_000)
+    });
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers.get("location");
+      if (!location) throw new Error(`${stage}: Apple hat weitergeleitet, aber kein Ziel genannt (${res.status}).`);
+      target = new URL(location, target).toString();
+      continue;
+    }
+    if (res.status === 401 || res.status === 403) {
+      throw new IcloudAuthError(
+        "Apple hat den Zugriff abgelehnt. Bitte ein neues app-spezifisches Passwort erzeugen und erneut verbinden."
+      );
+    }
+    if (res.status !== 207 && res.status !== 200) {
+      // Bewusst ohne Antwortinhalt: der Status genügt zur Einordnung und es
+      // können keine Kontodaten nach außen gelangen.
+      throw new Error(`${stage}: Apple antwortete mit Status ${res.status}.`);
+    }
+    return res.text();
   }
-  return res.text();
+  throw new Error(`${stage}: Zu viele Weiterleitungen von Apple.`);
 }
 
 export class IcloudAuthError extends Error {}
@@ -102,26 +123,37 @@ function tagText(xml: string, tag: string): string | null {
 async function discoverHome(appleId: string, appPassword: string): Promise<string> {
   const auth = authHeader(appleId, appPassword);
 
-  const principalXml = await davRequest(
-    ROOT + "/",
-    "PROPFIND",
-    auth,
-    "0",
-    `<?xml version="1.0" encoding="utf-8"?><d:propfind ${NS_D}><d:prop><d:current-user-principal/></d:prop></d:propfind>`
-  );
-  const principalHref = hrefInside(principalXml, "current-user-principal");
-  if (!principalHref) throw new Error("CalDAV: Principal-URL nicht gefunden.");
-  const principalUrl = new URL(principalHref, ROOT).toString();
+  const principalBody = `<?xml version="1.0" encoding="utf-8"?><d:propfind ${NS_D}><d:prop><d:current-user-principal/></d:prop></d:propfind>`;
+  // Erst der Serverstamm, sonst der standardisierte Discovery-Pfad.
+  const candidates = [ROOT + "/", ROOT + "/.well-known/caldav"];
+  let principalHref: string | null = null;
+  let principalBase = ROOT;
+  let lastError: Error | null = null;
+  for (const candidate of candidates) {
+    try {
+      const xml = await davRequest(candidate, "PROPFIND", auth, "0", principalBody, "Anmeldung bei Apple");
+      const found = hrefInside(xml, "current-user-principal");
+      if (found) { principalHref = found; principalBase = candidate; break; }
+    } catch (error) {
+      if (error instanceof IcloudAuthError) throw error;
+      lastError = error as Error;
+    }
+  }
+  if (!principalHref) {
+    throw new Error(lastError?.message || "Apple hat kein Benutzerkonto (Principal) zurückgegeben.");
+  }
+  const principalUrl = new URL(principalHref, principalBase).toString();
 
   const homeXml = await davRequest(
     principalUrl,
     "PROPFIND",
     auth,
     "0",
-    `<?xml version="1.0" encoding="utf-8"?><d:propfind ${NS_D} ${NS_C}><d:prop><c:calendar-home-set/></d:prop></d:propfind>`
+    `<?xml version="1.0" encoding="utf-8"?><d:propfind ${NS_D} ${NS_C}><d:prop><c:calendar-home-set/></d:prop></d:propfind>`,
+    "Kalenderliste abrufen"
   );
   const homeHref = hrefInside(homeXml, "calendar-home-set");
-  if (!homeHref) throw new Error("CalDAV: Kalender-Home nicht gefunden.");
+  if (!homeHref) throw new Error("Apple hat keinen Kalenderbereich (calendar-home-set) zurückgegeben.");
   return new URL(homeHref, principalUrl).toString();
 }
 

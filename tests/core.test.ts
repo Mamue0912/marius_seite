@@ -4,7 +4,7 @@ import { dayDistance, taskBucket } from "../lib/taskDates";
 import { mapLimit } from "../lib/concurrency";
 import { messageContentKey } from "../lib/mailKeys";
 import { requestJson } from "../lib/http";
-import { extractCalendarData, parseIcsEvents, normalizeColor, readableText } from "../lib/icloudCalendar";
+import { extractCalendarData, parseIcsEvents, normalizeColor, readableText, verifyIcloud, IcloudAuthError } from "../lib/icloudCalendar";
 import { calendarEventTaskRecord, staleExternalIds } from "../lib/calendarTaskSync";
 import { safeInternalPath } from "../lib/safeNavigation";
 import { isPrivateAddress, resolvePublicNetworkEndpoint } from "../lib/safeRemote";
@@ -130,4 +130,39 @@ test("Kalenderaufgaben bewahren Ganztagsdatum und ermitteln Löschkandidaten", (
   assert.equal(row.starts_at, "2026-09-07T12:00:00.000Z");
   assert.equal(row.source, "icloud_calendar");
   assert.deepEqual(staleExternalIds([{external_id:"a"},{external_id:"b"}], ["b","c"]), ["a"]);
+});
+
+test("iCloud folgt Apple-Weiterleitungen und behält die Anmeldung", async () => {
+ const original = globalThis.fetch;
+ const seen: Array<{ url: string; auth: string | null }> = [];
+ const dav = (xml: string) => new Response(xml, { status: 207, headers: { "content-type": "application/xml" } });
+ globalThis.fetch = (async (input: any, init: any) => {
+  const url = String(input);
+  seen.push({ url, auth: new Headers(init?.headers).get("authorization") });
+  if (seen.length === 1) return new Response(null, { status: 302, headers: { location: "https://p52-caldav.icloud.com/" } });
+  if (url === "https://p52-caldav.icloud.com/") {
+   return dav('<multistatus xmlns="DAV:"><response><href>/</href><propstat><prop><current-user-principal><href>/123/principal/</href></current-user-principal></prop></propstat></response></multistatus>');
+  }
+  if (url.endsWith("/123/principal/")) {
+   return dav('<multistatus xmlns="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav"><response><href>/123/principal/</href><propstat><prop><C:calendar-home-set><href>https://p52-caldav.icloud.com/123/calendars/</href></C:calendar-home-set></prop></propstat></response></multistatus>');
+  }
+  return dav('<multistatus xmlns="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav" xmlns:A="http://apple.com/ns/ical/"><response><href>/123/calendars/privat/</href><propstat><prop><resourcetype><collection/><C:calendar/></resourcetype><displayname>Privat</displayname><A:calendar-color>#FF2968FF</A:calendar-color><C:supported-calendar-component-set><C:comp name="VEVENT"/></C:supported-calendar-component-set></prop></propstat></response></multistatus>');
+ }) as any;
+ try {
+  const result = await verifyIcloud("person@icloud.com", "abcd-efgh-ijkl-mnop");
+  assert.equal(result.calendars, 1);
+  assert.equal(result.home, "https://p52-caldav.icloud.com/123/calendars/");
+  // Entscheidend: auch nach der Weiterleitung auf den Shard-Host wird die
+  // Anmeldung weiterhin mitgesendet.
+  assert.ok(seen.length >= 2);
+  assert.ok(seen.every((entry) => (entry.auth || "").startsWith("Basic ")));
+  assert.ok(seen[1].url.startsWith("https://p52-caldav.icloud.com/"));
+ } finally { globalThis.fetch = original; }
+});
+test("iCloud meldet fehlende Berechtigung (403) als Zugangsproblem", async () => {
+ const original = globalThis.fetch;
+ globalThis.fetch = (async () => new Response("nope", { status: 403 })) as any;
+ try {
+  await assert.rejects(() => verifyIcloud("person@icloud.com", "abcd"), (error: unknown) => error instanceof IcloudAuthError);
+ } finally { globalThis.fetch = original; }
 });

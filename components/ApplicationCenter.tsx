@@ -121,10 +121,12 @@ export default function ApplicationCenter({ accounts, sendEnabled, initialSectio
       // Liste nicht als "keine Bewerbungen" interpretieren.
       const loaded = await loadApps();
       if (loaded?.[0]?.id) { openApp(loaded[0].id); return; }
-      // Ohne Bewerbung gibt es keinen Chat-Kontext. Das wird erklärt, statt den
-      // Nutzer kommentarlos auf eine andere Seite zu schicken.
+      // Ohne Bewerbung gibt es keinen Chat-Kontext (der Chat gehört immer zu
+      // einer Stelle). Ein Ladefehler wird davon klar unterschieden, damit
+      // "keine Bewerbungen" nicht fälschlich behauptet wird.
       nav("aktiv");
-      notify("Der Bewerbungs-Chat bezieht sich immer auf eine Stelle. Lege zuerst eine Bewerbung an.");
+      if (loaded === null) notify("Bewerbungen konnten nicht geladen werden. Bitte erneut versuchen.", true);
+      else notify("Der Bewerbungs-Chat gehört immer zu einer Stelle. Lege zuerst über „Neue Stelle“ eine Bewerbung an – danach öffnet sich der Chat automatisch.");
       return;
     }
     nav(key);

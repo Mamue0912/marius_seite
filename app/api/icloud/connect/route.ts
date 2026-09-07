@@ -42,11 +42,14 @@ export async function POST(req: NextRequest) {
     if (e instanceof IcloudAuthError) {
       return NextResponse.json({ error: e.message }, { status: 400 });
     }
-    const message = (e as Error).message;
-    const safe = message.includes("keine Kalender") || message.includes("keinen Kalender")
-      ? message
-      : "Apple-Kalender konnten nicht gelesen werden. Bitte App-Passwort und Kalenderberechtigung prüfen.";
-    return NextResponse.json({ error: safe }, { status: 502 });
+    // Die Meldungen benennen nur die Stufe und ggf. den HTTP-Status. Sie
+    // enthalten weder Zugangsdaten noch Antwortinhalte und dürfen deshalb
+    // sichtbar sein – sonst ist die Ursache nicht zu ermitteln.
+    const message = (e as Error).message?.trim();
+    return NextResponse.json(
+      { error: message || "Apple-Kalender konnten nicht gelesen werden. Bitte App-Passwort und Kalenderberechtigung prüfen." },
+      { status: 502 }
+    );
   }
 
   const { error } = await supabaseAdmin()
