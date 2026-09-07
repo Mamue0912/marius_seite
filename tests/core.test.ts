@@ -301,14 +301,23 @@ test("Aussortierte Termine verschwinden nicht, sondern werden ausgeblendet", () 
  }) as any;
  // Feiertage und Ferien werden angelegt, aber ausgeblendet ("ignored"),
  // damit sie ueber den Filter zurueckholbar bleiben.
- assert.equal(classifyCalendarEvent(ev("Tag der Deutschen Einheit")), "ignored");
- assert.equal(classifyCalendarEvent(ev("Reformationstag")), "ignored");
- assert.equal(classifyCalendarEvent(ev("Herbstferien 2026 Hamburg")), "ignored");
- assert.equal(classifyCalendarEvent(ev("Oma", { calendar: "Geburtstage" })), "ignored");
+ assert.equal(classifyCalendarEvent(ev("Tag der Deutschen Einheit")), "ignoredHard");
+ assert.equal(classifyCalendarEvent(ev("Reformationstag")), "ignoredHard");
+ assert.equal(classifyCalendarEvent(ev("Herbstferien 2026 Hamburg")), "ignoredHard");
+ assert.equal(classifyCalendarEvent(ev("Oma", { calendar: "Geburtstage" })), "ignoredHard");
  // Serien-Master wird ausgeblendet, Einzelinstanzen erzeugen gar nichts.
- assert.equal(classifyCalendarEvent(ev("Karate-Training", { recurring: true })), "ignored");
+ assert.equal(classifyCalendarEvent(ev("Karate-Training", { recurring: true })), "ignoredSoft");
  assert.equal(classifyCalendarEvent(ev("Karate-Training", { recurring: true, recurrenceInstance: true })), "skip");
  // Echte Aufgaben bleiben Aufgaben.
  assert.equal(classifyCalendarEvent(ev("Punica Cup")), "task");
  assert.equal(classifyCalendarEvent(ev("Lutz Athletikplan")), "task");
+});
+
+test("Zurueckgeholte Serien bleiben Aufgaben, Feiertage nicht", () => {
+ // Serie: Standard ist ausgeblendet, ein vorhandener Status des Nutzers gewinnt.
+ const serie = { id: "s1", title: "Lutz Feedbackbogen", recurring: true } as any;
+ assert.equal(classifyCalendarEvent(serie), "ignoredSoft");
+ // Feiertag: setzt sich immer durch, auch gegen einen alten Status.
+ const feiertag = { id: "f1", title: "Reformationstag" } as any;
+ assert.equal(classifyCalendarEvent(feiertag), "ignoredHard");
 });

@@ -36,7 +36,13 @@ const NON_TASK_TITLES = [
 // Kalender, die grundsätzlich nur Hintergrund liefern (abonniert oder generiert).
 const BACKGROUND_CALENDAR = /(feiertag|geburtstag|ferien|namenstag|holiday|birthday)/i;
 
-export type CalendarEventKind = "task" | "ignored" | "skip";
+// "ignoredHard" – eindeutig keine Aufgabe (Feiertage, Ferien, Geburtstage).
+//                 Setzt sich immer durch, auch gegen einen alten Status.
+// "ignoredSoft"  – standardmäßig keine Aufgabe, aber Ansichtssache. Serien
+//                 gehören hierher: Ein wöchentliches Training ist keine
+//                 Aufgabe, ein wöchentlicher Feedbackbogen dagegen schon.
+//                 Holt der Nutzer so etwas zurück, bleibt es dauerhaft drin.
+export type CalendarEventKind = "task" | "ignoredHard" | "ignoredSoft" | "skip";
 
 // Einordnung eines Kalendertermins:
 //   task    – wird als Aufgabe/Frist geführt
@@ -46,11 +52,13 @@ export type CalendarEventKind = "task" | "ignored" | "skip";
 //   skip    – erzeugt gar nichts (Einzelinstanzen einer Serie, sonst entstünde
 //             pro Wiederholung ein neuer Eintrag).
 export function classifyCalendarEvent(event: CalendarEvent): CalendarEventKind {
+  // Einzelinstanzen einer Serie erzeugen gar nichts, sonst entstünde pro
+  // Wiederholung ein Eintrag. Nur der Serien-Master wird geführt.
   if (event.recurring && event.recurrenceInstance) return "skip";
-  if (event.recurring) return "ignored";
-  if (event.calendar && BACKGROUND_CALENDAR.test(event.calendar)) return "ignored";
+  if (event.calendar && BACKGROUND_CALENDAR.test(event.calendar)) return "ignoredHard";
   const title = (event.title || "").toLowerCase().trim();
-  if (title && NON_TASK_TITLES.some((entry) => title.includes(entry))) return "ignored";
+  if (title && NON_TASK_TITLES.some((entry) => title.includes(entry))) return "ignoredHard";
+  if (event.recurring) return "ignoredSoft";
   return "task";
 }
 
@@ -112,11 +120,13 @@ export async function syncIcloudTasks(
   // aussortieren, wird trotzdem angelegt – nur als „Nicht als Aufgabe“
   // ausgeblendet. Damit verschwindet nichts spurlos und eine falsch
   // aussortierte Sache lässt sich mit einem Klick zurückholen.
-  const defaultStatusById = new Map<string, string>();
+  const forcedStatusById = new Map<string, string>();   // setzt sich immer durch
+  const defaultStatusById = new Map<string, string>();  // nur beim ersten Anlegen
   events = events.filter((event) => {
     const kind = classifyCalendarEvent(event);
     if (kind === "skip") return false;
-    if (kind === "ignored") defaultStatusById.set(event.id, "ignoriert");
+    if (kind === "ignoredHard") forcedStatusById.set(event.id, "ignoriert");
+    if (kind === "ignoredSoft") defaultStatusById.set(event.id, "ignoriert");
     return true;
   });
   const incomingIds = events.map((event) => event.id);
@@ -133,12 +143,17 @@ export async function syncIcloudTasks(
     for (const task of (data || []) as ExistingCalendarTask[]) existingById.set(task.external_id, task);
   }
 
-  // Regel-Aussortiertes ("ignoriert") setzt sich gegen einen vorhandenen Status
-  // durch – sonst blieben früher angelegte Feiertage und Ferien für immer in der
-  // Liste stehen. Bei allem Übrigen gewinnt der vorhandene Status, damit ein vom
-  // Nutzer selbst ausgeblendeter Termin ausgeblendet bleibt.
+  // Reihenfolge der Status: Eindeutiges (Feiertage, Ferien) setzt sich immer
+  // durch – sonst blieben früher angelegte Einträge für immer in der Liste.
+  // Sonst gewinnt der vorhandene Status, damit eine Entscheidung des Nutzers
+  // hält (zurückgeholte Serie bleibt Aufgabe, ausgeblendeter Termin bleibt
+  // ausgeblendet). Erst danach greift der Standard für neue Einträge.
   const records = events.map((event) =>
-    calendarEventTaskRecord(userId, event, defaultStatusById.get(event.id) || existingById.get(event.id)?.status)
+    calendarEventTaskRecord(
+      userId,
+      event,
+      forcedStatusById.get(event.id) || existingById.get(event.id)?.status || defaultStatusById.get(event.id)
+    )
   );
   for (const batch of chunks(records)) {
     if (!batch.length) continue;

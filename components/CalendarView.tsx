@@ -360,9 +360,11 @@ function WeekView({ anchor, byDay, todayKey, loading }: any) {
     const el = scrollRef.current;
     if (!el) return;
     const onWheel = (ev: WheelEvent) => {
-      // Zoomen nur mit Strg/Cmd. So bleibt das Mausrad fürs Scrollen frei –
-      // sonst käme man nicht an die Stunden oberhalb des Sichtbereichs.
-      if (!ev.ctrlKey && !ev.metaKey) { userScrolled.current = true; return; }
+      // Über dem Kalender skaliert das Mausrad die Zeitachse. Neben dem
+      // Kalender scrollt die Seite wie gewohnt – dieser Listener hängt nur am
+      // Raster, außerhalb wird nichts abgefangen.
+      // Shift + Rad bleibt als Weg zum Scrollen innerhalb des Rasters.
+      if (ev.shiftKey) { userScrolled.current = true; return; }
       ev.preventDefault();
       const h = hhRef.current;
       const next = Math.min(HOUR_MAX, Math.max(HOUR_MIN, Math.round(ev.deltaY < 0 ? h * 1.12 : h / 1.12)));
@@ -400,15 +402,35 @@ function WeekView({ anchor, byDay, todayKey, loading }: any) {
     return Math.max(0, earliest);
   }, [days, byDay]);
 
+  // Ein Durchlauf nach dem ersten Layout: erst dann hat der Scrollbereich eine
+  // Höhe und lässt sich überhaupt positionieren.
+  const [layoutReady, setLayoutReady] = useState(false);
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => setLayoutReady(true));
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
   // Beim Wochenwechsel wird die Startposition neu bestimmt.
   useEffect(() => { userScrolled.current = false; placedFor.current = null; }, [anchor]);
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || userScrolled.current || placedFor.current === earliestMin) return;
-    placedFor.current = earliestMin;
     // Etwas Luft über dem frühesten Eintrag, damit er nicht am Rand klebt.
-    el.scrollTop = Math.max(0, (earliestMin / 60) * hourHeight - 8);
-  }, [earliestMin, hourHeight]);
+    const target = Math.max(0, (earliestMin / 60) * hourHeight - 8);
+    // Vor dem ersten Layout ist der Bereich noch nicht scrollbar; ein Setzen
+    // von scrollTop würde dann auf 0 zurückfallen und – weil die Position als
+    // erledigt vermerkt wäre – nie wiederholt. Deshalb wird erst nach dem
+    // Layout gesetzt und nur bei tatsächlichem Erfolg vermerkt.
+    const apply = () => {
+      if (!el || userScrolled.current) return;
+      el.scrollTop = target;
+      if (Math.abs(el.scrollTop - target) < 2) placedFor.current = earliestMin;
+    };
+    apply();
+    const raf1 = requestAnimationFrame(() => { apply(); });
+    const raf2 = requestAnimationFrame(() => { apply(); });
+    return () => { cancelAnimationFrame(raf1); cancelAnimationFrame(raf2); };
+  }, [earliestMin, hourHeight, layoutReady]);
 
   const [nowMin, setNowMin] = useState(() => { const n = new Date(); return n.getHours() * 60 + n.getMinutes(); });
   useEffect(() => {
@@ -477,7 +499,7 @@ function WeekView({ anchor, byDay, todayKey, loading }: any) {
       </div>
 
       <div className="cal-tg-hint">
-        <span>Mausrad über dem Raster skaliert die Zeit · Shift + Mausrad scrollt</span>
+        <span>Mausrad über dem Kalender skaliert die Zeit · Shift + Mausrad scrollt · neben dem Kalender scrollt die Seite</span>
         <span className="cal-tg-zoom">
           <button type="button" onClick={() => setHourHeight((h) => Math.max(HOUR_MIN, Math.round(h / 1.25)))} aria-label="Zeitskala verkleinern">−</button>
           <button type="button" onClick={() => setHourHeight(HOUR_DEFAULT)}>Standard</button>
