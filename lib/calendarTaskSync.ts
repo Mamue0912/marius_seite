@@ -4,6 +4,7 @@ import {
   automaticFocusCategory, calendarFocusSignature, classifyCalendarFocus,
   focusKindFromCategory, isFocusKind, isManualFocusCategory
 } from "./calendarFocus";
+import { keepCurrentTask } from "./taskDates";
 
 export interface CalendarTaskSyncResult { taskIds:Map<string,string>; synced:number; deleted:number }
 type ExistingCalendarTask={id:string;external_id:string;status:string|null;category:string|null;title:string|null;calendar_name:string|null};
@@ -67,6 +68,7 @@ export async function syncIcloudTasks(userId:string,inputEvents:CalendarEvent[],
   const stateById=new Map<string,{status:string;category:string}>();
   const uniqueEvents=new Map(inputEvents.map((event)=>[event.id,event]));
   for(const event of uniqueEvents.values()) {
+    if(!keepCurrentTask({title:event.title,due_at:event.start})) continue;
     const decision=classifyCalendarFocus(event);
     const existing=existingById.get(event.id);
     const inherited=manualBySignature.get(calendarFocusSignature(event.title,event.calendar));

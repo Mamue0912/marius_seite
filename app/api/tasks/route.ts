@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/supabaseServer";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { taskDueDate, taskNote, taskTitle, validTaskPriority, validTaskStatus } from "@/lib/taskValidation";
 import { isFocusKind, manualFocusCategory, type CalendarFocusKind } from "@/lib/calendarFocus";
+import { keepCurrentTask } from "@/lib/taskDates";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,7 +17,7 @@ export async function GET() {
   const user=await requireUser(); if(!user) return NextResponse.json({error:"unauthorized"},{status:401});
   const {data,error}=await supabaseAdmin().from("tasks").select("*").eq("user_id",user.id).order("created_at",{ascending:false});
   if(error) return serverError("Aufgaben & Fristen konnten nicht geladen werden.");
-  return NextResponse.json({tasks:data||[]});
+  return NextResponse.json({tasks:(data||[]).filter((task)=>keepCurrentTask(task))});
 }
 
 export async function POST(req: NextRequest) {

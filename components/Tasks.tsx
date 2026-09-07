@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import Icon from "./Icon";
 import { Notice, notify } from "./Feedback";
 import { requestJson, jsonRequest } from "@/lib/http";
-import { taskBucket } from "@/lib/taskDates";
+import { keepCurrentTask, taskBucket } from "@/lib/taskDates";
 import { taskPriorityRank } from "@/lib/taskValidation";
 import { calendarFocusLabel, calendarTaskReason, focusKindFromCategory, type CalendarFocusKind } from "@/lib/calendarFocus";
 
@@ -46,7 +46,7 @@ function linkedHref(task: Task): string | null {
 }
 
 export default function Tasks({ initial, initialError = null, initialOpenId = null, initialSource = "all" }: { initial: Task[]; initialError?: string | null; initialOpenId?: string | null; initialSource?: string }) {
-  const [tasks, setTasks] = useState(initial);
+  const [tasks, setTasks] = useState(() => initial.filter((task) => keepCurrentTask(task)));
   const [title, setTitle] = useState("");
   const [note, setNote] = useState("");
   const [due, setDue] = useState("");
@@ -77,7 +77,7 @@ export default function Tasks({ initial, initialError = null, initialOpenId = nu
       const dueAt = due ? new Date(`${due}T${time || "12:00"}:00`).toISOString() : null;
       const data = await requestJson("/api/tasks", jsonRequest("POST", { title: title.trim(), note: note.trim() || null, due_at: dueAt, priority: prio, category, allow_no_date: allowNoDate }));
       if (!data.task) throw new Error("Eintrag konnte nicht gespeichert werden.");
-      setTasks((current) => [data.task, ...current]);
+      setTasks((current) => keepCurrentTask(data.task) ? [data.task, ...current] : current);
       setTitle(""); setNote(""); setDue(""); setTime("12:00"); setAllowNoDate(false); setCategory("Sonstiges"); setPrio("normal");
       notify("Aufgabe oder Frist hinzugefügt.");
     } catch (caught) { setError((caught as Error).message); }

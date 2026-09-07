@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dayDistance, taskBucket } from "../lib/taskDates";
+import { dayDistance, keepCurrentTask, taskBucket } from "../lib/taskDates";
 import { mapLimit } from "../lib/concurrency";
 import { messageContentKey } from "../lib/mailKeys";
 import { requestJson } from "../lib/http";
@@ -20,6 +20,13 @@ test("Datumsgruppen vergleichen Kalendertage", () => {
  assert.equal(taskBucket({status:"offen",due_at:"2026-03-28"},now),"Überfällig");
  assert.equal(taskBucket({status:"offen",due_at:"2026-03-29"},now),"Heute");
  assert.equal(taskBucket({status:"offen",due_at:"2026-04-05"},now),"Diese Woche");
+});
+test("Vergangene Aufgaben verschwinden, Feedbackbögen bleiben",()=>{
+ const now=new Date("2026-09-07T12:00:00+02:00");
+ assert.equal(keepCurrentTask({title:"Alte Aufgabe",due_at:"2026-09-06T12:00:00+02:00"},now),false);
+ assert.equal(keepCurrentTask({title:"Lutz Feedbackbogen",due_at:"2026-09-01T12:00:00+02:00"},now),true);
+ assert.equal(keepCurrentTask({title:"Heutige Aufgabe",due_at:"2026-09-07T00:10:00+02:00"},now),true);
+ assert.equal(keepCurrentTask({title:"Ohne Datum",due_at:null},now),true);
 });
 test("Mail-Cache-Schlüssel trennen Konto, Ordner und Bildmodus",()=>{
  assert.notEqual(messageContentKey("a","INBOX",5,false),messageContentKey("b","INBOX",5,false));

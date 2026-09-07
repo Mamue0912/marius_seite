@@ -14,3 +14,32 @@ export function taskBucket(task: TaskLike, now = new Date()): string {
   if (days === null) return "Ohne Datum";
   return days < 0 ? "Überfällig" : days === 0 ? "Heute" : days <= 7 ? "Diese Woche" : "Später";
 }
+
+type DatedTaskLike = TaskLike & { title?: string | null };
+
+function calendarDateKey(value: string, timeZone: string): string | null {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return null;
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date);
+  const part = (type: string) => parts.find((item) => item.type === type)?.value || "";
+  const year = part("year"), month = part("month"), day = part("day");
+  return year && month && day ? `${year}-${month}-${day}` : null;
+}
+
+export function isFeedbackFormTask(task: DatedTaskLike): boolean {
+  return (task.title || "").toLocaleLowerCase("de").includes("feedbackbogen");
+}
+
+/** Vergangene Aufgaben bleiben aus den aktiven Cockpit-Ansichten. Aufgaben ohne Datum und Feedbackbögen bleiben sichtbar. */
+export function keepCurrentTask(task: DatedTaskLike, now = new Date(), timeZone = "Europe/Berlin"): boolean {
+  if (!task.due_at || isFeedbackFormTask(task)) return true;
+  const due = calendarDateKey(task.due_at, timeZone);
+  const today = calendarDateKey(now.toISOString(), timeZone);
+  return !due || !today || due >= today;
+}

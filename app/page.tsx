@@ -5,6 +5,7 @@ import LoginForm from "@/components/LoginForm";
 import AppShell from "@/components/AppShell";
 import Overview from "@/components/Overview";
 import { calendarTaskIsInFocus } from "@/lib/calendarFocus";
+import { keepCurrentTask } from "@/lib/taskDates";
 
 export const dynamic = "force-dynamic";
 
@@ -39,7 +40,7 @@ export default async function Home() {
   const rows = inboxResult.data || [];
   const appRows = applicationResult.data || [];
   const taskRows = taskResult.data || [];
-  const focusTaskRows = taskRows.filter((task) => calendarTaskIsInFocus(task));
+  const focusTaskRows = taskRows.filter((task) => keepCurrentTask(task) && calendarTaskIsInFocus(task));
   const loadErrors = {
     mail: inboxResult.error ? "E-Mails konnten nicht geladen werden." : null,
     applications: applicationResult.error ? "Bewerbungen konnten nicht geladen werden." : null,
