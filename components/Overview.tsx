@@ -81,7 +81,10 @@ export default function Overview({ accounts, summary, newestUnread = [], needsRe
           <div className="ov-agenda-list">
             {openTasks.slice(focusTask ? 1 : 0, focusTask ? 4 : 3).map((task) => (
               <a href={`/tasks?open=${task.id}`} className="ov-agenda-row" key={task.id}>
-                <span className={"ov-agenda-dot " + (task.priority === "hoch" ? "high" : "task")} />
+                {/* Kein generisches "task" als Zusatzklasse: das ist zugleich die
+                    globale Klasse der Aufgaben-Karten und hat den Punkt mit deren
+                    Innenabstand zu einer grossen Kugel aufgeblaeht. */}
+                <span className={"ov-agenda-dot" + (task.priority === "hoch" ? " high" : task.source === "mail" || task.source === "bewerbung" ? " deadline" : "")} />
                 <span className="ov-agenda-main"><strong>{task.title}</strong><small>{task.source === "icloud_calendar" ? "iCloud-Kalender" : task.source === "mail" ? "E-Mail-Frist" : task.source === "bewerbung" ? "Bewerbungsfrist" : "Aufgabe"} · {dueLabel(task.due_at)}</small></span>
                 <Icon name="chevron" size={15} />
               </a>

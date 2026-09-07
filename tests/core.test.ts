@@ -5,7 +5,7 @@ import { mapLimit } from "../lib/concurrency";
 import { messageContentKey } from "../lib/mailKeys";
 import { requestJson } from "../lib/http";
 import { extractCalendarData, parseIcsEvents, normalizeColor, readableText, verifyIcloud, IcloudAuthError, hrefInside } from "../lib/icloudCalendar";
-import { calendarEventTaskRecord, staleExternalIds } from "../lib/calendarTaskSync";
+import { calendarEventTaskRecord, staleExternalIds, isTaskWorthyEvent } from "../lib/calendarTaskSync";
 import { safeInternalPath } from "../lib/safeNavigation";
 import { isPrivateAddress, resolvePublicNetworkEndpoint } from "../lib/safeRemote";
 import { taskDueDate, taskNote, taskPriorityRank, taskTitle, validTaskPriority, validTaskStatus } from "../lib/taskValidation";
@@ -273,4 +273,23 @@ test("Serientermine werden erkannt und nicht zu Aufgaben", () => {
  assert.equal(instanz[0].recurring, true);
  const einmalig = parseIcsEvents(["BEGIN:VCALENDAR","BEGIN:VEVENT","UID:abgabe","DTSTART:20260910T090000Z","SUMMARY:Abgabe Referat","END:VEVENT","END:VCALENDAR"].join("\r\n"));
  assert.equal(einmalig[0].recurring, false);
+});
+
+test("Kalendereintraege werden als Aufgabe oder Nicht-Aufgabe eingeordnet", () => {
+ const ev = (title: string, extra: any = {}) => ({
+  id: "icloud:c:" + title, title, start: "2026-10-03", end: null, allDay: true,
+  location: null, calendar: "Privat", color: "#fff", textColor: "#000", htmlLink: null, ...extra
+ }) as any;
+ // Feiertage und Gedenktage sind Kalenderwissen, keine Aufgaben.
+ assert.equal(isTaskWorthyEvent(ev("Tag der Deutschen Einheit")), false);
+ assert.equal(isTaskWorthyEvent(ev("Weihnachten")), false);
+ assert.equal(isTaskWorthyEvent(ev("Ostermontag")), false);
+ // Hintergrundkalender liefern nie Aufgaben.
+ assert.equal(isTaskWorthyEvent(ev("Oma", { calendar: "Geburtstage" })), false);
+ // Wiederkehrendes ist ein Rhythmus, keine Frist.
+ assert.equal(isTaskWorthyEvent(ev("Karate-Training", { recurring: true })), false);
+ // Echte Termine mit Handlungsbezug bleiben Aufgaben.
+ assert.equal(isTaskWorthyEvent(ev("Punica Cup")), true);
+ assert.equal(isTaskWorthyEvent(ev("Lutz Athletikplan")), true);
+ assert.equal(isTaskWorthyEvent(ev("Abgabe Referat")), true);
 });

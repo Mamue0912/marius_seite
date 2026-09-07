@@ -1,5 +1,9 @@
 export const TASK_PRIORITIES = ["niedrig", "normal", "hoch", "dringend"] as const;
-export const TASK_STATUSES = ["offen", "warten", "erledigt"] as const;
+// "ignoriert": ein importierter Kalendertermin, den der Nutzer ausdrücklich
+// nicht als Aufgabe führen will. Der Eintrag bleibt erhalten (und damit
+// umkehrbar), taucht aber nicht mehr in der Liste auf. Die Synchronisierung
+// übernimmt vorhandene Status, deshalb überlebt die Entscheidung jeden Abgleich.
+export const TASK_STATUSES = ["offen", "warten", "erledigt", "ignoriert"] as const;
 export const TASK_SOURCES = ["manuell", "mail", "bewerbung", "apple", "apple_erinnerungen", "icloud_calendar"] as const;
 
 export function taskPriorityRank(value: string | null | undefined): number {

@@ -99,7 +99,11 @@ export default function Tasks({ initial, initialError = null, initialOpenId = nu
   const normalizedQuery = query.toLocaleLowerCase("de");
   const categories = Array.from(new Set(tasks.map((task) => task.category).filter(Boolean) as string[])).sort();
   const visible = tasks.filter((task) => {
-    const statusMatches = statusFilter === "all" || (statusFilter === "open" ? task.status !== "erledigt" : task.status === statusFilter);
+    // "ignoriert" erscheint nur, wenn ausdrücklich danach gefiltert wird –
+    // die Einträge bleiben erhalten und lassen sich zurückholen.
+    const statusMatches = statusFilter === "ignoriert"
+      ? task.status === "ignoriert"
+      : task.status !== "ignoriert" && (statusFilter === "all" || (statusFilter === "open" ? task.status !== "erledigt" : task.status === statusFilter));
     return statusMatches && (sourceFilter === "all" || task.source === sourceFilter)
       && (categoryFilter === "all" || task.category === categoryFilter)
       && (task.title + " " + (task.note || "") + " " + (task.calendar_name || "")).toLocaleLowerCase("de").includes(normalizedQuery);
@@ -126,7 +130,7 @@ export default function Tasks({ initial, initialError = null, initialOpenId = nu
 
       <div className="task-filter task-filter-unified">
         <input type="search" aria-label="Aufgaben und Fristen durchsuchen" placeholder="Aufgaben & Fristen durchsuchen" value={query} onChange={(event) => setQuery(event.target.value)} />
-        <select aria-label="Status filtern" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="open">Offen</option><option value="all">Alle Status</option><option value="warten">Warten</option><option value="erledigt">Erledigt</option></select>
+        <select aria-label="Status filtern" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="open">Offen</option><option value="all">Alle Status</option><option value="warten">Warten</option><option value="erledigt">Erledigt</option><option value="ignoriert">Nicht als Aufgabe</option></select>
         <select aria-label="Quelle filtern" value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)}><option value="all">Alle Quellen</option>{Object.entries(SOURCE_LABEL).map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select>
         <select aria-label="Kategorie filtern" value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}><option value="all">Alle Kategorien</option>{categories.map((item) => <option key={item}>{item}</option>)}</select>
       </div>
@@ -139,7 +143,9 @@ export default function Tasks({ initial, initialError = null, initialOpenId = nu
             <div className="task-body"><div className="task-title">{task.title}</div>{task.note && <div className="task-note">{task.note}</div>}
               <div className="task-meta"><span>{dueText(task)}</span><span>{PRIORITY_LABEL[task.priority] || "Normal"}</span><span>{task.category || "Sonstiges"}</span><span>{SOURCE_LABEL[task.source] || task.source}</span>{task.calendar_name && <span>{task.calendar_name}</span>}{task.location && <span>{task.location}</span>}</div>
             </div>
-            <div className="task-actions">{href && <a className="icon-button" href={href} title="Quelle öffnen" aria-label="Quelle öffnen"><Icon name="arrow" /></a>}{task.status !== "erledigt" && <button type="button" className="icon-button" disabled={pending.has(task.id)} title={task.status === "warten" ? "Wieder aufnehmen" : "Auf Rückmeldung warten"} onClick={() => void patch(task,{status:task.status === "warten" ? "offen" : "warten"})}><Icon name={task.status === "warten" ? "refresh" : "clock"} /></button>}{!task.external_id && <button type="button" className="icon-button" aria-label="Eintrag löschen" disabled={pending.has(task.id)} onClick={() => void remove(task)}><Icon name="trash" /></button>}</div>
+            <div className="task-actions">{href && <a className="icon-button" href={href} title="Quelle öffnen" aria-label="Quelle öffnen"><Icon name="arrow" /></a>}{task.status !== "erledigt" && <button type="button" className="icon-button" disabled={pending.has(task.id)} title={task.status === "warten" ? "Wieder aufnehmen" : "Auf Rückmeldung warten"} onClick={() => void patch(task,{status:task.status === "warten" ? "offen" : "warten"})}><Icon name={task.status === "warten" ? "refresh" : "clock"} /></button>}{task.external_id && task.status !== "ignoriert" && <button type="button" className="icon-button" title="Keine Aufgabe – dauerhaft aus der Liste nehmen" aria-label="Nicht als Aufgabe führen" disabled={pending.has(task.id)} onClick={() => void patch(task,{status:"ignoriert"})}><Icon name="close" /></button>}
+            {task.status === "ignoriert" && <button type="button" className="icon-button" title="Doch als Aufgabe führen" aria-label="Doch als Aufgabe führen" disabled={pending.has(task.id)} onClick={() => void patch(task,{status:"offen"})}><Icon name="refresh" /></button>}
+            {!task.external_id && <button type="button" className="icon-button" aria-label="Eintrag löschen" disabled={pending.has(task.id)} onClick={() => void remove(task)}><Icon name="trash" /></button>}</div>
           </article>; })}
         </section> : null;
       })}

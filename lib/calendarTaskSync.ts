@@ -19,6 +19,31 @@ function allDayInstant(value: string | null): string | null {
   return /^\d{4}-\d{2}-\d{2}$/.test(date) ? `${date}T12:00:00.000Z` : null;
 }
 
+// Feiertage und Gedenktage sind Kalenderwissen, keine Aufgaben. Die Liste ist
+// bewusst eng gehalten: Nur eindeutige Fälle werden automatisch aussortiert,
+// damit nichts Wichtiges stillschweigend verschwindet.
+const HOLIDAY_TITLES = [
+  "neujahr", "silvester", "heilige drei könige", "heilige drei koenige", "karfreitag",
+  "ostersonntag", "ostermontag", "ostern", "tag der arbeit", "christi himmelfahrt",
+  "pfingstsonntag", "pfingstmontag", "pfingsten", "fronleichnam", "mariä himmelfahrt",
+  "maria himmelfahrt", "tag der deutschen einheit", "reformationstag", "allerheiligen",
+  "buß- und bettag", "buss- und bettag", "heiligabend", "weihnachtstag", "weihnachten",
+  "muttertag", "vatertag", "nikolaus", "halloween", "valentinstag"
+];
+
+// Kalender, die grundsätzlich nur Hintergrund liefern (abonniert oder generiert).
+const BACKGROUND_CALENDAR = /(feiertag|geburtstag|ferien|namenstag|holiday|birthday)/i;
+
+// Entscheidet, ob ein Kalendertermin als Aufgabe/Frist geführt wird.
+export function isTaskWorthyEvent(event: CalendarEvent): boolean {
+  // Wiederkehrendes (Training, feste Wochenrhythmen) ist ein Rhythmus, keine Frist.
+  if (event.recurring) return false;
+  if (event.calendar && BACKGROUND_CALENDAR.test(event.calendar)) return false;
+  const title = (event.title || "").toLowerCase().trim();
+  if (title && HOLIDAY_TITLES.some((holiday) => title === holiday || title.includes(holiday))) return false;
+  return true;
+}
+
 export function calendarEventTaskRecord(
   userId: string,
   event: CalendarEvent,
@@ -69,11 +94,11 @@ export async function syncIcloudTasks(
   timeMax: string
 ): Promise<CalendarTaskSyncResult> {
   const admin = supabaseAdmin();
-  // Serientermine (tägliches/wöchentliches Training, feste Wochenrhythmen) sind
-  // keine Aufgaben und keine Fristen. Sie bleiben im Kalender sichtbar, werden
-  // hier aber nicht übernommen. Da ihre IDs damit nicht mehr im Eingang stehen,
-  // räumt der Löschabgleich unten bereits angelegte Einträge selbsttätig weg.
-  events = events.filter((event) => !event.recurring);
+  // Nicht jeder Kalendereintrag ist eine Aufgabe oder Frist. Aussortiert wird
+  // nur, was sicher erkennbar ist (Serien, Feiertage, Hintergrundkalender).
+  // Alles andere wird übernommen und kann im Bereich „Aufgaben & Fristen“ mit
+  // einem Klick dauerhaft als „keine Aufgabe“ markiert werden.
+  events = events.filter(isTaskWorthyEvent);
   const incomingIds = events.map((event) => event.id);
   const existingById = new Map<string, ExistingCalendarTask>();
 
