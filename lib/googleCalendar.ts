@@ -137,6 +137,8 @@ export interface CalendarEvent {
   htmlLink: string | null;
   // Serientermin: gehoert in den Kalender, aber nicht in Aufgaben & Fristen.
   recurring?: boolean;
+  // Einzelne Instanz einer Serie (im Gegensatz zum Serien-Master).
+  recurrenceInstance?: boolean;
   description?: string | null;
   source?: "google" | "icloud";
   taskId?: string | null;

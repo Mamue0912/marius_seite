@@ -22,26 +22,40 @@ function allDayInstant(value: string | null): string | null {
 // Feiertage und Gedenktage sind Kalenderwissen, keine Aufgaben. Die Liste ist
 // bewusst eng gehalten: Nur eindeutige Fälle werden automatisch aussortiert,
 // damit nichts Wichtiges stillschweigend verschwindet.
-const HOLIDAY_TITLES = [
+const NON_TASK_TITLES = [
   "neujahr", "silvester", "heilige drei könige", "heilige drei koenige", "karfreitag",
   "ostersonntag", "ostermontag", "ostern", "tag der arbeit", "christi himmelfahrt",
   "pfingstsonntag", "pfingstmontag", "pfingsten", "fronleichnam", "mariä himmelfahrt",
   "maria himmelfahrt", "tag der deutschen einheit", "reformationstag", "allerheiligen",
   "buß- und bettag", "buss- und bettag", "heiligabend", "weihnachtstag", "weihnachten",
-  "muttertag", "vatertag", "nikolaus", "halloween", "valentinstag"
+  "muttertag", "vatertag", "nikolaus", "halloween", "valentinstag",
+  // Ferienzeiträume sind Zeitraum-Wissen, keine Aufgabe.
+  "ferien", "feiertag", "brückentag", "brueckentag"
 ];
 
 // Kalender, die grundsätzlich nur Hintergrund liefern (abonniert oder generiert).
 const BACKGROUND_CALENDAR = /(feiertag|geburtstag|ferien|namenstag|holiday|birthday)/i;
 
-// Entscheidet, ob ein Kalendertermin als Aufgabe/Frist geführt wird.
-export function isTaskWorthyEvent(event: CalendarEvent): boolean {
-  // Wiederkehrendes (Training, feste Wochenrhythmen) ist ein Rhythmus, keine Frist.
-  if (event.recurring) return false;
-  if (event.calendar && BACKGROUND_CALENDAR.test(event.calendar)) return false;
+export type CalendarEventKind = "task" | "ignored" | "skip";
+
+// Einordnung eines Kalendertermins:
+//   task    – wird als Aufgabe/Frist geführt
+//   ignored – wird angelegt, aber als „Nicht als Aufgabe“ ausgeblendet. So
+//             verschwindet nichts spurlos und lässt sich mit einem Klick
+//             zurückholen, falls die Regel danebenlag.
+//   skip    – erzeugt gar nichts (Einzelinstanzen einer Serie, sonst entstünde
+//             pro Wiederholung ein neuer Eintrag).
+export function classifyCalendarEvent(event: CalendarEvent): CalendarEventKind {
+  if (event.recurring && event.recurrenceInstance) return "skip";
+  if (event.recurring) return "ignored";
+  if (event.calendar && BACKGROUND_CALENDAR.test(event.calendar)) return "ignored";
   const title = (event.title || "").toLowerCase().trim();
-  if (title && HOLIDAY_TITLES.some((holiday) => title === holiday || title.includes(holiday))) return false;
-  return true;
+  if (title && NON_TASK_TITLES.some((entry) => title.includes(entry))) return "ignored";
+  return "task";
+}
+
+export function isTaskWorthyEvent(event: CalendarEvent): boolean {
+  return classifyCalendarEvent(event) === "task";
 }
 
 export function calendarEventTaskRecord(
@@ -94,11 +108,17 @@ export async function syncIcloudTasks(
   timeMax: string
 ): Promise<CalendarTaskSyncResult> {
   const admin = supabaseAdmin();
-  // Nicht jeder Kalendereintrag ist eine Aufgabe oder Frist. Aussortiert wird
-  // nur, was sicher erkennbar ist (Serien, Feiertage, Hintergrundkalender).
-  // Alles andere wird übernommen und kann im Bereich „Aufgaben & Fristen“ mit
-  // einem Klick dauerhaft als „keine Aufgabe“ markiert werden.
-  events = events.filter(isTaskWorthyEvent);
+  // Nicht jeder Kalendereintrag ist eine Aufgabe oder Frist. Was die Regeln
+  // aussortieren, wird trotzdem angelegt – nur als „Nicht als Aufgabe“
+  // ausgeblendet. Damit verschwindet nichts spurlos und eine falsch
+  // aussortierte Sache lässt sich mit einem Klick zurückholen.
+  const defaultStatusById = new Map<string, string>();
+  events = events.filter((event) => {
+    const kind = classifyCalendarEvent(event);
+    if (kind === "skip") return false;
+    if (kind === "ignored") defaultStatusById.set(event.id, "ignoriert");
+    return true;
+  });
   const incomingIds = events.map((event) => event.id);
   const existingById = new Map<string, ExistingCalendarTask>();
 
@@ -113,7 +133,13 @@ export async function syncIcloudTasks(
     for (const task of (data || []) as ExistingCalendarTask[]) existingById.set(task.external_id, task);
   }
 
-  const records = events.map((event) => calendarEventTaskRecord(userId, event, existingById.get(event.id)?.status));
+  // Regel-Aussortiertes ("ignoriert") setzt sich gegen einen vorhandenen Status
+  // durch – sonst blieben früher angelegte Feiertage und Ferien für immer in der
+  // Liste stehen. Bei allem Übrigen gewinnt der vorhandene Status, damit ein vom
+  // Nutzer selbst ausgeblendeter Termin ausgeblendet bleibt.
+  const records = events.map((event) =>
+    calendarEventTaskRecord(userId, event, defaultStatusById.get(event.id) || existingById.get(event.id)?.status)
+  );
   for (const batch of chunks(records)) {
     if (!batch.length) continue;
     const { error } = await admin.from("tasks").upsert(batch, { onConflict: "user_id,source,external_id" });

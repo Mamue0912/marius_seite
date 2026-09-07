@@ -390,6 +390,7 @@ async function fetchCalendarEvents(
         end: ev.end,
         allDay: ev.allDay,
         recurring: ev.recurring,
+        recurrenceInstance: !!ev.recurrenceId,
         location: ev.location,
         calendar: cal.name,
         color: cal.color,

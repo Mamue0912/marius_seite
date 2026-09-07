@@ -343,20 +343,26 @@ function WeekView({ anchor, byDay, todayKey, loading }: any) {
   });
   const scrollRef = useRef<HTMLDivElement>(null);
   const hhRef = useRef(hourHeight);
+  // Sobald der Nutzer selbst scrollt, wird die Startposition nicht mehr gesetzt.
+  const userScrolled = useRef(false);
+  const placedFor = useRef<number | null>(null);
   useEffect(() => {
     hhRef.current = hourHeight;
     try { localStorage.setItem("calHourHeight", String(hourHeight)); } catch { /* egal */ }
   }, [hourHeight]);
 
-  // Mausrad skaliert die Zeitachse; der Punkt unter dem Zeiger bleibt stehen.
-  // Shift + Rad scrollt weiterhin normal. Der Listener wird bewusst selbst
-  // registriert (passive: false), weil React Rad-Ereignisse sonst passiv
-  // behandelt und preventDefault wirkungslos bliebe.
+  // Strg/Cmd + Mausrad skaliert die Zeitachse; der Punkt unter dem Zeiger
+  // bleibt dabei stehen. Das blanke Mausrad scrollt ganz normal, damit die
+  // Stunden oberhalb des Sichtbereichs erreichbar bleiben. Der Listener wird
+  // bewusst selbst registriert (passive: false), weil React Rad-Ereignisse
+  // sonst passiv behandelt und preventDefault wirkungslos bliebe.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const onWheel = (ev: WheelEvent) => {
-      if (ev.shiftKey) return;
+      // Zoomen nur mit Strg/Cmd. So bleibt das Mausrad fürs Scrollen frei –
+      // sonst käme man nicht an die Stunden oberhalb des Sichtbereichs.
+      if (!ev.ctrlKey && !ev.metaKey) { userScrolled.current = true; return; }
       ev.preventDefault();
       const h = hhRef.current;
       const next = Math.min(HOUR_MAX, Math.max(HOUR_MIN, Math.round(ev.deltaY < 0 ? h * 1.12 : h / 1.12)));
@@ -366,18 +372,43 @@ function WeekView({ anchor, byDay, todayKey, loading }: any) {
       setHourHeight(next);
       requestAnimationFrame(() => { el.scrollTop = Math.max(0, (minutes / 60) * next - y); });
     };
+    // Auch Ziehen an der Bildlaufleiste oder Tastaturscrollen zählt als
+    // eigene Entscheidung des Nutzers.
+    const markManual = () => { userScrolled.current = true; };
     el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
+    el.addEventListener("pointerdown", markManual, { passive: true });
+    el.addEventListener("keydown", markManual);
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("pointerdown", markManual);
+      el.removeEventListener("keydown", markManual);
+    };
   }, []);
 
-  // Beim ersten Öffnen auf den Morgen scrollen statt auf Mitternacht.
-  const didScroll = useRef(false);
+  // Startposition: der Tag beginnt sichtbar um 6 Uhr. Liegt in der Woche ein
+  // Termin früher, wird so weit nach oben gerückt, dass auch dieser zu sehen
+  // ist – nichts soll oberhalb des Sichtbereichs verborgen bleiben.
+  const earliestMin = useMemo(() => {
+    let earliest = 6 * 60;
+    for (const d of days) {
+      const k = ymd(d);
+      for (const e of ((byDay[k] || []) as Ev[])) {
+        const slot = daySlot(e, k);
+        if (slot && slot.from < earliest) earliest = slot.from;
+      }
+    }
+    return Math.max(0, earliest);
+  }, [days, byDay]);
+
+  // Beim Wochenwechsel wird die Startposition neu bestimmt.
+  useEffect(() => { userScrolled.current = false; placedFor.current = null; }, [anchor]);
   useEffect(() => {
     const el = scrollRef.current;
-    if (!el || didScroll.current) return;
-    el.scrollTop = 7 * hourHeight;
-    didScroll.current = true;
-  }, [hourHeight]);
+    if (!el || userScrolled.current || placedFor.current === earliestMin) return;
+    placedFor.current = earliestMin;
+    // Etwas Luft über dem frühesten Eintrag, damit er nicht am Rand klebt.
+    el.scrollTop = Math.max(0, (earliestMin / 60) * hourHeight - 8);
+  }, [earliestMin, hourHeight]);
 
   const [nowMin, setNowMin] = useState(() => { const n = new Date(); return n.getHours() * 60 + n.getMinutes(); });
   useEffect(() => {

@@ -5,7 +5,7 @@ import { mapLimit } from "../lib/concurrency";
 import { messageContentKey } from "../lib/mailKeys";
 import { requestJson } from "../lib/http";
 import { extractCalendarData, parseIcsEvents, normalizeColor, readableText, verifyIcloud, IcloudAuthError, hrefInside } from "../lib/icloudCalendar";
-import { calendarEventTaskRecord, staleExternalIds, isTaskWorthyEvent } from "../lib/calendarTaskSync";
+import { calendarEventTaskRecord, staleExternalIds, isTaskWorthyEvent, classifyCalendarEvent } from "../lib/calendarTaskSync";
 import { safeInternalPath } from "../lib/safeNavigation";
 import { isPrivateAddress, resolvePublicNetworkEndpoint } from "../lib/safeRemote";
 import { taskDueDate, taskNote, taskPriorityRank, taskTitle, validTaskPriority, validTaskStatus } from "../lib/taskValidation";
@@ -292,4 +292,23 @@ test("Kalendereintraege werden als Aufgabe oder Nicht-Aufgabe eingeordnet", () =
  assert.equal(isTaskWorthyEvent(ev("Punica Cup")), true);
  assert.equal(isTaskWorthyEvent(ev("Lutz Athletikplan")), true);
  assert.equal(isTaskWorthyEvent(ev("Abgabe Referat")), true);
+});
+
+test("Aussortierte Termine verschwinden nicht, sondern werden ausgeblendet", () => {
+ const ev = (title: string, extra: any = {}) => ({
+  id: "icloud:c:" + title, title, start: "2026-10-03", end: null, allDay: true,
+  location: null, calendar: "Privat", color: "#fff", textColor: "#000", htmlLink: null, ...extra
+ }) as any;
+ // Feiertage und Ferien werden angelegt, aber ausgeblendet ("ignored"),
+ // damit sie ueber den Filter zurueckholbar bleiben.
+ assert.equal(classifyCalendarEvent(ev("Tag der Deutschen Einheit")), "ignored");
+ assert.equal(classifyCalendarEvent(ev("Reformationstag")), "ignored");
+ assert.equal(classifyCalendarEvent(ev("Herbstferien 2026 Hamburg")), "ignored");
+ assert.equal(classifyCalendarEvent(ev("Oma", { calendar: "Geburtstage" })), "ignored");
+ // Serien-Master wird ausgeblendet, Einzelinstanzen erzeugen gar nichts.
+ assert.equal(classifyCalendarEvent(ev("Karate-Training", { recurring: true })), "ignored");
+ assert.equal(classifyCalendarEvent(ev("Karate-Training", { recurring: true, recurrenceInstance: true })), "skip");
+ // Echte Aufgaben bleiben Aufgaben.
+ assert.equal(classifyCalendarEvent(ev("Punica Cup")), "task");
+ assert.equal(classifyCalendarEvent(ev("Lutz Athletikplan")), "task");
 });
