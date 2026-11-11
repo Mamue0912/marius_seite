@@ -24,14 +24,14 @@ Die Scopes werden dynamisch in `lib/env.ts → ms.scopes()` zusammengesetzt.
 
 - Läuft **serverseitig** (`lib/anthropic.ts`) über das offizielle Anthropic-SDK.
   Der Schlüssel `ANTHROPIC_API_KEY` liegt nur serverseitig, nie im Frontend.
-- Modell: `ANTHROPIC_MODEL` (Standard `claude-opus-4-8`).
+- Modell: `ANTHROPIC_MODEL` (Standard `claude-opus-5-5`).
 - **Strukturierte Ausgaben** (`output_config.format`) garantieren parsebares JSON.
 
 ### Umgebungsvariablen (zusätzlich zu OUTLOOK_LIVE_SYNC_SETUP.md)
 
 ```
 ANTHROPIC_API_KEY=...
-ANTHROPIC_MODEL=claude-opus-4-8
+ANTHROPIC_MODEL=claude-opus-5-5
 ENABLE_SEND=false        # true = Mail.Send anfordern + Senden-Knopf aktiv
 ```
 

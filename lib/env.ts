@@ -1,3 +1,5 @@
+import { modelFor } from "./aiModels";
+
 // Zentrale, typisierte Umgebungsvariablen. Wirft früh und deutlich,
 // wenn etwas fehlt – aber nur serverseitig (public-Werte sind im Client ok).
 
@@ -34,7 +36,9 @@ export const env = {
     configured: () => !!process.env.GOOGLE_CLIENT_ID && !!process.env.GOOGLE_CLIENT_SECRET
   },
   anthropicKey: () => req("ANTHROPIC_API_KEY"),
-  anthropicModel: () => opt("ANTHROPIC_MODEL", "claude-opus-4-8"),
+  // Modell-IDs liegen zentral in lib/aiModels.ts (inkl. Env-Übersteuerung).
+  // Diese Abkürzung bleibt für den Allzweck-Fall erhalten.
+  anthropicModel: () => modelFor("standard"),
   supabase: {
     url: () => req("NEXT_PUBLIC_SUPABASE_URL"),
     anonKey: () => req("NEXT_PUBLIC_SUPABASE_ANON_KEY"),

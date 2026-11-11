@@ -89,5 +89,5 @@ Nach SMTP-Erfolg → Status **„Gesendet"** + `reply_sent_at`.
 ## Benötigte Vercel-Umgebungsvariablen
 
 - `ANTHROPIC_API_KEY` (Pflicht für KI)
-- `ANTHROPIC_MODEL` (optional, Standard `claude-opus-4-8`)
+- `ANTHROPIC_MODEL` (optional, Standard `claude-opus-5-5`)
 - `ENABLE_SEND=true` (nur wenn wirklich gesendet werden soll)

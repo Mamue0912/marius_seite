@@ -21,7 +21,7 @@ Falls das per SQL nicht durchläuft: Storage → New bucket → Name `documents`
 | Variable | Zweck | Pflicht |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | KI-Service (Mail, Stellenanalyse, Chat, Dokumente) | **ja** für KI |
-| `ANTHROPIC_MODEL` | Modell (Standard `claude-opus-4-8`) | nein |
+| `ANTHROPIC_MODEL` | Modell (Standard `claude-opus-5-5`) | nein |
 | `ENABLE_SEND` | erlaubt tatsächlichen Mailversand (`true`) | nur zum Senden |
 | `SUPABASE_SERVICE_ROLE_KEY`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Storage/DB serverseitig | ja (bereits gesetzt) |
 

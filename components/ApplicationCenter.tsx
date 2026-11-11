@@ -4,6 +4,7 @@ import Icon from "@/components/Icon";
 import { Notice, notify } from "@/components/Feedback";
 import Markdown from "@/components/Markdown";
 import OverlayScroll from "@/components/OverlayScroll";
+import MotivationStudio from "@/components/MotivationStudio";
 import { getAppsCache, getDocsCache, fetchApps, fetchDocs, getAppDetail, fetchAppDetail, prefetchAppDetail, getFactsCache, setFactsCache, fetchFacts, getGenDocsCache, setGenDocsCache } from "@/lib/appsStore";
 
 // ============================ Konstanten ============================
@@ -74,6 +75,24 @@ export default function ApplicationCenter({ accounts, sendEnabled, initialSectio
   const [loadError, setLoadError] = useState<string | null>(null);
   const [diag, setDiag] = useState(false);
   const [mergePrompt, setMergePrompt] = useState<{ newId: string; existing: any } | null>(null);
+  // Oberste Ebene: Bewerbung vs. Motivationsschreiben. Beide Bereiche bleiben
+  // gemountet (nur versteckt), damit beim Wechsel KEINE Eingabe verloren geht.
+  // Immer gleich starten wie der Server, sonst entsteht eine
+  // Hydration-Diskrepanz. Die URL wird erst im Effekt ausgewertet.
+  const [tab, setTab] = useState<"bewerbung" | "motivation">("bewerbung");
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("tab") === "motivation") setTab("motivation");
+  }, []);
+  // Der Motivationsbereich wird erst beim ersten Öffnen geladen, danach
+  // dauerhaft gehalten.
+  const [motivationSeen, setMotivationSeen] = useState(false);
+  useEffect(() => { if (tab === "motivation") setMotivationSeen(true); }, [tab]);
+  function switchTab(next: "bewerbung" | "motivation") {
+    setTab(next);
+    const params = new URLSearchParams(window.location.search);
+    if (next === "motivation") params.set("tab", "motivation"); else params.delete("tab");
+    window.history.replaceState({}, "", "/applications" + (params.size ? "?" + params.toString() : ""));
+  }
 
   const loadApps = useCallback(async (): Promise<any[] | null> => {
     try {
@@ -199,6 +218,37 @@ export default function ApplicationCenter({ accounts, sendEnabled, initialSectio
   }
 
   return (
+    <div className="ac-shell">
+      {/* Zwei klar erkennbare Reiter auf oberster Ebene. */}
+      <div className="ac-tabs" role="tablist" aria-label="Bereich">
+        <button
+          role="tab" id="tab-bewerbung" aria-controls="panel-bewerbung"
+          aria-selected={tab === "bewerbung"} tabIndex={tab === "bewerbung" ? 0 : -1}
+          className={"ac-tab" + (tab === "bewerbung" ? " on" : "")}
+          onClick={() => switchTab("bewerbung")}
+          onKeyDown={(e) => { if (e.key === "ArrowRight") { e.preventDefault(); switchTab("motivation"); } }}
+        >
+          <Icon name="briefcase" size={17} /><span>Bewerbung</span>
+        </button>
+        <button
+          role="tab" id="tab-motivation" aria-controls="panel-motivation"
+          aria-selected={tab === "motivation"} tabIndex={tab === "motivation" ? 0 : -1}
+          className={"ac-tab" + (tab === "motivation" ? " on" : "")}
+          onClick={() => switchTab("motivation")}
+          onKeyDown={(e) => { if (e.key === "ArrowLeft") { e.preventDefault(); switchTab("bewerbung"); } }}
+        >
+          <Icon name="document" size={17} /><span>Motivationsschreiben</span>
+        </button>
+      </div>
+
+      {/* Motivationsbereich bleibt nach dem ersten Öffnen gemountet. */}
+      {motivationSeen && (
+        <div role="tabpanel" id="panel-motivation" aria-labelledby="tab-motivation" hidden={tab !== "motivation"} className="ac-panel">
+          <MotivationStudio />
+        </div>
+      )}
+
+      <div role="tabpanel" id="panel-bewerbung" aria-labelledby="tab-bewerbung" hidden={tab !== "bewerbung"} className="ac-panel">
     <div className={"ac" + (openId ? " ac-workspace-open" : "")}>
       <aside className="ac-side">
         <div className="ac-side-head"><span className="ac-mark" /> Bewerbungen</div>
@@ -256,6 +306,8 @@ export default function ApplicationCenter({ accounts, sendEnabled, initialSectio
           </div>
         </div>
       )}
+    </div>
+      </div>
     </div>
   );
 }

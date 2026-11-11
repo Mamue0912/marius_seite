@@ -54,7 +54,24 @@ async function main() {
       ["/api/reply/send", "POST"],
       ["/api/calendar/events", "GET"],
       ["/api/rules", "GET"],
-      ["/api/status", "GET"]
+      ["/api/status", "GET"],
+      ["/api/motivation/profile", "GET"],
+      ["/api/motivation/profile", "PUT"],
+      ["/api/motivation/letters", "GET"],
+      ["/api/motivation/letters", "POST"],
+      ["/api/motivation/letters/test-id", "GET"],
+      ["/api/motivation/letters/test-id", "PATCH"],
+      ["/api/motivation/letters/test-id", "DELETE"],
+      ["/api/motivation/letters/test-id/versions", "GET"],
+      ["/api/motivation/letters/test-id/versions", "POST"],
+      ["/api/motivation/letters/test-id/export", "GET"],
+      ["/api/motivation/examples", "GET"],
+      ["/api/motivation/examples", "PUT"],
+      ["/api/motivation/examples", "DELETE"],
+      ["/api/motivation/requirements", "GET"],
+      ["/api/motivation/generate", "POST"],
+      ["/api/motivation/refine", "POST"],
+      ["/api/motivation/check", "POST"]
     ];
     for (const [endpoint, method] of protectedEndpoints) {
       const response = await fetch("http://127.0.0.1:3115" + endpoint, { method });
