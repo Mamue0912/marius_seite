@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { env } from "./env";
+import { modelFor, MAX_TOKENS, type ModelPurpose } from "./aiModels";
 
 // Server-seitige KI-Generierung. Der API-Schlüssel liegt ausschließlich
 // serverseitig (ANTHROPIC_API_KEY), niemals im Frontend.
@@ -80,12 +81,12 @@ function renderThread(thread: ThreadMessage[]): string {
     .join("\n\n---\n\n");
 }
 
-async function parseJson<T>(system: string, user: string, schema: any): Promise<T> {
+async function parseJson<T>(system: string, user: string, schema: any, purpose: ModelPurpose = "standard"): Promise<T> {
   // Fehlender Schlüssel: sofort mit klarer Kategorie werfen (kein 38-s-Hänger).
   if (!aiConfigured()) throw new Error("Fehlende Umgebungsvariable: ANTHROPIC_API_KEY");
   const res = await client().messages.create({
-    model: env.anthropicModel(),
-    max_tokens: 2000,
+    model: modelFor(purpose),
+    max_tokens: MAX_TOKENS[purpose],
     system,
     messages: [{ role: "user", content: user }],
     // Strukturierte Ausgabe → garantiert parsebares JSON. output_config wird
@@ -191,10 +192,10 @@ export type Block =
   | { type: "image"; source: { type: "base64"; media_type: string; data: string } }
   | { type: "document"; source: { type: "base64"; media_type: "application/pdf"; data: string } };
 
-async function rawJson<T>(system: string, content: string | Block[], schema: any, maxTokens = 2600): Promise<T> {
+async function rawJson<T>(system: string, content: string | Block[], schema: any, maxTokens = 2600, purpose: ModelPurpose = "standard"): Promise<T> {
   if (!aiConfigured()) throw new Error("Fehlende Umgebungsvariable: ANTHROPIC_API_KEY");
   const res = await client().messages.create({
-    model: env.anthropicModel(), max_tokens: maxTokens, system,
+    model: modelFor(purpose), max_tokens: maxTokens, system,
     messages: [{ role: "user", content: content as any }],
     output_config: { format: { type: "json_schema", schema } }
   } as any, { timeout: AI_TIMEOUT_MS, maxRetries: 1 });
@@ -202,10 +203,10 @@ async function rawJson<T>(system: string, content: string | Block[], schema: any
   return JSON.parse(text) as T;
 }
 
-async function rawText(system: string, messages: any[], maxTokens = 2000): Promise<string> {
+async function rawText(system: string, messages: any[], maxTokens = 2000, purpose: ModelPurpose = "standard"): Promise<string> {
   if (!aiConfigured()) throw new Error("Fehlende Umgebungsvariable: ANTHROPIC_API_KEY");
   const res = await client().messages.create({
-    model: env.anthropicModel(), max_tokens: maxTokens, system, messages
+    model: modelFor(purpose), max_tokens: maxTokens, system, messages
   } as any, { timeout: AI_TIMEOUT_MS, maxRetries: 1 });
   return res.content.map((b: any) => (b.type === "text" ? b.text : "")).join("").trim();
 }
@@ -495,7 +496,7 @@ ${params.jobContext || "(keine Analyse vorhanden)"}
 
 === BESTÄTIGTE FAKTEN ===
 ${params.factsText || "(keine bestätigten Fakten)"}`;
-  return rawJson<AppDocResult>(system, "Erstelle das Dokument jetzt.", schema, 2400);
+  return rawJson<AppDocResult>(system, "Erstelle das Dokument jetzt.", schema, 2400, "writing");
 }
 
 // Generische Textüberarbeitung (kürzer, persönlicher, …) für Bewerbungsdokumente.
@@ -508,7 +509,7 @@ ${RECRUITER_BRIEF}
 Aufgabe: Überarbeite NUR den vorliegenden Text gemäß Anweisung "${params.command}". Ändere keine zugesagten Inhalte, erfinde nichts Neues, behalte belegte Fakten bei. Der Text bleibt sauberer Fließtext ohne Markdown (keine Sternchen/Rauten/Backticks). Prüfe nach der Überarbeitung aus Recruiter-Sicht und kürze Wiederholungen und unnötige Einleitungen.
 ${params.jobContext ? `\nStellenkontext:\n${params.jobContext}` : ""}
 ${params.factsText ? `\nBestätigte Fakten:\n${params.factsText}` : ""}`;
-  return rawJson(system, `Anweisung: ${params.command}\n\nText:\n${params.body}`, schema, 2200);
+  return rawJson(system, `Anweisung: ${params.command}\n\nText:\n${params.body}`, schema, 2200, "writing");
 }
 
 // Stellen aus einer Trefferliste auf das Profil zuschneiden: wählt die am
@@ -592,7 +593,7 @@ An: ${input.to || ""}
 Betreff: ${input.subject || ""}${atts}
 Text (gekürzt):
 ${(input.body || "").slice(0, 2500)}`;
-  return parseJson(system, user, schema);
+  return parseJson(system, user, schema, "fast");
 }
 
 // ---- Neue E-Mail aus kurzer Anweisung verfassen ----
@@ -635,4 +636,135 @@ export async function refineDraft(params: {
 Aufgabe: Überarbeite NUR den vorliegenden Entwurf gemäß dem Befehl "${params.command}" (z. B. Kürzer, Freundlicher, Förmlicher, Direkter, Wärmer, Weniger begeistert, Mehr Kontext, Rechtschreibung prüfen). Ändere nichts an den zugesagten Inhalten und erfinde nichts Neues.`;
   const user = `Befehl: ${params.command}\n\nAktueller Entwurf:\n${params.body}\n\nZum Kontext der ursprüngliche Thread:\n${renderThread(params.thread)}`;
   return parseJson(system, user, schema);
+}
+
+// =====================================================================
+//  Motivationsschreiben (Studienbewerbungen)
+//  Nutzt bewusst das Schreibmodell ("writing"), weil Textqualität hier
+//  im Vordergrund steht. Alle Regeln gegen erfundene Inhalte stehen in
+//  lib/motivation.ts (MOTIVATION_RULES) und werden hier eingebunden.
+// =====================================================================
+
+export interface MotivationOutlineResult {
+  sections: { id: string; heading: string; intent: string }[];
+  missing: string[];
+}
+
+export async function generateMotivationOutline(params: {
+  rules: string; language: "de" | "en";
+  institution: string; programme: string;
+  requirements: string; programmeFacts: string;
+  profile: string; examples: string;
+}): Promise<MotivationOutlineResult> {
+  const schema = {
+    type: "object", additionalProperties: false, required: ["sections", "missing"],
+    properties: {
+      sections: {
+        type: "array",
+        items: {
+          type: "object", additionalProperties: false, required: ["id", "heading", "intent"],
+          properties: { id: { type: "string" }, heading: { type: "string" }, intent: { type: "string" } }
+        }
+      },
+      missing: { type: "array", items: { type: "string" } }
+    }
+  };
+  const system = `${params.rules}
+
+Aufgabe: Entwirf die GLIEDERUNG eines Motivationsschreibens – noch keinen Fließtext.
+- 4 bis 6 Abschnitte. "heading" ist eine kurze Überschrift, "intent" beschreibt in einem Satz, was der Abschnitt leisten soll und welches vorhandene Beispiel er nutzt.
+- Die Gliederung muss alle verbindlichen Pflichtbestandteile abdecken.
+- "missing": welche Angaben für ein überzeugendes Schreiben noch fehlen. Nur echte Lücken, keine Wunschliste.
+- Sprache der Ausgabe: ${params.language === "en" ? "Englisch" : "Deutsch"}.
+
+=== HOCHSCHULE ===
+${params.institution} – ${params.programme}
+
+=== VERBINDLICHE VORGABEN ===
+${params.requirements}
+
+=== ÜBERPRÜFBARE MERKMALE DES PROGRAMMS ===
+${params.programmeFacts}
+
+=== PROFIL ===
+${params.profile}
+
+=== PERSÖNLICHE BEISPIELE ===
+${params.examples}`;
+  return rawJson<MotivationOutlineResult>(system, "Erstelle die Gliederung jetzt.", schema, 1800, "writing");
+}
+
+export interface MotivationDraftResult { body: string; missing: string[]; }
+
+export async function generateMotivationDraft(params: {
+  rules: string; language: "de" | "en";
+  institution: string; programme: string;
+  requirements: string; programmeFacts: string;
+  profile: string; examples: string; outline: string;
+  identityLine: string;
+}): Promise<MotivationDraftResult> {
+  const schema = {
+    type: "object", additionalProperties: false, required: ["body", "missing"],
+    properties: { body: { type: "string" }, missing: { type: "array", items: { type: "string" } } }
+  };
+  const system = `${params.rules}
+
+Aufgabe: Schreibe den vollständigen Entwurf des Motivationsschreibens entlang der Gliederung.
+- Beginne mit der Kopfzeile genau so: "${params.identityLine}" – danach eine Leerzeile.
+- Danach reiner Fließtext in Absätzen, getrennt durch Leerzeilen. Keine Überschriften im Text.
+- Umfang: so, dass der Text sicher auf höchstens zwei DIN-A4-Seiten passt. Orientierung: etwa 450 bis 650 Wörter. Das ist KEINE Vorgabe der Hochschule, sondern nur eine Hilfsgröße.
+- Nenne keine E-Mail-Adresse, Telefonnummer oder Anschrift.
+- "missing": Angaben, die du weggelassen hast, weil sie fehlen.
+- Sprache: ${params.language === "en" ? "Englisch" : "Deutsch"}.
+
+=== HOCHSCHULE ===
+${params.institution} – ${params.programme}
+
+=== VERBINDLICHE VORGABEN ===
+${params.requirements}
+
+=== ÜBERPRÜFBARE MERKMALE DES PROGRAMMS ===
+${params.programmeFacts}
+
+=== GLIEDERUNG ===
+${params.outline}
+
+=== PROFIL ===
+${params.profile}
+
+=== PERSÖNLICHE BEISPIELE ===
+${params.examples}`;
+  return rawJson<MotivationDraftResult>(system, "Schreibe den Entwurf jetzt.", schema, 3000, "writing");
+}
+
+// Absatzweise Überarbeitung. Gibt NUR den neuen Absatz zurück, damit die
+// Oberfläche Vorher/Nachher vergleichen kann, bevor etwas übernommen wird.
+export async function refineMotivationParagraph(params: {
+  rules: string; language: "de" | "en";
+  paragraph: string; instruction: string;
+  profile: string; examples: string; programmeFacts: string;
+}): Promise<{ paragraph: string; note: string | null }> {
+  const schema = {
+    type: "object", additionalProperties: false, required: ["paragraph", "note"],
+    properties: { paragraph: { type: "string" }, note: { type: ["string", "null"] } }
+  };
+  const system = `${params.rules}
+
+Aufgabe: Überarbeite GENAU EINEN Absatz. Gib ausschließlich den überarbeiteten Absatz zurück.
+- Anweisung: ${params.instruction}
+- Übernimm keine Inhalte aus anderen Absätzen und füge keine neuen Tatsachen hinzu.
+- "note": kurzer Hinweis, falls die Anweisung nur teilweise umsetzbar war (sonst null).
+- Sprache: ${params.language === "en" ? "Englisch" : "Deutsch"}.
+
+=== ÜBERPRÜFBARE MERKMALE DES PROGRAMMS ===
+${params.programmeFacts}
+
+=== PROFIL ===
+${params.profile}
+
+=== PERSÖNLICHE BEISPIELE ===
+${params.examples}`;
+  return rawJson<{ paragraph: string; note: string | null }>(
+    system, `Absatz:\n${params.paragraph}`, schema, 1500, "writing"
+  );
 }
