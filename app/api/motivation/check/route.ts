@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabaseServer";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { loadLetter, loadProfile, loadExamples, plannedTerms } from "@/lib/motivationContext";
+import { loadLetter, loadProfile, loadExamples, plannedTerms, loadSourceMaterial } from "@/lib/motivationContext";
 import { checkRequirements, qualityFindings, countWords, countChars, paragraphs, missingProfileFields } from "@/lib/motivation";
 import { buildMotivationPdf } from "@/lib/motivationPdf";
 
@@ -22,12 +22,13 @@ export async function POST(req: NextRequest) {
   const letterId = typeof payload.letterId === "string" ? payload.letterId : "";
   if (!letterId) return NextResponse.json({ error: "bad_request", message: "Kein Schreiben angegeben." }, { status: 400 });
 
-  let letter, profile, examples;
+  let letter, profile, examples, source;
   try {
     letter = await loadLetter(user.id, letterId);
     if (!letter) return NextResponse.json({ error: "not_found" }, { status: 404 });
     profile = await loadProfile(user.id);
     examples = await loadExamples(user.id, letterId);
+    source = await loadSourceMaterial(user.id);
   } catch (e) {
     return NextResponse.json({ error: "db_error", message: (e as Error).message }, { status: 500 });
   }
@@ -53,7 +54,12 @@ export async function POST(req: NextRequest) {
   const requirements = checkRequirements({
     body, profile, language: letter.language === "en" ? "en" : "de", renderedPages: pages
   });
-  const quality = qualityFindings({ body, examples, plannedTerms: plannedTerms(profile, examples) });
+  // Unterlagen zählen als Belege: wer Lebenslauf/Zeugnisse hinterlegt hat,
+  // soll nicht fälschlich "zu wenig Belege" gemeldet bekommen.
+  const quality = qualityFindings({
+    body, examples, plannedTerms: plannedTerms(profile, examples),
+    evidenceCount: source.factCount + source.documents.length
+  });
 
   const result = {
     counts: { words: countWords(body), chars: countChars(body), paragraphs: paragraphs(body).length },
@@ -61,6 +67,7 @@ export async function POST(req: NextRequest) {
     requirements,
     quality,
     missingProfile: missingProfileFields(profile),
+    sources: { factCount: source.factCount, documents: source.documents },
     checkedAt: new Date().toISOString()
   };
 

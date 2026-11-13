@@ -9,13 +9,13 @@ import { api, fetchRequirements, getRequirementsCache } from "@/lib/motivationSt
 type Stage = "profil" | "beispiele" | "bezug" | "gliederung" | "entwurf" | "ueberarbeitung" | "export";
 
 const STAGES: { key: Stage; label: string; ic: string }[] = [
+  { key: "entwurf", label: "Schreiben & Bearbeiten", ic: "edit" },
+  { key: "ueberarbeitung", label: "Gezielt ändern", ic: "spark" },
+  { key: "export", label: "Prüfen & Export", ic: "document" },
+  { key: "beispiele", label: "Beispiele ergänzen", ic: "chat" },
   { key: "profil", label: "Profil", ic: "user" },
-  { key: "beispiele", label: "Persönliche Beispiele", ic: "chat" },
-  { key: "bezug", label: "Hochschul-Bezug", ic: "star" },
-  { key: "gliederung", label: "Gliederung", ic: "tasks" },
-  { key: "entwurf", label: "Entwurf", ic: "edit" },
-  { key: "ueberarbeitung", label: "Überarbeitung", ic: "spark" },
-  { key: "export", label: "Prüfen & Export", ic: "document" }
+  { key: "bezug", label: "Anforderungen", ic: "star" },
+  { key: "gliederung", label: "Gliederung", ic: "tasks" }
 ];
 
 const REFINE_BUTTONS = [
@@ -34,7 +34,7 @@ export default function MotivationStudio() {
   const [profile, setProfile] = useState<any>({});
   const [profileMissing, setProfileMissing] = useState<string[]>([]);
   const [reqs, setReqs] = useState<any>(() => getRequirementsCache());
-  const [stage, setStage] = useState<Stage>("profil");
+  const [stage, setStage] = useState<Stage>("entwurf");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -44,6 +44,9 @@ export default function MotivationStudio() {
   const [versions, setVersions] = useState<any[]>([]);
   const [compare, setCompare] = useState<any | null>(null); // Vorher/Nachher
   const [missingInfo, setMissingInfo] = useState<string[]>([]);
+  const [sources, setSources] = useState<any>(null);
+  const [targeted, setTargeted] = useState<any | null>(null);
+  const [wish, setWish] = useState("");
 
   const savedRef = useRef("");   // zuletzt gespeicherter Text
   const letterRef = useRef<string | null>(null);
@@ -67,7 +70,7 @@ export default function MotivationStudio() {
     savedRef.current = r.data.letter.body || "";
     setExamples(r.data.examples || []);
     setCheck(r.data.letter.last_check || null);
-    setStage((r.data.letter.stage as Stage) || "profil");
+    setStage((r.data.letter.stage as Stage) || "entwurf");
     void loadExamples(id);
     void loadVersions(id);
   }, [loadExamples, loadVersions]);
@@ -153,6 +156,7 @@ export default function MotivationStudio() {
     setBusy(null);
     if (!r.ok) { notify(r.message || "Die Erzeugung ist fehlgeschlagen.", true); return; }
     setMissingInfo(r.data.missing || []);
+    if (r.data.sources) setSources(r.data.sources);
     if (mode === "outline") {
       setLetter((l: any) => ({ ...l, outline: r.data.outline, stage: "gliederung" }));
       setStage("gliederung");
@@ -178,6 +182,43 @@ export default function MotivationStudio() {
     if (!r.ok) { notify(r.message || "Die Überarbeitung ist fehlgeschlagen.", true); return; }
     // Nichts wird automatisch übernommen: erst vergleichen, dann entscheiden.
     setCompare({ index: paragraphIndex, before: r.data.before, after: r.data.after, note: r.data.note, action });
+  }
+
+  // Freitext-Wunsch: die KI sucht selbst die betroffenen Absätze und ändert
+  // nur diese. Nichts wird automatisch übernommen.
+  async function applyWish() {
+    if (!letter || !wish.trim()) return;
+    setBusy("wish");
+    setTargeted(null);
+    const r = await api("/api/motivation/refine", {
+      json: { letterId: letter.id, body: draft, instruction: wish.trim() }, timeoutMs: 60000
+    });
+    setBusy(null);
+    if (!r.ok) { notify(r.message || "Die Änderung ist fehlgeschlagen.", true); return; }
+    if (!r.data.changes?.length) {
+      notify(r.data.note || r.data.message || "Dafür wurde keine passende Stelle gefunden.", true);
+      return;
+    }
+    setTargeted({ changes: r.data.changes, note: r.data.note, accepted: {} as Record<number, boolean> });
+  }
+
+  // Einzelne vorgeschlagene Änderung übernehmen.
+  function acceptChange(index: number, after: string) {
+    const paras = splitParagraphs(draft);
+    if (!paras[index]) return;
+    paras[index] = after;
+    setDraft(paras.join("\n\n"));
+    setTargeted((t: any) => t ? { ...t, accepted: { ...t.accepted, [index]: true } } : t);
+  }
+
+  function acceptAllChanges() {
+    if (!targeted) return;
+    const paras = splitParagraphs(draft);
+    for (const c of targeted.changes) if (paras[c.index] && !targeted.accepted[c.index]) paras[c.index] = c.after;
+    setDraft(paras.join("\n\n"));
+    setTargeted(null);
+    setWish("");
+    notify("Änderungen übernommen. Der alte Stand liegt in den Versionen.");
   }
 
   function applyCompare() {
@@ -350,7 +391,11 @@ export default function MotivationStudio() {
               {stage === "entwurf" && (
                 <DraftStep
                   draft={draft} setDraft={setDraft} counts={counts} busy={busy} missing={missingInfo}
-                  onGenerate={() => void generate("draft")} onNext={() => setStage("ueberarbeitung")}
+                  sources={sources} wish={wish} setWish={setWish} targeted={targeted}
+                  onGenerate={() => void generate("draft")} onWish={applyWish}
+                  onAcceptChange={acceptChange} onAcceptAll={acceptAllChanges}
+                  onDiscardTargeted={() => setTargeted(null)}
+                  onNext={() => setStage("ueberarbeitung")}
                 />
               )}
               {stage === "ueberarbeitung" && (
@@ -675,38 +720,130 @@ function OutlineStep({ letter, busy, missing, onGenerate, onChange, onNext }: an
 }
 
 // ============================ Schritt 5: Entwurf ============================
-function DraftStep({ draft, setDraft, counts, busy, missing, onGenerate, onNext }: any) {
+function DraftStep({ draft, setDraft, counts, busy, missing, sources, wish, setWish,
+  targeted, onGenerate, onWish, onAcceptChange, onAcceptAll, onDiscardTargeted, onNext }: any) {
+  const writing = busy === "draft";
   return (
     <section className="ms-sec">
-      <h3>Entwurf</h3>
-      <p className="ms-lead">
-        Der Entwurf entsteht aus Profil, Beispielen und Gliederung. Du kannst ihn direkt bearbeiten –
-        es wird automatisch gespeichert.
-      </p>
-      <div className="ms-actions left">
-        <button className="ac-btn" onClick={onGenerate} disabled={busy === "draft"}>
-          {busy === "draft" ? <><span className="spin sm" /> Wird geschrieben…</> : draft ? "Neu schreiben" : "Entwurf erstellen"}
-        </button>
-        <span className="ms-counts">{counts.words} Wörter · {counts.chars} Zeichen · {counts.paragraphs} Absätze</span>
-      </div>
-      {draft && (
-        <div className="ms-hint">
-          Die Wortzahl ist nur eine Orientierung. Verbindlich sind zwei DIN-A4-Seiten – das prüft der Export.
-        </div>
+      <h3>Schreiben &amp; Bearbeiten</h3>
+
+      {!draft.trim() ? (
+        <>
+          <p className="ms-lead">
+            Claude schreibt dir einen vollständigen Entwurf aus deinen hinterlegten Unterlagen
+            (Lebenslauf, Zeugnisse, bestätigte Angaben) und deinem Profil. Danach kannst du alles
+            selbst bearbeiten oder gezielt ändern lassen.
+          </p>
+          <button className="ac-btn primary big" onClick={onGenerate} disabled={writing}>
+            {writing ? <><span className="spin sm" /> Claude schreibt…</> : "Motivationsschreiben jetzt schreiben lassen"}
+          </button>
+          <div className="ms-hint" style={{ marginTop: 10 }}>
+            Es werden keine Tatsachen erfunden. Was fehlt, wird dir danach angezeigt.
+          </div>
+        </>
+      ) : (
+        <p className="ms-lead">
+          Bearbeite den Text direkt im Feld – es wird automatisch gespeichert. Oder sag unten in
+          eigenen Worten, was geändert werden soll; dann fasst Claude nur die betroffene Stelle an.
+        </p>
       )}
+
+      <SourceInfo sources={sources} />
+
       {missing?.length > 0 && (
-        <div className="ms-gap"><b>Fehlende Angaben:</b>
+        <div className="ms-gap"><b>Dafür fehlten Angaben – bitte selbst prüfen und ergänzen:</b>
           <ul>{missing.map((m: string, i: number) => <li key={i}>{m}</li>)}</ul></div>
       )}
-      <textarea
-        className="ms-editor" value={draft} onChange={(e) => setDraft(e.target.value)}
-        rows={22} aria-label="Text des Motivationsschreibens"
-        placeholder="Hier entsteht dein Motivationsschreiben. Du kannst auch selbst schreiben."
-      />
-      <div className="ms-actions">
-        <button className="ac-btn primary" onClick={onNext} disabled={!draft.trim()}>Weiter zur Überarbeitung</button>
-      </div>
+
+      {draft.trim() && (
+        <>
+          <textarea
+            className="ms-editor" value={draft} onChange={(e) => setDraft(e.target.value)}
+            rows={22} aria-label="Text des Motivationsschreibens"
+          />
+          <div className="ms-actions left">
+            <span className="ms-counts">{counts.words} Wörter · {counts.chars} Zeichen · {counts.paragraphs} Absätze</span>
+            <span className="ms-hint" style={{ margin: 0 }}>
+              Verbindlich sind zwei DIN-A4-Seiten – das prüft der Export, nicht die Wortzahl.
+            </span>
+          </div>
+
+          {/* Freitext-Änderungswunsch */}
+          <div className="ms-wish">
+            <label className="ms-label" htmlFor="ms-wish-input">Was soll geändert werden?</label>
+            <div className="ms-wish-row">
+              <input
+                id="ms-wish-input" value={wish} onChange={(e) => setWish(e.target.value)}
+                placeholder="z. B. den Absatz über Karate konkreter machen"
+                onKeyDown={(e) => { if (e.key === "Enter" && wish.trim() && !busy) { e.preventDefault(); onWish(); } }}
+              />
+              <button className="ac-btn primary" onClick={onWish} disabled={!wish.trim() || busy === "wish"}>
+                {busy === "wish" ? <><span className="spin sm" /> Wird geändert…</> : "Ändern"}
+              </button>
+            </div>
+            <div className="ms-hint">
+              Claude sucht selbst die passende Stelle und ändert nur diese. Du siehst den Vorschlag,
+              bevor etwas übernommen wird.
+            </div>
+          </div>
+
+          {targeted && (
+            <div className="ms-changes">
+              <h4>Vorgeschlagene Änderungen ({targeted.changes.length})</h4>
+              {targeted.note && <div className="ms-gap">{targeted.note}</div>}
+              {targeted.changes.map((c: any) => (
+                <div key={c.index} className={"ms-change" + (targeted.accepted?.[c.index] ? " done" : "")}>
+                  <div className="ms-change-h">
+                    <span>Absatz {c.index + 1}</span>
+                    {c.reason && <span className="ms-change-r">{c.reason}</span>}
+                  </div>
+                  <div className="ms-cmp">
+                    <div><h4>Bisher</h4><p>{c.before}</p></div>
+                    <div><h4>Vorschlag</h4><p>{c.after}</p></div>
+                  </div>
+                  <button className="ac-btn tiny" disabled={!!targeted.accepted?.[c.index]}
+                    onClick={() => onAcceptChange(c.index, c.after)}>
+                    {targeted.accepted?.[c.index] ? "Übernommen" : "Diesen übernehmen"}
+                  </button>
+                </div>
+              ))}
+              <div className="ms-actions left">
+                <button className="ac-btn primary" onClick={onAcceptAll}>Alle übernehmen</button>
+                <button className="ac-btn" onClick={onDiscardTargeted}>Verwerfen</button>
+              </div>
+            </div>
+          )}
+
+          <div className="ms-actions">
+            <button className="ac-btn" onClick={onGenerate} disabled={writing}>
+              {writing ? "Wird geschrieben…" : "Komplett neu schreiben"}
+            </button>
+            <button className="ac-btn primary" onClick={onNext}>Weiter zu Prüfung &amp; Export</button>
+          </div>
+        </>
+      )}
     </section>
+  );
+}
+
+// Zeigt, worauf der Entwurf beruht – damit nachvollziehbar ist, welche
+// Unterlagen verwendet wurden.
+function SourceInfo({ sources }: any) {
+  if (!sources) return null;
+  const docs = sources.documents || [];
+  if (!sources.factCount && !docs.length) {
+    return (
+      <div className="ms-gap">
+        <b>Keine Unterlagen gefunden.</b> Lade unter „Bewerbung → Meine Unterlagen“ deinen Lebenslauf
+        und Zeugnisse hoch und bestätige die erkannten Angaben – dann wird der Entwurf deutlich konkreter.
+      </div>
+    );
+  }
+  return (
+    <div className="ms-srcinfo">
+      <b>Verwendet:</b> {sources.factCount} bestätigte Angabe(n)
+      {docs.length > 0 && <> · {docs.length} Unterlage(n): {docs.map((d: any) => d.name).join(", ")}</>}
+    </div>
   );
 }
 

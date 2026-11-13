@@ -742,7 +742,7 @@ ${params.examples}`;
 export async function refineMotivationParagraph(params: {
   rules: string; language: "de" | "en";
   paragraph: string; instruction: string;
-  profile: string; examples: string; programmeFacts: string;
+  profile: string; examples: string; programmeFacts: string; sourceMaterial?: string;
 }): Promise<{ paragraph: string; note: string | null }> {
   const schema = {
     type: "object", additionalProperties: false, required: ["paragraph", "note"],
@@ -762,9 +762,72 @@ ${params.programmeFacts}
 === PROFIL ===
 ${params.profile}
 
+=== UNTERLAGEN UND BESTÄTIGTE ANGABEN ===
+${params.sourceMaterial || "(keine Unterlagen hinterlegt)"}
+
 === PERSÖNLICHE BEISPIELE ===
 ${params.examples}`;
   return rawJson<{ paragraph: string; note: string | null }>(
     system, `Absatz:\n${params.paragraph}`, schema, 1500, "writing"
+  );
+}
+
+// Gezielte Überarbeitung per Freitext-Wunsch.
+// Die KI bekommt den ganzen Text mit nummerierten Absätzen, entscheidet
+// SELBST, welche Absätze der Wunsch betrifft, und gibt nur diese neu
+// zurück. Alles andere bleibt unangetastet.
+export interface TargetedChange { index: number; paragraph: string; reason: string; }
+
+export async function refineMotivationTargeted(params: {
+  rules: string; language: "de" | "en";
+  numberedBody: string; instruction: string;
+  profile: string; examples: string; sourceMaterial: string; programmeFacts: string;
+}): Promise<{ changes: TargetedChange[]; note: string | null }> {
+  const schema = {
+    type: "object", additionalProperties: false, required: ["changes", "note"],
+    properties: {
+      changes: {
+        type: "array",
+        items: {
+          type: "object", additionalProperties: false, required: ["index", "paragraph", "reason"],
+          properties: {
+            index: { type: "integer" },
+            paragraph: { type: "string" },
+            reason: { type: "string" }
+          }
+        }
+      },
+      note: { type: ["string", "null"] }
+    }
+  };
+  const system = `${params.rules}
+
+Aufgabe: Setze EINEN Änderungswunsch des Nutzers um – so eng wie möglich.
+
+Wunsch des Nutzers: "${params.instruction}"
+
+Vorgehen:
+- Du bekommst den Text mit nummerierten Absätzen (Nummer in eckigen Klammern).
+- Entscheide, welche Absätze der Wunsch WIRKLICH betrifft. Ändere so wenige wie möglich; oft ist es genau einer.
+- Gib in "changes" nur die geänderten Absätze zurück: "index" ist die Absatznummer, "paragraph" der vollständige neue Absatztext, "reason" eine kurze Begründung in einem Satz.
+- Absätze, die der Wunsch nicht betrifft, gibst du NICHT zurück.
+- Betrifft der Wunsch den ganzen Text (z. B. "insgesamt kürzer"), gib die wirklich geänderten Absätze einzeln zurück.
+- Ist der Wunsch unklar oder nicht umsetzbar, ohne etwas zu erfinden: gib "changes" leer zurück und erkläre es in "note".
+- Füge KEINE neuen Tatsachen hinzu. Fehlt etwas für den Wunsch, sage das in "note", statt es zu erfinden.
+- Sprache: ${params.language === "en" ? "Englisch" : "Deutsch"}.
+
+=== ÜBERPRÜFBARE MERKMALE DES PROGRAMMS ===
+${params.programmeFacts}
+
+=== PROFIL ===
+${params.profile}
+
+=== UNTERLAGEN UND BESTÄTIGTE ANGABEN ===
+${params.sourceMaterial}
+
+=== PERSÖNLICHE BEISPIELE ===
+${params.examples}`;
+  return rawJson<{ changes: TargetedChange[]; note: string | null }>(
+    system, `Text mit nummerierten Absätzen:\n\n${params.numberedBody}`, schema, 3000, "writing"
   );
 }

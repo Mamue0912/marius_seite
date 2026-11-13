@@ -3,10 +3,10 @@ import { requireUser } from "@/lib/supabaseServer";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { aiConfigured, aiErrorInfo, generateMotivationOutline, generateMotivationDraft } from "@/lib/anthropic";
 import { recordAiEvent } from "@/lib/aiDiagnostics";
-import { loadLetter, loadProfile, loadExamples, saveVersion } from "@/lib/motivationContext";
+import { loadLetter, loadProfile, loadExamples, saveVersion, loadSourceMaterial } from "@/lib/motivationContext";
 import {
   MOTIVATION_RULES, profileBlock, examplesBlock, requirementsBlock,
-  programmeFactsBlock, defaultOutline
+  programmeFactsBlock, defaultOutline, sourceMaterialBlock
 } from "@/lib/motivation";
 import { modelFor } from "@/lib/aiModels";
 
@@ -27,12 +27,13 @@ export async function POST(req: NextRequest) {
   const mode = payload.mode === "draft" ? "draft" : "outline";
   if (!letterId) return NextResponse.json({ error: "bad_request", message: "Kein Schreiben angegeben." }, { status: 400 });
 
-  let letter, profile, examples;
+  let letter, profile, examples, source;
   try {
     letter = await loadLetter(user.id, letterId);
     if (!letter) return NextResponse.json({ error: "not_found" }, { status: 404 });
     profile = await loadProfile(user.id);
     examples = await loadExamples(user.id, letterId);
+    source = await loadSourceMaterial(user.id);
   } catch (e) {
     return NextResponse.json({ error: "db_error", message: (e as Error).message }, { status: 500 });
   }
@@ -47,7 +48,8 @@ export async function POST(req: NextRequest) {
         rules: MOTIVATION_RULES, language,
         institution: letter.institution, programme: letter.programme,
         requirements: requirementsBlock(), programmeFacts: programmeFactsBlock(),
-        profile: profileBlock(profile), examples: examplesBlock(examples)
+        profile: profileBlock(profile) + "\n\n" + sourceMaterialBlock(source.factsText, source.documentsText),
+        examples: examplesBlock(examples)
       });
       const sections = (res.sections || []).slice(0, 8).map((s, i) => ({
         id: String(s.id || `s${i}`).slice(0, 40),
@@ -60,7 +62,7 @@ export async function POST(req: NextRequest) {
         .eq("id", letter.id).eq("user_id", user.id);
       if (error) return NextResponse.json({ error: "db_error", message: "Die Gliederung konnte nicht gespeichert werden." }, { status: 500 });
       await recordAiEvent({ userId: user.id, kind: "compose", ok: true, durationMs: Date.now() - started, model, subjectHint: "motivation_outline" });
-      return NextResponse.json({ outline, missing: res.missing || [] });
+      return NextResponse.json({ outline, missing: res.missing || [], sources: { factCount: source.factCount, documents: source.documents } });
     }
 
     // Entwurf: vorhandenen Text vorher sichern (nichts geht verloren).
@@ -77,13 +79,19 @@ export async function POST(req: NextRequest) {
       const [y, m, d] = String(profile.birthDate).slice(0, 10).split("-");
       identity = `${nameLine}, geboren am ${d}.${m}.${y}`.trim();
     }
-    if (!identity) identity = "(Name und Geburtsdatum fehlen im Profil)";
+    if (!identity) {
+      // Nicht blockieren: die KI soll Name/Geburtsdatum aus den Unterlagen
+      // übernehmen, falls dort vorhanden, sonst die Zeile weglassen und
+      // den Mangel unter "missing" melden.
+      identity = "(Name und Geburtsdatum aus den Unterlagen übernehmen; falls dort nicht auffindbar, Kopfzeile weglassen und unter missing melden)";
+    }
 
     const res = await generateMotivationDraft({
       rules: MOTIVATION_RULES, language,
       institution: letter.institution, programme: letter.programme,
       requirements: requirementsBlock(), programmeFacts: programmeFactsBlock(),
-      profile: profileBlock(profile), examples: examplesBlock(examples),
+      profile: profileBlock(profile) + "\n\n" + sourceMaterialBlock(source.factsText, source.documentsText),
+      examples: examplesBlock(examples),
       outline: outlineText, identityLine: identity
     });
 
@@ -99,7 +107,7 @@ export async function POST(req: NextRequest) {
     if (error) return NextResponse.json({ error: "db_error", message: "Der Entwurf konnte nicht gespeichert werden." }, { status: 500 });
 
     await recordAiEvent({ userId: user.id, kind: "compose", ok: true, durationMs: Date.now() - started, model, subjectHint: "motivation_draft" });
-    return NextResponse.json({ letter: data, missing: res.missing || [] });
+    return NextResponse.json({ letter: data, missing: res.missing || [], sources: { factCount: source.factCount, documents: source.documents } });
   } catch (e) {
     const info = aiErrorInfo(e);
     await recordAiEvent({ userId: user.id, kind: "compose", ok: false, durationMs: Date.now() - started, model, errorCategory: info.category, subjectHint: `motivation_${mode}` });

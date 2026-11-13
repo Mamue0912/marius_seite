@@ -36,8 +36,8 @@ create table if not exists public.motivation_letters (
   outline jsonb not null default '[]'::jsonb,   -- [{id,heading,intent,done}]
   body text not null default '',
   -- Status des geführten Ablaufs.
-  stage text not null default 'profil',
-  -- profil | beispiele | bezug | gliederung | entwurf | ueberarbeitung | export
+  stage text not null default 'entwurf',
+  -- entwurf | ueberarbeitung | export | beispiele | profil | bezug | gliederung
   last_check jsonb,                             -- letztes Prüfergebnis (Anzeige)
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -103,3 +103,9 @@ begin
     );
   end loop;
 end $$;
+
+-- =====================================================================
+--  Nachträge (gefahrlos erneut ausführbar)
+-- =====================================================================
+-- Der geführte Ablauf beginnt jetzt beim Entwurf, nicht beim Profil.
+alter table public.motivation_letters alter column stage set default 'entwurf';

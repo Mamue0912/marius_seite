@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
     title: (typeof body.title === "string" && body.title.trim()) ? body.title.trim().slice(0, 300) : null,
     outline: defaultOutline(language),
     body: "",
-    stage: "profil"
+    stage: "entwurf"
   };
 
   const { data, error } = await supabaseAdmin().from("motivation_letters").insert(insert).select("*").single();
