@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { env } from "./env";
-import { modelFor, MAX_TOKENS, type ModelPurpose } from "./aiModels";
+import { modelFor, modelChain, MAX_TOKENS, type ModelPurpose } from "./aiModels";
 
 // Server-seitige KI-Generierung. Der API-Schlüssel liegt ausschließlich
 // serverseitig (ANTHROPIC_API_KEY), niemals im Frontend.
@@ -20,9 +20,31 @@ export function aiConfigured(): boolean {
 // meldung zurückgeben, statt hart abgeschnitten zu werden.
 const AI_TIMEOUT_MS = 38000;
 
-export type AiErrorCategory = "not_configured" | "auth" | "rate_limit" | "timeout" | "overloaded" | "api_error";
+export type AiErrorCategory = "not_configured" | "auth" | "rate_limit" | "timeout" | "overloaded" | "model_unavailable" | "bad_request" | "api_error";
 
-export interface AiErrorInfo { category: AiErrorCategory; message: string; }
+export interface AiErrorInfo {
+  category: AiErrorCategory;
+  message: string;
+  /** Kurzer, bereinigter Originaltext der API – nur für die Diagnose. */
+  detail?: string;
+}
+
+// Erkennt zuverlässig, dass ein Modell für diesen Zugang nicht existiert
+// bzw. nicht freigeschaltet ist.
+export function isModelUnavailable(e: any): boolean {
+  const status = e?.status || e?.statusCode;
+  const msg = `${e?.message || ""} ${JSON.stringify(e?.error || "")}`.toLowerCase();
+  if (status === 404) return true;
+  return /not_found_error|model.*(not found|does not exist|not available|invalid)|invalid.*model/.test(msg);
+}
+
+// Rohen API-Text für die Diagnose kürzen. Enthält nie den Schlüssel:
+// das SDK gibt ihn in Fehlermeldungen nicht aus; zur Sicherheit filtern
+// wir alles heraus, was wie ein Schlüssel aussieht.
+function safeDetail(e: any): string {
+  const raw = String(e?.error?.error?.message || e?.error?.message || e?.message || "");
+  return raw.replace(/sk-[A-Za-z0-9_\-]+/g, "[Schlüssel entfernt]").slice(0, 200);
+}
 
 // Übersetzt einen KI-Fehler in eine verständliche Meldung – ohne je
 // Schlüssel oder private Inhalte preiszugeben.
@@ -33,7 +55,14 @@ export function aiErrorInfo(e: any): AiErrorInfo {
     return { category: "not_configured", message: "Die KI-Verbindung ist noch nicht vollständig eingerichtet." };
   }
   if (status === 401 || status === 403 || /authentication|invalid x-api-key|permission/i.test(msg)) {
-    return { category: "auth", message: "Der KI-Zugang wurde abgelehnt. Bitte den API-Schlüssel prüfen." };
+    return { category: "auth", message: "Der KI-Zugang wurde abgelehnt. Bitte den API-Schlüssel prüfen.", detail: safeDetail(e) };
+  }
+  if (isModelUnavailable(e)) {
+    return {
+      category: "model_unavailable",
+      message: "Das eingestellte KI-Modell ist für deinen Zugang nicht verfügbar. In den Umgebungsvariablen lässt sich mit ANTHROPIC_MODEL ein anderes Modell setzen.",
+      detail: safeDetail(e)
+    };
   }
   if (status === 429 || /rate limit/i.test(msg)) {
     return { category: "rate_limit", message: "Die KI ist gerade ausgelastet. Bitte in einem Moment erneut versuchen." };
@@ -44,7 +73,46 @@ export function aiErrorInfo(e: any): AiErrorInfo {
   if (e?.name === "APIConnectionTimeoutError" || /timeout|timed out|aborted/i.test(msg)) {
     return { category: "timeout", message: "Die KI hat zu lange gebraucht. Der Vorgang wurde abgebrochen – bitte erneut versuchen." };
   }
-  return { category: "api_error", message: "Die KI-Antwort konnte nicht erstellt werden. Bitte erneut versuchen." };
+  if (status === 400 || status === 422) {
+    return {
+      category: "bad_request",
+      message: `Die KI hat die Anfrage abgelehnt: ${safeDetail(e) || "ungültige Anfrage"}`,
+      detail: safeDetail(e)
+    };
+  }
+  const detail = safeDetail(e);
+  return {
+    category: "api_error",
+    message: detail ? `Die KI-Antwort konnte nicht erstellt werden: ${detail}` : "Die KI-Antwort konnte nicht erstellt werden. Bitte erneut versuchen.",
+    detail
+  };
+}
+
+// Welches Modell zuletzt tatsächlich geantwortet hat (für die Diagnose).
+let _lastServedModel: string | null = null;
+export function lastServedModel(): string | null { return _lastServedModel; }
+
+/**
+ * Führt einen Aufruf aus und weicht NUR bei "Modell nicht verfügbar" auf
+ * das nächste Modell der Kette aus. Alle anderen Fehler werden sofort
+ * weitergereicht – ein überlastetes Modell soll nicht stillschweigend
+ * durch ein anderes ersetzt werden.
+ */
+async function withModelFallback<T>(purpose: ModelPurpose, run: (model: string) => Promise<T>): Promise<T> {
+  const chain = modelChain(purpose);
+  let lastError: any = null;
+  for (const model of chain) {
+    try {
+      const result = await run(model);
+      _lastServedModel = model;
+      return result;
+    } catch (e) {
+      lastError = e;
+      if (!isModelUnavailable(e)) throw e;
+      console.error(`Modell ${model} nicht verfügbar, versuche das nächste.`);
+    }
+  }
+  throw lastError;
 }
 
 export interface ThreadMessage {
@@ -84,8 +152,8 @@ function renderThread(thread: ThreadMessage[]): string {
 async function parseJson<T>(system: string, user: string, schema: any, purpose: ModelPurpose = "standard"): Promise<T> {
   // Fehlender Schlüssel: sofort mit klarer Kategorie werfen (kein 38-s-Hänger).
   if (!aiConfigured()) throw new Error("Fehlende Umgebungsvariable: ANTHROPIC_API_KEY");
-  const res = await client().messages.create({
-    model: modelFor(purpose),
+  const res = await withModelFallback(purpose, (model) => client().messages.create({
+    model,
     max_tokens: MAX_TOKENS[purpose],
     system,
     messages: [{ role: "user", content: user }],
@@ -93,7 +161,7 @@ async function parseJson<T>(system: string, user: string, schema: any, purpose: 
     // vom SDK im Request-Body durchgereicht; das Cast umgeht nur die Typprüfung
     // der installierten SDK-Version.
     output_config: { format: { type: "json_schema", schema } }
-  } as any, { timeout: AI_TIMEOUT_MS, maxRetries: 1 });
+  } as any, { timeout: AI_TIMEOUT_MS, maxRetries: 1 }));
   const text = res.content.map((b: any) => (b.type === "text" ? b.text : "")).join("");
   return JSON.parse(text) as T;
 }
@@ -194,20 +262,20 @@ export type Block =
 
 async function rawJson<T>(system: string, content: string | Block[], schema: any, maxTokens = 2600, purpose: ModelPurpose = "standard"): Promise<T> {
   if (!aiConfigured()) throw new Error("Fehlende Umgebungsvariable: ANTHROPIC_API_KEY");
-  const res = await client().messages.create({
-    model: modelFor(purpose), max_tokens: maxTokens, system,
+  const res = await withModelFallback(purpose, (model) => client().messages.create({
+    model, max_tokens: maxTokens, system,
     messages: [{ role: "user", content: content as any }],
     output_config: { format: { type: "json_schema", schema } }
-  } as any, { timeout: AI_TIMEOUT_MS, maxRetries: 1 });
+  } as any, { timeout: AI_TIMEOUT_MS, maxRetries: 1 }));
   const text = res.content.map((b: any) => (b.type === "text" ? b.text : "")).join("");
   return JSON.parse(text) as T;
 }
 
 async function rawText(system: string, messages: any[], maxTokens = 2000, purpose: ModelPurpose = "standard"): Promise<string> {
   if (!aiConfigured()) throw new Error("Fehlende Umgebungsvariable: ANTHROPIC_API_KEY");
-  const res = await client().messages.create({
-    model: modelFor(purpose), max_tokens: maxTokens, system, messages
-  } as any, { timeout: AI_TIMEOUT_MS, maxRetries: 1 });
+  const res = await withModelFallback(purpose, (model) => client().messages.create({
+    model, max_tokens: maxTokens, system, messages
+  } as any, { timeout: AI_TIMEOUT_MS, maxRetries: 1 }));
   return res.content.map((b: any) => (b.type === "text" ? b.text : "")).join("").trim();
 }
 

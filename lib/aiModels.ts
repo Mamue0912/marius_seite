@@ -85,6 +85,27 @@ export function modelFor(purpose: ModelPurpose): string {
   return fromEnv(ENV_KEYS[purpose]) || DEFAULTS[purpose];
 }
 
+// Ausweichmodelle je Zweck. Greift NUR, wenn die API meldet, dass das
+// gewählte Modell für diesen Zugang nicht existiert bzw. nicht freigegeben
+// ist. Dann ist eine funktionierende Antwort mit einem anderen Modell
+// besser als gar keine. Welches Modell tatsächlich geantwortet hat, steht
+// in der KI-Diagnose.
+const FALLBACKS: Record<ModelPurpose, string[]> = {
+  standard: ["claude-sonnet-5-5", "claude-opus-4-8", "claude-sonnet-4-5"],
+  writing: ["claude-sonnet-5-5", "claude-opus-4-8", "claude-sonnet-4-5"],
+  fast: ["claude-haiku-4-5", "claude-sonnet-5-5"]
+};
+
+/**
+ * Reihenfolge der zu versuchenden Modelle: zuerst das konfigurierte,
+ * danach die Ausweichmodelle (ohne Doppelungen).
+ */
+export function modelChain(purpose: ModelPurpose): string[] {
+  const first = modelFor(purpose);
+  const chain = [first, ...FALLBACKS[purpose]];
+  return chain.filter((m, i) => chain.indexOf(m) === i);
+}
+
 // Nur für Diagnose/Anzeige: Katalogeintrag, falls bekannt.
 export function modelInfo(id: string): ModelInfo | null {
   return MODEL_CATALOG[id] || null;
