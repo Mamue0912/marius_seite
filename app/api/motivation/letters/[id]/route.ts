@@ -63,6 +63,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (typeof body.intake === "string") update.intake = body.intake.trim().slice(0, 100) || null;
   if (body.language === "de" || body.language === "en") update.language = body.language;
   if (body.preset === "custom" || body.preset === "whu_bachelor") update.preset = body.preset;
+  if (["persoenlich", "klassisch", "analytisch"].includes(body.tone)) update.tone = body.tone;
   if (typeof body.stage === "string" && STAGES.includes(body.stage)) update.stage = body.stage;
   if (Array.isArray(body.outline)) {
     update.outline = body.outline.slice(0, 12).map((s: any) => ({
@@ -73,7 +74,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   if (Object.keys(update).length === 1) {
-    return NextResponse.json({ error: "bad_request", message: "Keine Änderung angegeben." }, { status: 400 });
+    // Nichts zu tun. Das ist kein Fehler des Nutzers – der aktuelle Stand
+    // wird einfach unverändert zurückgegeben.
+    return NextResponse.json({ letter, savedAt: new Date().toISOString(), unchanged: true });
   }
 
   const { data, error } = await supabaseAdmin()
