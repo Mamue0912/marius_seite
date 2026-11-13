@@ -32,6 +32,10 @@ export const MODEL_CATALOG: Record<string, ModelInfo> = {
     id: "claude-opus-5-5", label: "Claude Opus 5.5",
     inputPerMTokUsd: 4, outputPerMTokUsd: 20, contextTokens: 1_000_000, maxOutputTokens: 128_000
   },
+  "claude-opus-5": {
+    id: "claude-opus-5", label: "Claude Opus 5",
+    inputPerMTokUsd: 5, outputPerMTokUsd: 25, contextTokens: 1_000_000, maxOutputTokens: 128_000
+  },
   "claude-sonnet-5-5": {
     id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5",
     inputPerMTokUsd: 2, outputPerMTokUsd: 10, contextTokens: 1_000_000, maxOutputTokens: 128_000
