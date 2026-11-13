@@ -12,7 +12,7 @@ import { admissionsBlock, dataBlock, toneInstruction, TONE_GUARD, CORE_RULES, PR
 import { paragraphs } from "@/lib/motivation";
 import {
   RUBRIC_DIMENSIONS, RUBRIC_DISCLAIMER, averageScore, complianceChecks, styleFindings,
-  weakDimensions, type RubricScore
+  weakDimensions, genericFindings, evidenceDepthWarning, type RubricScore
 } from "@/lib/qualityRubric";
 import { buildMotivationPdf } from "@/lib/motivationPdf";
 import { modelFor } from "@/lib/aiModels";
@@ -125,6 +125,12 @@ export async function POST(req: NextRequest) {
       summary: String(res.summary || "").slice(0, 800),
       compliance,
       style: styleFindings(body),
+      generic: genericFindings(body, [
+        ...evidence.map((e) => e.title),
+        profile.school || "", adm.institution, adm.programme,
+        ...adm.curriculum.map((m) => m.name)
+      ].filter(Boolean)),
+      depth: evidenceDepthWarning(evidence),
       pages,
       disclaimer: RUBRIC_DISCLAIMER,
       promptVersion: PROMPT_VERSION,

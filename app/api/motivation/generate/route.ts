@@ -10,6 +10,7 @@ import {
 import { profileBlock, examplesBlock, defaultOutline } from "@/lib/motivation";
 import { evidenceBlock, selectStories } from "@/lib/evidence";
 import { profileById } from "@/lib/admissions";
+import { evidenceDepthWarning } from "@/lib/qualityRubric";
 import { CORE_RULES, admissionsBlock, dataBlock, toneInstruction, TONE_GUARD, PROMPT_VERSION } from "@/lib/prompts";
 import { modelFor } from "@/lib/aiModels";
 
@@ -162,7 +163,8 @@ export async function POST(req: NextRequest) {
       letter: data,
       missing: Array.from(new Set([...planMissing, ...(draft.missing || [])])),
       sources: { factCount: source.factCount, documents: source.documents },
-      evidenceUsed: selectStories(evidence).map((s) => s.title)
+      evidenceUsed: selectStories(evidence).map((s) => s.title),
+      depth: evidenceDepthWarning(evidence)
     });
   } catch (e) {
     const info = aiErrorInfo(e);

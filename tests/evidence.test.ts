@@ -396,3 +396,76 @@ test("Aktualisieren wirft den Nutzer nicht aus dem gewählten Schritt", async ()
   assert.ok(ui.includes("keepStage"), "Beim Aktualisieren muss der Schritt erhalten bleiben");
   assert.ok(!/onChanged=\{\(\) => void loadAll\(\)\}/.test(ui), "Teilbereiche dürfen keinen Vollreload auslösen");
 });
+
+// ===================================================== Schablonen-Erkennung
+test("Austauschbare Sätze werden erkannt, konkrete nicht", async () => {
+  const { isGenericSentence, genericFindings } = await import("../lib/qualityRubric");
+  const anchors = ["Nacréa", "business@school", "Kaiser-Friedrich-Ufer-Gymnasium"];
+
+  assert.equal(
+    isGenericSentence("Wirtschaft begeistert mich, weil sie viele spannende Perspektiven eröffnet und Menschen verbindet.", anchors),
+    true, "ein Satz ohne jeden Anker ist austauschbar"
+  );
+  assert.equal(
+    isGenericSentence("Bei Nacréa habe ich das Sortiment von zwölf auf vier Produkte verkleinert.", anchors),
+    false, "ein Satz mit Projektname und Zahl ist konkret"
+  );
+  assert.equal(
+    isGenericSentence("Im Jahr 2023 habe ich diese Entscheidung getroffen und sie hat vieles verändert.", anchors),
+    false, "eine Jahreszahl ist ein Anker"
+  );
+  assert.equal(isGenericSentence("Das war schwer.", anchors), false, "kurze Sätze werden nicht beanstandet");
+  // Im Deutschen sind alle Substantive gross – das darf NICHT als
+  // Eigenname durchgehen, sonst erkennt der Prüfer nichts mehr.
+  assert.equal(
+    isGenericSentence("Die Zusammenarbeit mit Menschen aus anderen Ländern hat meine Perspektive erweitert.", anchors),
+    true, "grossgeschriebene Substantive sind keine Anker"
+  );
+
+  const found = genericFindings(
+    "Wirtschaft begeistert mich, weil sie viele spannende Perspektiven eröffnet und Menschen verbindet. Bei Nacréa habe ich das Sortiment verkleinert.",
+    anchors
+  );
+  assert.equal(found.length, 1);
+  assert.ok(found[0].sentence.startsWith("Wirtschaft begeistert"));
+});
+
+test("Zu dünne Datenlage wird vor dem Schreiben gemeldet", async () => {
+  const { evidenceDepthWarning } = await import("../lib/qualityRubric");
+
+  // Nur Lebenslauf-Fakten, keine Reflexion: genau der Fall aus der Praxis.
+  const thin = evidenceDepthWarning([
+    ev({ title: "Nacréa", status: "USER_REPORTED", situation: long("Eigener Onlineshop"), result: long("Shop aufgebaut") })
+  ]);
+  assert.equal(thin.ready, 0);
+  assert.ok(/allgemein/i.test(thin.message || ""), "die Ursache muss benannt werden");
+  assert.ok(thin.thin[0].missing.includes("eigene Entscheidung"));
+
+  // Mit Reflexion ist die Warnung weg.
+  const deep = (t: string) => ev({
+    title: t, status: "USER_REPORTED",
+    situation: long("S"), challenge: long("C"), decision: long("D"), action: long("A"), learning: long("L")
+  });
+  const ok = evidenceDepthWarning([deep("Nacréa"), deep("business@school")]);
+  assert.equal(ok.ready, 2);
+  assert.equal(ok.message, null);
+});
+
+test("Der Entwurfs-Prompt verlangt konkrete Einzelheiten und verbietet erfundene Gefühle", async () => {
+  const fs = await import("node:fs");
+  const src = fs.readFileSync("lib/anthropic.ts", "utf8");
+  assert.ok(/GEGEN SCHABLONENTEXT/.test(src));
+  assert.ok(/konkrete, nachprüfbare Einzelheit/.test(src));
+  assert.ok(/Erfinde keine Gefühle, Kindheitserinnerungen oder Schlüsselmomente/.test(src));
+  // Echte, belegte Reaktion bleibt ausdruecklich erlaubt.
+  assert.ok(/Zurückhaltung heisst nicht Blutleere/.test(src));
+});
+
+test("Die Extraktion erfasst auch Reflexionsfelder, erfindet sie aber nicht", async () => {
+  const fs = await import("node:fs");
+  const src = fs.readFileSync("lib/anthropic.ts", "utf8");
+  for (const f of ["decision", "action", "learning", "challenge"]) {
+    assert.ok(new RegExp(`${f}: \\{ type: \\["string", "null"\\] \\}`).test(src), `${f} fehlt im Schema`);
+  }
+  assert.ok(/Ein Lebenslauf enthält fast nie Entscheidung, Handeln oder Erkenntnis/.test(src));
+});

@@ -393,6 +393,21 @@ export function ReviewPanel({ letterId, body }: { letterId: string; body: string
             </>
           )}
 
+          {review.generic?.length > 0 && (
+            <>
+              <h4>Austauschbare Sätze</h4>
+              <div className="ms-hint">Diese Sätze könnten in jeder Bewerbung stehen. Ersetze sie durch eine konkrete Einzelheit.</div>
+              <ul className="ms-checklist">
+                {review.generic.map((g: any, i: number) => (
+                  <li key={i} className="fehlt"><span className="ms-ck-ic">!</span>
+                    <span><i>„{g.sentence}“</i></span></li>
+                ))}
+              </ul>
+            </>
+          )}
+
+          {review.depth?.message && <div className="ms-gap"><b>Datenlage:</b> {review.depth.message}</div>}
+
           {review.style?.length > 0 && (
             <>
               <h4>Sprachliche Auffälligkeiten</h4>

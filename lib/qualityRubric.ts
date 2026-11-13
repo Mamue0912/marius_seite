@@ -12,7 +12,7 @@
 
 import type { AdmissionsProfile } from "./admissions";
 import { checkableRules } from "./admissions";
-import { type EvidenceItem, plannedTitles, excludedTitles, findContradictions } from "./evidence";
+import { type EvidenceItem, plannedTitles, excludedTitles, findContradictions, isStoryReady, missingFields } from "./evidence";
 import { paragraphs } from "./motivation";
 
 export const RUBRIC_DIMENSIONS = [
@@ -238,6 +238,77 @@ export function styleFindings(body: string): StyleFinding[] {
     }
   }
   return out;
+}
+
+// ---------------------------------------------------------------------
+// Schablonen-Erkennung (ohne KI)
+// ---------------------------------------------------------------------
+
+/**
+ * Ein Satz wirkt austauschbar, wenn er keinerlei Anker enthält: keinen
+ * Eigennamen, keine Zahl, keinen konkreten Begriff. Solche Sätze könnten
+ * in der Bewerbung jeder beliebigen Person stehen.
+ */
+export function isGenericSentence(sentence: string, anchors: string[]): boolean {
+  const s = sentence.trim();
+  // Kurze Sätze tragen oft nur die Überleitung – die sollen nicht stören.
+  if (s.length < 55) return false;
+
+  // Eine Zahl oder Jahreszahl ist ein Anker.
+  if (/\d/.test(s)) return false;
+
+  // Ein eigener Begriff des Bewerbers ist ein Anker: Projektname, Schule,
+  // Studiengang, Modulname.
+  //
+  // Bewusst KEINE Grossschreibungs-Heuristik: im Deutschen werden alle
+  // Substantive gross geschrieben, "Menschen" wäre sonst ein Eigenname.
+  const low = s.toLowerCase();
+  if (anchors.some((a) => a && a.trim().length >= 4 && low.includes(a.trim().toLowerCase()))) return false;
+
+  return true;
+}
+
+export interface GenericFinding { sentence: string; hint: string; }
+
+/**
+ * Findet austauschbare Sätze. "anchors" sind die eigenen Begriffe des
+ * Bewerbers (Titel der Erfahrungen, Schule, Studiengang).
+ */
+export function genericFindings(body: string, anchors: string[]): GenericFinding[] {
+  const sentences = (body || "").split(/(?<=[.!?])\s+/).filter((s) => s.trim());
+  const out: GenericFinding[] = [];
+  for (const s of sentences) {
+    if (isGenericSentence(s, anchors)) {
+      out.push({
+        sentence: s.trim().slice(0, 160),
+        hint: "Dieser Satz könnte in jeder Bewerbung stehen. Durch eine konkrete Einzelheit aus deinen Erfahrungen ersetzen."
+      });
+    }
+  }
+  return out.slice(0, 8);
+}
+
+/**
+ * Reicht die Datenlage überhaupt für einen persönlichen Text?
+ * Fehlen Entscheidung, Handeln und Erkenntnis durchgehend, wird der Text
+ * zwangsläufig allgemein – das soll die Anwendung VORHER sagen.
+ */
+export interface DepthWarning { ready: number; thin: { title: string; missing: string[] }[]; message: string | null; }
+
+export function evidenceDepthWarning(items: EvidenceItem[]): DepthWarning {
+  const usable = items.filter((i) => i.status === "CONFIRMED" || i.status === "USER_REPORTED" || i.status === "PLANNED");
+  const ready = usable.filter(isStoryReady);
+  const thin = usable
+    .filter((i) => !isStoryReady(i))
+    .map((i) => ({ title: i.title, missing: missingFields(i) }));
+
+  let message: string | null = null;
+  if (ready.length === 0) {
+    message = "Keine deiner Erfahrungen ist bisher tief genug für einen persönlichen Absatz. Der Text bleibt deshalb allgemein. Am meisten bringt jetzt das Gespräch – dort werden Entscheidung, Handeln und Erkenntnis erfragt.";
+  } else if (ready.length < 2) {
+    message = "Erst eine Erfahrung ist tief genug. Zwei bis drei machen den Text deutlich überzeugender.";
+  }
+  return { ready: ready.length, thin, message };
 }
 
 // ---------------------------------------------------------------------
