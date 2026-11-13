@@ -115,11 +115,42 @@ export function modelInfo(id: string): ModelInfo | null {
   return MODEL_CATALOG[id] || null;
 }
 
-// Antwortlänge je Zweck. Bewusst konservativ: ein Motivationsschreiben mit
-// maximal zwei DIN-A4-Seiten braucht keine 128k Token, und eine kleinere
-// Obergrenze schützt vor Zeitüberschreitungen.
+// Budget für den eigentlichen ANTWORTTEXT je Zweck.
 export const MAX_TOKENS: Record<ModelPurpose, number> = {
   standard: 2000,
   writing: 4000,
   fast: 1200
+};
+
+/**
+ * Zusätzliches Budget für das Nachdenken des Modells.
+ *
+ * WICHTIG: Die aktuellen Modelle denken immer mit ("adaptive thinking"),
+ * und diese Denk-Token zählen laut offizieller Dokumentation gegen
+ * max_tokens – auch wenn der Denktext nicht zurückgegeben wird.
+ * max_tokens ist eine harte Obergrenze für Denken PLUS Antwort.
+ *
+ * Ohne diesen Puffer verbraucht das Nachdenken das Budget und die
+ * Antwort bricht mitten im Satz ab (unlesbares, abgeschnittenes JSON).
+ */
+export const THINKING_HEADROOM: Record<ModelPurpose, number> = {
+  standard: 8000,
+  writing: 12000,
+  fast: 2000
+};
+
+/** Gesamtbudget: gewünschte Antwortlänge plus Platz zum Nachdenken. */
+export function totalTokens(purpose: ModelPurpose, textTokens?: number): number {
+  return (textTokens ?? MAX_TOKENS[purpose]) + THINKING_HEADROOM[purpose];
+}
+
+/**
+ * Denkaufwand je Zweck. Niedriger Aufwand spart Zeit und Geld; die Routen
+ * haben nur 60 Sekunden. Für Textarbeit bleibt es bei "medium".
+ */
+export type Effort = "low" | "medium" | "high";
+export const EFFORT: Record<ModelPurpose, Effort> = {
+  standard: "low",
+  writing: "medium",
+  fast: "low"
 };

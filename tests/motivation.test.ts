@@ -346,3 +346,38 @@ test("Modelltest wertet Überlastung nicht als fehlendes Modell", async () => {
     assert.ok(c === "rate_limit" || c === "overloaded", `${c} darf kein Modellproblem sein`);
   }
 });
+
+// ------------------------------------- Denk-Token und Abschneiden
+test("Token-Budget lässt Platz zum Nachdenken", async () => {
+  const { totalTokens, MAX_TOKENS, THINKING_HEADROOM } = await import("../lib/aiModels");
+  // Die aktuellen Modelle denken immer mit; Denk-Token zählen gegen max_tokens.
+  for (const p of ["standard", "writing", "fast"] as const) {
+    assert.ok(THINKING_HEADROOM[p] > 0, `${p} braucht Denk-Puffer`);
+    assert.equal(totalTokens(p), MAX_TOKENS[p] + THINKING_HEADROOM[p]);
+    assert.ok(totalTokens(p) > MAX_TOKENS[p]);
+  }
+  // Ein eigener Textwunsch bekommt denselben Puffer obendrauf.
+  assert.equal(totalTokens("writing", 3000), 3000 + THINKING_HEADROOM.writing);
+  // Das Budget für einen Entwurf muss deutlich über dem alten Wert liegen,
+  // bei dem die Antwort abgeschnitten wurde.
+  assert.ok(totalTokens("writing", 3000) >= 15000);
+});
+
+test("Abgeschnittene Antwort wird als solche gemeldet, nicht als JSON-Fehler", async () => {
+  const { aiErrorInfo } = await import("../lib/anthropic");
+  process.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "test-key";
+  const info = aiErrorInfo(new Error("TRUNCATED: Die Antwort wurde abgeschnitten (Token-Budget erschöpft)."));
+  assert.equal(info.category, "truncated");
+  assert.ok(/abgeschnitten/i.test(info.message));
+  assert.ok(!/JSON/i.test(info.message), "der Nutzer soll keinen JSON-Jargon sehen");
+});
+
+test("Denkaufwand ist je Zweck gesetzt und gültig", async () => {
+  const { EFFORT } = await import("../lib/aiModels");
+  for (const p of ["standard", "writing", "fast"] as const) {
+    assert.ok(["low", "medium", "high"].includes(EFFORT[p]), `${p}: ungültiger Effort`);
+  }
+  // Textarbeit darf mehr nachdenken als Massen-Einordnung.
+  assert.equal(EFFORT.fast, "low");
+  assert.equal(EFFORT.writing, "medium");
+});
