@@ -1686,7 +1686,7 @@ function DiagModal({ onClose }: { onClose: () => void }) {
     setProbing(false);
     setProbe(r.ok ? r.data : { error: errText(r, "Der Modelltest ist fehlgeschlagen.") });
   }
-  const cat: Record<string, string> = { not_configured: "Nicht eingerichtet", auth: "Authentifizierung", rate_limit: "Rate-Limit", timeout: "Zeitüberschreitung", overloaded: "Überlastet", api_error: "API-Fehler", model_unavailable: "Modell nicht verfügbar", bad_request: "Anfrage abgelehnt" };
+  const cat: Record<string, string> = { not_configured: "Nicht eingerichtet", auth: "Authentifizierung", rate_limit: "Rate-Limit", timeout: "Zeitüberschreitung", overloaded: "Überlastet", api_error: "API-Fehler", model_unavailable: "Modell nicht verfügbar", bad_request: "Anfrage abgelehnt", truncated: "Antwort abgeschnitten" };
   return (
     <div className="ac-modal-scrim" onClick={onClose}>
       <div className="ac-modal" onClick={(e) => e.stopPropagation()}>

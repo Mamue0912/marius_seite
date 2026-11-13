@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { env } from "./env";
-import { modelFor, modelChain, MAX_TOKENS, type ModelPurpose } from "./aiModels";
+import { modelFor, modelChain, MAX_TOKENS, totalTokens, EFFORT, type ModelPurpose } from "./aiModels";
 
 // Server-seitige KI-Generierung. Der API-Schlüssel liegt ausschließlich
 // serverseitig (ANTHROPIC_API_KEY), niemals im Frontend.
@@ -18,9 +18,9 @@ export function aiConfigured(): boolean {
 // Serverseitiges Zeitlimit für einen KI-Aufruf. Bewusst kleiner als das
 // Vercel-Funktionslimit (maxDuration), damit wir eine verständliche Fehler-
 // meldung zurückgeben, statt hart abgeschnitten zu werden.
-const AI_TIMEOUT_MS = 38000;
+const AI_TIMEOUT_MS = 50000;
 
-export type AiErrorCategory = "not_configured" | "auth" | "rate_limit" | "timeout" | "overloaded" | "model_unavailable" | "bad_request" | "api_error";
+export type AiErrorCategory = "not_configured" | "auth" | "rate_limit" | "timeout" | "overloaded" | "model_unavailable" | "bad_request" | "truncated" | "api_error";
 
 export interface AiErrorInfo {
   category: AiErrorCategory;
@@ -56,6 +56,13 @@ export function aiErrorInfo(e: any): AiErrorInfo {
   }
   if (status === 401 || status === 403 || /authentication|invalid x-api-key|permission/i.test(msg)) {
     return { category: "auth", message: "Der KI-Zugang wurde abgelehnt. Bitte den API-Schlüssel prüfen.", detail: safeDetail(e) };
+  }
+  if (/^TRUNCATED:/.test(msg)) {
+    return {
+      category: "truncated",
+      message: "Die Antwort wurde abgeschnitten, bevor sie fertig war. Bitte erneut versuchen – bleibt es dabei, ist der Text zu lang.",
+      detail: msg.replace(/^TRUNCATED:\s*/, "")
+    };
   }
   if (isModelUnavailable(e)) {
     return {
@@ -115,6 +122,30 @@ async function withModelFallback<T>(purpose: ModelPurpose, run: (model: string) 
   throw lastError;
 }
 
+/**
+ * Liest den Text aus der Antwort und erkennt vorher, ob sie abgeschnitten
+ * wurde. Ohne diese Prüfung scheitert erst JSON.parse mit einer Meldung
+ * wie "Unterminated string in JSON", die den eigentlichen Grund verbirgt.
+ */
+function textFromResponse(res: any): string {
+  if (res?.stop_reason === "max_tokens") {
+    throw new Error("TRUNCATED: Die Antwort wurde abgeschnitten (Token-Budget erschöpft).");
+  }
+  if (res?.stop_reason === "model_context_window_exceeded") {
+    throw new Error("TRUNCATED: Die Anfrage war zu lang für das Kontextfenster.");
+  }
+  return (res?.content || []).map((b: any) => (b.type === "text" ? b.text : "")).join("");
+}
+
+/** JSON lesen und bei kaputter Antwort verständlich scheitern. */
+function parseStrict<T>(text: string): T {
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error("TRUNCATED: Die Antwort war unvollständig und konnte nicht gelesen werden.");
+  }
+}
+
 export interface ThreadMessage {
   from: string;
   date: string;
@@ -154,16 +185,15 @@ async function parseJson<T>(system: string, user: string, schema: any, purpose: 
   if (!aiConfigured()) throw new Error("Fehlende Umgebungsvariable: ANTHROPIC_API_KEY");
   const res = await withModelFallback(purpose, (model) => client().messages.create({
     model,
-    max_tokens: MAX_TOKENS[purpose],
+    max_tokens: totalTokens(purpose),
     system,
     messages: [{ role: "user", content: user }],
     // Strukturierte Ausgabe → garantiert parsebares JSON. output_config wird
     // vom SDK im Request-Body durchgereicht; das Cast umgeht nur die Typprüfung
     // der installierten SDK-Version.
-    output_config: { format: { type: "json_schema", schema } }
+    output_config: { format: { type: "json_schema", schema }, effort: EFFORT[purpose] }
   } as any, { timeout: AI_TIMEOUT_MS, maxRetries: 1 }));
-  const text = res.content.map((b: any) => (b.type === "text" ? b.text : "")).join("");
-  return JSON.parse(text) as T;
+  return parseStrict<T>(textFromResponse(res));
 }
 
 // 1) Drei dynamische, kontextabhängige Antwortvorschläge.
@@ -263,20 +293,20 @@ export type Block =
 async function rawJson<T>(system: string, content: string | Block[], schema: any, maxTokens = 2600, purpose: ModelPurpose = "standard"): Promise<T> {
   if (!aiConfigured()) throw new Error("Fehlende Umgebungsvariable: ANTHROPIC_API_KEY");
   const res = await withModelFallback(purpose, (model) => client().messages.create({
-    model, max_tokens: maxTokens, system,
+    model, max_tokens: totalTokens(purpose, maxTokens), system,
     messages: [{ role: "user", content: content as any }],
-    output_config: { format: { type: "json_schema", schema } }
+    output_config: { format: { type: "json_schema", schema }, effort: EFFORT[purpose] }
   } as any, { timeout: AI_TIMEOUT_MS, maxRetries: 1 }));
-  const text = res.content.map((b: any) => (b.type === "text" ? b.text : "")).join("");
-  return JSON.parse(text) as T;
+  return parseStrict<T>(textFromResponse(res));
 }
 
 async function rawText(system: string, messages: any[], maxTokens = 2000, purpose: ModelPurpose = "standard"): Promise<string> {
   if (!aiConfigured()) throw new Error("Fehlende Umgebungsvariable: ANTHROPIC_API_KEY");
   const res = await withModelFallback(purpose, (model) => client().messages.create({
-    model, max_tokens: maxTokens, system, messages
+    model, max_tokens: totalTokens(purpose, maxTokens), system, messages,
+    output_config: { effort: EFFORT[purpose] }
   } as any, { timeout: AI_TIMEOUT_MS, maxRetries: 1 }));
-  return res.content.map((b: any) => (b.type === "text" ? b.text : "")).join("").trim();
+  return textFromResponse(res).trim();
 }
 
 const APPLICATION_RULES = `Du bist ein sorgfältiger, ehrlicher Bewerbungs-Assistent. Absolute Regeln:
