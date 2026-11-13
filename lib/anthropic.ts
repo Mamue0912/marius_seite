@@ -1038,6 +1038,17 @@ AUFGABE: Schreibe den vollständigen Entwurf entlang des Plans.
 - Beginne mit der Kopfzeile genau so: "${params.identityLine}" – danach eine Leerzeile.
 - Danach reiner Fliesstext in Absätzen. Keine Überschriften im Text.
 - Umfang so, dass der Text sicher auf höchstens zwei DIN-A4-Seiten passt. Orientierung: etwa 450 bis 650 Wörter. Das ist KEINE Vorgabe der Hochschule, nur eine Hilfsgrösse.
+
+GEGEN SCHABLONENTEXT – das ist der wichtigste Teil dieser Aufgabe:
+- Jeder inhaltliche Absatz muss mindestens EINE konkrete, nachprüfbare Einzelheit aus den ERFAHRUNGEN enthalten: ein Produkt, eine Zahl, einen Ort, einen Zeitpunkt, eine konkret benannte Entscheidung. Ein Absatz, der genauso in der Bewerbung einer anderen Person stehen könnte, ist unbrauchbar.
+- Schreibe nicht ÜBER Eigenschaften, sondern zeige sie an einer Handlung. Statt "ich bin verantwortungsbewusst" die Situation, in der das sichtbar wurde.
+- Nenne Dinge beim Namen. "Ein eigenes Projekt" ist schwach, der Name des Projekts ist stark.
+- Keine Zusammenfassung des Lebenslaufs und keine Aufzählung von Stationen.
+- Liegt zu einer gewählten Erfahrung nur die Station vor, aber keine Entscheidung, kein Handeln und keine Erkenntnis, dann BAUE SIE NICHT AUS. Nimm sie kurz oder gar nicht und melde unter "missing", welche Angabe für einen tragfähigen Absatz fehlt.
+
+ZUR EMOTIONALITÄT:
+- Erfinde keine Gefühle, Kindheitserinnerungen oder Schlüsselmomente.
+- Eine ECHTE, in den Erfahrungen belegte Reaktion darf aber benannt werden: was eine Entscheidung gekostet hat, was nach einem Rückschlag anders lief, was überrascht hat. Zurückhaltung heisst nicht Blutleere.
 - Keine E-Mail-Adresse, keine Telefonnummer, keine Anschrift.
 - Tonalität: ${params.tone}
 - ${params.toneGuard}
@@ -1278,10 +1289,13 @@ export async function extractEvidenceFromDocuments(params: {
         type: "array",
         items: {
           type: "object", additionalProperties: false,
-          required: ["title", "period", "role", "situation", "result", "status", "source"],
+          required: ["title", "period", "role", "situation", "challenge", "decision", "action", "result", "learning", "businessLink", "status", "source"],
           properties: {
             title: { type: "string" }, period: { type: ["string", "null"] },
             role: { type: ["string", "null"] }, situation: { type: ["string", "null"] },
+            challenge: { type: ["string", "null"] }, decision: { type: ["string", "null"] },
+            action: { type: ["string", "null"] }, learning: { type: ["string", "null"] },
+            businessLink: { type: ["string", "null"] },
             result: { type: ["string", "null"] },
             status: { type: "string", enum: ["CONFIRMED", "USER_REPORTED", "PLANNED", "INFERRED", "UNKNOWN"] },
             source: { type: ["string", "null"] }
@@ -1301,7 +1315,7 @@ REGELN:
   * USER_REPORTED, wenn es im Lebenslauf steht, aber nicht weiter belegt ist.
   * PLANNED, wenn erkennbar ist, dass es noch bevorsteht (Formulierungen wie "geplant", "ab", ein Datum in der Zukunft, "Zusage für").
   * INFERRED, wenn du es nur erschliesst. Dann KEINE Details ergänzen.
-- Felder, die die Unterlage nicht hergibt, bleiben null. Niemals ausschmücken.
+- Felder, die die Unterlage nicht hergibt, bleiben null. Niemals ausschmücken. Ein Lebenslauf enthält fast nie Entscheidung, Handeln oder Erkenntnis – lass diese Felder dann leer, statt sie zu erfinden. Sie werden später im Gespräch erfragt.
 - "source": aus welcher Unterlage die Angabe stammt.
 - Höchstens 12 Einträge, die aussagekräftigsten zuerst.
 Sprache: ${params.language === "en" ? "Englisch" : "Deutsch"}.`;

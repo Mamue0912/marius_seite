@@ -55,6 +55,7 @@ export default function MotivationStudio() {
   const [compare, setCompare] = useState<any | null>(null); // Vorher/Nachher
   const [missingInfo, setMissingInfo] = useState<string[]>([]);
   const [sources, setSources] = useState<any>(null);
+  const [depth, setDepth] = useState<any>(null);
   const [targeted, setTargeted] = useState<any | null>(null);
   const [wish, setWish] = useState("");
 
@@ -171,6 +172,7 @@ export default function MotivationStudio() {
     if (!r.ok) { notify(r.message || "Die Erzeugung ist fehlgeschlagen.", true); return; }
     setMissingInfo(r.data.missing || []);
     if (r.data.sources) setSources(r.data.sources);
+    if (r.data.depth) setDepth(r.data.depth);
     if (mode === "outline") {
       setLetter((l: any) => ({ ...l, outline: r.data.outline, stage: "gliederung" }));
       setStage("gliederung");
@@ -417,7 +419,7 @@ export default function MotivationStudio() {
               {stage === "entwurf" && (
                 <DraftStep
                   draft={draft} setDraft={setDraft} counts={counts} busy={busy} missing={missingInfo}
-                  sources={sources} wish={wish} setWish={setWish} targeted={targeted}
+                  sources={sources} depth={depth} wish={wish} setWish={setWish} targeted={targeted}
                   onGenerate={() => void generate("draft")} onWish={applyWish}
                   onAcceptChange={acceptChange} onAcceptAll={acceptAllChanges}
                   onDiscardTargeted={() => setTargeted(null)}
@@ -747,7 +749,7 @@ function OutlineStep({ letter, busy, missing, onGenerate, onChange, onNext }: an
 }
 
 // ============================ Schritt 5: Entwurf ============================
-function DraftStep({ draft, setDraft, counts, busy, missing, sources, wish, setWish,
+function DraftStep({ draft, setDraft, counts, busy, missing, sources, depth, wish, setWish,
   targeted, onGenerate, onWish, onAcceptChange, onAcceptAll, onDiscardTargeted, onNext }: any) {
   const writing = busy === "draft";
   return (
@@ -776,6 +778,19 @@ function DraftStep({ draft, setDraft, counts, busy, missing, sources, wish, setW
       )}
 
       <SourceInfo sources={sources} />
+
+      {depth?.message && (
+        <div className="ms-gap">
+          <b>Warum der Text noch allgemein klingt:</b> {depth.message}
+          {depth.thin?.length > 0 && (
+            <ul>
+              {depth.thin.slice(0, 4).map((t: any, i: number) => (
+                <li key={i}><b>{t.title}</b> – es fehlt: {t.missing.join(", ")}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {missing?.length > 0 && (
         <div className="ms-gap"><b>Dafür fehlten Angaben – bitte selbst prüfen und ergänzen:</b>
