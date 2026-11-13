@@ -279,3 +279,52 @@ test("Regeln erlauben einen vollständigen Entwurf trotz Lücken", () => {
   assert.ok(/vollständig zu Ende/i.test(MOTIVATION_RULES));
   assert.ok(/erfinde/i.test(MOTIVATION_RULES));
 });
+
+// ------------------------------------------------- Modellfehler/Ausweichen
+test("Nicht verfügbares Modell wird sicher erkannt", async () => {
+  const { isModelUnavailable, aiErrorInfo } = await import("../lib/anthropic");
+  process.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "test-key";
+
+  assert.equal(isModelUnavailable({ status: 404 }), true);
+  assert.equal(isModelUnavailable({ status: 400, error: { error: { type: "not_found_error", message: "model: claude-x" } } }), true);
+  assert.equal(isModelUnavailable({ status: 400, message: "model not found" }), true);
+  // Andere Fehler dürfen NICHT als Modellproblem gelten.
+  assert.equal(isModelUnavailable({ status: 429, message: "rate limit" }), false);
+  assert.equal(isModelUnavailable({ status: 529, message: "overloaded" }), false);
+
+  assert.equal(aiErrorInfo({ status: 404, message: "model not found" }).category, "model_unavailable");
+  assert.equal(aiErrorInfo({ status: 429, message: "rate limit" }).category, "rate_limit");
+  assert.equal(aiErrorInfo({ status: 529, message: "overloaded" }).category, "overloaded");
+});
+
+test("Fehlermeldung nennt den echten Grund statt nur Allgemeinplatz", async () => {
+  const { aiErrorInfo } = await import("../lib/anthropic");
+  process.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "test-key";
+  const info = aiErrorInfo({ status: 400, error: { error: { message: "output_config nicht unterstützt" } } });
+  assert.equal(info.category, "bad_request");
+  assert.ok(info.message.includes("output_config nicht unterstützt"), "Originalgrund muss sichtbar sein");
+});
+
+test("Ein API-Schlüssel taucht nie in der Fehlermeldung auf", async () => {
+  const { aiErrorInfo } = await import("../lib/anthropic");
+  process.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "test-key";
+  const info = aiErrorInfo({ status: 400, message: "bad key sk-ant-geheim12345 used" });
+  assert.ok(!/sk-ant-geheim/.test(info.message + (info.detail || "")), "Schlüssel muss entfernt sein");
+  assert.ok((info.detail || "").includes("[Schlüssel entfernt]"));
+});
+
+test("Ausweichkette beginnt beim eingestellten Modell und hat keine Doppel", async () => {
+  const { modelChain } = await import("../lib/aiModels");
+  delete process.env.ANTHROPIC_MODEL;
+  delete process.env.ANTHROPIC_MODEL_WRITING;
+  const chain = modelChain("writing");
+  assert.equal(chain[0], "claude-opus-5-5");
+  assert.ok(chain.length > 1, "es muss Ausweichmodelle geben");
+  assert.equal(new Set(chain).size, chain.length, "keine Doppelungen");
+
+  process.env.ANTHROPIC_MODEL_WRITING = "claude-sonnet-5-5";
+  const custom = modelChain("writing");
+  assert.equal(custom[0], "claude-sonnet-5-5");
+  assert.equal(new Set(custom).size, custom.length);
+  delete process.env.ANTHROPIC_MODEL_WRITING;
+});

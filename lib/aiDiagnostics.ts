@@ -12,6 +12,7 @@ export interface AiEventInput {
   durationMs: number;
   model?: string | null;
   errorCategory?: string | null;
+  errorDetail?: string | null;
   subjectHint?: string | null; // nur gekürzter Betreff, kein Inhalt
 }
 
@@ -23,7 +24,11 @@ export async function recordAiEvent(ev: AiEventInput): Promise<void> {
       ok: ev.ok,
       duration_ms: Math.round(ev.durationMs),
       model: ev.model || null,
-      error_category: ev.errorCategory || null,
+      // Kategorie plus kurzer Originalgrund, damit die Diagnose
+      // verwertbar ist. Passt in die vorhandene Textspalte.
+      error_category: ev.errorCategory
+        ? (ev.errorDetail ? `${ev.errorCategory}: ${ev.errorDetail}`.slice(0, 300) : ev.errorCategory)
+        : null,
       subject_hint: ev.subjectHint ? String(ev.subjectHint).slice(0, 80) : null
     });
   } catch {

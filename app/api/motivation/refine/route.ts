@@ -110,7 +110,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ before: paragraph, after: suggestion, note: res.note || null });
   } catch (e) {
     const info = aiErrorInfo(e);
-    await recordAiEvent({ userId: user.id, kind: "refine", ok: false, durationMs: Date.now() - started, model, errorCategory: info.category });
+    await recordAiEvent({ userId: user.id, kind: "refine", ok: false, durationMs: Date.now() - started, model, errorCategory: info.category, errorDetail: info.detail });
     return NextResponse.json({ error: info.category, message: info.message }, { status: info.category === "not_configured" ? 503 : 502 });
   }
 }
