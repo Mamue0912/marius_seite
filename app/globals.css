@@ -1538,3 +1538,32 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--mat); }
 .ms-change-h { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; font-size: 13px; font-weight: 600; }
 .ms-change-r { font-weight: 400; color: var(--muted); font-size: 12px; }
 @media (max-width: 780px) { .ms-wish-row { flex-direction: column; } }
+
+/* ---- Erfahrungen, Gespräch, Bewertung ---- */
+.ms-ev { border: 1px solid var(--line-2); border-radius: var(--r-sm); padding: 12px 14px; margin-bottom: 10px; background: var(--mat-thin); }
+.ms-ev.ready { border-color: var(--accent-line); }
+.ms-ev-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.ms-ev-t { font-size: 14px; font-weight: 600; }
+.ms-ev-p { margin: 0 0 8px; font-size: 13.5px; line-height: 1.6; color: var(--ink-2); }
+.ms-badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: var(--r-pill); background: var(--surface-2); color: var(--muted); }
+.ms-badge.s-CONFIRMED { background: var(--low-soft); color: #c9f7d8; }
+.ms-badge.s-PLANNED { background: var(--high-soft); color: #ffe6c2; }
+.ms-badge.s-INFERRED, .ms-badge.s-UNKNOWN { background: var(--urgent-soft); color: #ffd9d6; }
+.ms-badge.ready { background: var(--accent-soft); color: var(--accent-ink); }
+.ms-field select { background: var(--surface-2); color: var(--ink); border: 1px solid var(--line-2); border-radius: var(--r-xs); padding: 9px 11px; font-size: 14px; font-family: inherit; }
+
+.ms-progress { display: flex; align-items: center; gap: 12px; margin: 10px 0 4px; flex-wrap: wrap; }
+.ms-progress-bar { flex: 1; min-width: 160px; height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+.ms-progress-bar span { display: block; height: 100%; background: var(--accent); transition: width var(--t); }
+
+.ms-rubric { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; }
+.ms-rub-row { display: grid; grid-template-columns: minmax(130px, 1.2fr) 3fr auto; align-items: center; gap: 10px; font-size: 13px; }
+.ms-rub-l { color: var(--ink-2); }
+.ms-rub-bar { height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+.ms-rub-bar span { display: block; height: 100%; border-radius: 4px; }
+.ms-rub-bar span.low { background: #ff6961; }
+.ms-rub-bar span.mid { background: #ffb340; }
+.ms-rub-bar span.high { background: #4ade80; }
+.ms-rub-n { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12.5px; }
+.ms-quote { margin: 0 0 6px; padding: 8px 11px; border-left: 3px solid var(--accent-line); background: var(--surface-2); font-size: 13px; font-style: italic; border-radius: 0 var(--r-xs) var(--r-xs) 0; }
+@media (max-width: 780px) { .ms-rub-row { grid-template-columns: 1fr auto; } .ms-rub-bar { grid-column: 1 / -1; } }

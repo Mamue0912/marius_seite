@@ -71,7 +71,16 @@ async function main() {
       ["/api/motivation/requirements", "GET"],
       ["/api/motivation/generate", "POST"],
       ["/api/motivation/refine", "POST"],
-      ["/api/motivation/check", "POST"]
+      ["/api/motivation/check", "POST"],
+      ["/api/motivation/evidence", "GET"],
+      ["/api/motivation/evidence", "PUT"],
+      ["/api/motivation/evidence", "POST"],
+      ["/api/motivation/evidence", "DELETE"],
+      ["/api/motivation/interview", "GET"],
+      ["/api/motivation/interview", "POST"],
+      ["/api/motivation/interview", "PATCH"],
+      ["/api/motivation/review", "POST"],
+      ["/api/motivation/interview-prep", "POST"]
     ];
     for (const [endpoint, method] of protectedEndpoints) {
       const response = await fetch("http://127.0.0.1:3115" + endpoint, { method });

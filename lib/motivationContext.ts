@@ -156,3 +156,73 @@ export async function loadSourceMaterial(userId: string): Promise<SourceMaterial
     documents: usable.map((d: any) => ({ name: d.name, type: d.doc_type }))
   };
 }
+
+// ---------------------------------------------------------------------
+//  Evidence Database und Interview – serverseitige Zugriffe
+// ---------------------------------------------------------------------
+
+import type { EvidenceItem, FactStatus } from "@/lib/evidence";
+import { FACT_STATUS } from "@/lib/evidence";
+
+function rowToEvidence(r: any): EvidenceItem {
+  return {
+    id: r.id, title: r.title, period: r.period, role: r.role,
+    situation: r.situation, challenge: r.challenge, decision: r.decision,
+    action: r.action, result: r.result, learning: r.learning,
+    businessLink: r.business_link,
+    valueKeys: Array.isArray(r.value_keys) ? r.value_keys : [],
+    status: (FACT_STATUS.includes(r.status) ? r.status : "USER_REPORTED") as FactStatus,
+    source: r.source, interviewProbe: r.interview_probe
+  };
+}
+
+export async function loadEvidence(userId: string): Promise<EvidenceItem[]> {
+  const { data, error } = await supabaseAdmin()
+    .from("motivation_evidence").select("*").eq("user_id", userId)
+    .order("updated_at", { ascending: false });
+  if (error) throw new Error("Die Erfahrungen konnten nicht geladen werden.");
+  return (data || []).map(rowToEvidence);
+}
+
+export function evidenceToRow(userId: string, item: EvidenceItem): Record<string, unknown> {
+  const str = (v: unknown) => (typeof v === "string" ? v.slice(0, 4000) : null);
+  return {
+    user_id: userId,
+    title: String(item.title || "").slice(0, 200),
+    period: str(item.period), role: str(item.role),
+    situation: str(item.situation), challenge: str(item.challenge),
+    decision: str(item.decision), action: str(item.action),
+    result: str(item.result), learning: str(item.learning),
+    business_link: str(item.businessLink),
+    value_keys: Array.isArray(item.valueKeys) ? item.valueKeys.slice(0, 8).map((v) => String(v).slice(0, 40)) : [],
+    status: FACT_STATUS.includes(item.status) ? item.status : "USER_REPORTED",
+    source: str(item.source), interview_probe: str(item.interviewProbe),
+    updated_at: new Date().toISOString()
+  };
+}
+
+export interface InterviewRow {
+  id: string; question_key: string; question: string;
+  answer: string | null; state: string; targets: string | null; created_at: string;
+}
+
+export async function loadInterview(userId: string, letterId?: string | null): Promise<InterviewRow[]> {
+  let q = supabaseAdmin().from("motivation_interview").select("*").eq("user_id", userId);
+  if (letterId) q = q.or(`letter_id.eq.${letterId},letter_id.is.null`);
+  const { data, error } = await q.order("created_at", { ascending: true });
+  if (error) throw new Error("Das Gespräch konnte nicht geladen werden.");
+  return (data || []) as InterviewRow[];
+}
+
+/** Beantwortete Gesprächsantworten als Prompt-Material. */
+export function interviewBlock(rows: InterviewRow[]): string {
+  const answered = rows.filter((r) => r.state === "beantwortet" && (r.answer || "").trim());
+  if (!answered.length) return "(noch keine Gesprächsantworten)";
+  return answered.map((r) => `F: ${r.question}\nA: ${r.answer}`).join("\n\n");
+}
+
+/** Bereits gestellte Fragen – damit nichts doppelt gefragt wird. */
+export function askedBlock(rows: InterviewRow[]): string {
+  if (!rows.length) return "";
+  return rows.map((r) => `- [${r.state}] ${r.question}`).join("\n");
+}

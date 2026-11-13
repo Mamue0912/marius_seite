@@ -4,18 +4,28 @@ import Icon from "@/components/Icon";
 import { Notice, notify } from "@/components/Feedback";
 import OverlayScroll from "@/components/OverlayScroll";
 import { api, fetchRequirements, getRequirementsCache } from "@/lib/motivationStore";
+import { EvidenceStep, InterviewStep, ReviewPanel } from "@/components/MotivationPanels";
 
 // ============================ Typen ============================
-type Stage = "profil" | "beispiele" | "bezug" | "gliederung" | "entwurf" | "ueberarbeitung" | "export";
+type Stage = "profil" | "erfahrungen" | "gespraech" | "beispiele" | "bezug" | "gliederung" | "entwurf" | "ueberarbeitung" | "export";
 
 const STAGES: { key: Stage; label: string; ic: string }[] = [
   { key: "entwurf", label: "Schreiben & Bearbeiten", ic: "edit" },
   { key: "ueberarbeitung", label: "Gezielt ändern", ic: "spark" },
   { key: "export", label: "Prüfen & Export", ic: "document" },
-  { key: "beispiele", label: "Beispiele ergänzen", ic: "chat" },
+  { key: "erfahrungen", label: "Meine Erfahrungen", ic: "star" },
+  { key: "gespraech", label: "Gespräch", ic: "chat" },
   { key: "profil", label: "Profil", ic: "user" },
-  { key: "bezug", label: "Anforderungen", ic: "star" },
+  { key: "bezug", label: "Anforderungen", ic: "shield" },
   { key: "gliederung", label: "Gliederung", ic: "tasks" }
+];
+// "beispiele" bleibt als Stage erhalten: früher erfasste Antworten fließen
+// weiterhin in den Prompt, der Schritt wird aber nicht mehr angeboten.
+
+const TONE_OPTIONS = [
+  { key: "persoenlich", label: "Natürlich und persönlich" },
+  { key: "klassisch", label: "Klassisch professionell" },
+  { key: "analytisch", label: "Reflektiert und analytisch" }
 ];
 
 const REFINE_BUTTONS = [
@@ -356,6 +366,16 @@ export default function MotivationStudio() {
               <div className="ms-head-a">
                 <SaveBadge state={saveState} />
                 <label className="ms-lang">
+                  <span className="sr-only">Tonalität</span>
+                  <select
+                    value={letter.tone || "persoenlich"}
+                    onChange={(e) => void patchLetter({ tone: e.target.value })}
+                    aria-label="Tonalität des Schreibens"
+                  >
+                    {TONE_OPTIONS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+                  </select>
+                </label>
+                <label className="ms-lang">
                   <span className="sr-only">Sprache</span>
                   <select
                     value={letter.language}
@@ -379,6 +399,8 @@ export default function MotivationStudio() {
                   onSaved={() => void loadExamples(letter.id)} onNext={() => setStage("bezug")}
                 />
               )}
+              {stage === "erfahrungen" && <EvidenceStep onChanged={() => void loadAll()} />}
+              {stage === "gespraech" && <InterviewStep letterId={letter.id} onChanged={() => void loadAll()} />}
               {stage === "bezug" && <ReferenceStep reqs={reqs} letter={letter} onPatch={patchLetter} onNext={() => setStage("gliederung")} />}
               {stage === "gliederung" && (
                 <OutlineStep
@@ -408,6 +430,7 @@ export default function MotivationStudio() {
               {stage === "export" && (
                 <ExportStep
                   check={check} counts={counts} busy={busy} reqs={reqs} profile={profile}
+                  letterId={letter.id} draftText={draft}
                   onCheck={runCheck} onExport={exportFile} onCopy={copyText}
                 />
               )}
@@ -914,7 +937,7 @@ function RefineStep({ draft, busy, compare, onRefine, onApply, onDiscard, versio
 }
 
 // ============================ Schritt 7: Prüfen & Export ============================
-function ExportStep({ check, counts, busy, reqs, profile, onCheck, onExport, onCopy }: any) {
+function ExportStep({ check, counts, busy, reqs, profile, letterId, draftText, onCheck, onExport, onCopy }: any) {
   const fileName = profile?.lastName && profile?.firstName
     ? `${profile.lastName}_${profile.firstName}_LM.pdf`.replace(/\s+/g, "")
     : "Nachname_Vorname_LM.pdf";
@@ -971,6 +994,8 @@ function ExportStep({ check, counts, busy, reqs, profile, onCheck, onExport, onC
           )}
         </>
       )}
+
+      <ReviewPanel letterId={letterId} body={draftText} />
 
       <h4>Export</h4>
       <div className="ms-hint">Dateiname nach WHU-Muster: <b>{fileName}</b></div>

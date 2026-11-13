@@ -956,3 +956,354 @@ export async function probeModels(models: string[]): Promise<ModelProbe[]> {
   }
   return out;
 }
+
+// =====================================================================
+//  Motivationsschreiben: mehrstufige Pipeline
+//  Jede Stufe ist ein eigener, schema-geprüfter Aufruf. Die Prüfstufen
+//  (Review, Faktencheck, Interviewfestigkeit) laufen getrennt von der
+//  Erzeugung, damit sie nicht die eigene Arbeit bewerten.
+// =====================================================================
+
+export interface StoryPlanItem { title: string; why: string; angle: string; }
+export interface NarrativePlan {
+  coreArgument: string;
+  stories: StoryPlanItem[];
+  sections: { heading: string; intent: string }[];
+  missing: string[];
+}
+
+// Stufe B+C+D: Motive erkennen, Geschichten wählen, Argumentation bauen.
+export async function planMotivationNarrative(params: {
+  rules: string; admissions: string; evidence: string; profile: string; interview: string;
+  language: "de" | "en"; preselected: string;
+}): Promise<NarrativePlan> {
+  const schema = {
+    type: "object", additionalProperties: false,
+    required: ["coreArgument", "stories", "sections", "missing"],
+    properties: {
+      coreArgument: { type: "string" },
+      stories: {
+        type: "array",
+        items: {
+          type: "object", additionalProperties: false, required: ["title", "why", "angle"],
+          properties: { title: { type: "string" }, why: { type: "string" }, angle: { type: "string" } }
+        }
+      },
+      sections: {
+        type: "array",
+        items: {
+          type: "object", additionalProperties: false, required: ["heading", "intent"],
+          properties: { heading: { type: "string" }, intent: { type: "string" } }
+        }
+      },
+      missing: { type: "array", items: { type: "string" } }
+    }
+  };
+  const system = `${params.rules}
+
+AUFGABE: Baue die Argumentation des Schreibens – noch keinen Fliesstext.
+
+1. Arbeite heraus, warum diese Person Wirtschaft studieren will. Leite das AUS DEN ERFAHRUNGEN ab, nicht aus Allgemeinplätzen. Wenn die Erfahrungen das nicht hergeben, sage es unter "missing".
+2. Wähle zwei bis vier Erfahrungen aus. Wähle NICHT die prestigeträchtigsten, sondern die, die am meisten über die Person aussagen: Relevanz, Glaubwürdigkeit, erkennbares Lernen und argumentative Vielfalt. Zwei Erfahrungen, die dasselbe belegen, sind schwächer als zwei, die verschiedene Seiten zeigen.
+3. "coreArgument": ein Satz, der die rote Linie des Schreibens benennt.
+4. "stories": je gewählte Erfahrung Titel, Begründung der Auswahl ("why") und der Blickwinkel, unter dem sie erzählt wird ("angle").
+5. "sections": 4 bis 6 Abschnitte mit Überschrift und Zweck. Innere Logik: Vergangenheit → prägende Erfahrung → Erkenntnis → Studienmotivation → Passung zur Hochschule → eigener Beitrag und Entwicklung. Das ist eine Denkreihenfolge, keine starre Absatzfolge.
+6. Alle offiziellen Pflichtbestandteile müssen abgedeckt sein.
+7. "missing": was für ein überzeugendes Schreiben fehlt. Nur echte Lücken.
+Sprache der Ausgabe: ${params.language === "en" ? "Englisch" : "Deutsch"}.
+
+${params.admissions}
+
+${params.preselected ? `VORAUSWAHL DER ANWENDUNG (nach Tiefe und Vielfalt, du darfst begründet abweichen):\n${params.preselected}\n` : ""}
+${params.profile}
+
+${params.evidence}
+
+${params.interview}`;
+  return rawJson<NarrativePlan>(system, "Erstelle den Argumentationsplan jetzt.", schema, 2200, "writing");
+}
+
+// Stufe E: Entwurf.
+export async function writeMotivationDraft(params: {
+  rules: string; admissions: string; evidence: string; profile: string; interview: string;
+  plan: string; identityLine: string; tone: string; toneGuard: string; language: "de" | "en";
+}): Promise<{ body: string; missing: string[] }> {
+  const schema = {
+    type: "object", additionalProperties: false, required: ["body", "missing"],
+    properties: { body: { type: "string" }, missing: { type: "array", items: { type: "string" } } }
+  };
+  const system = `${params.rules}
+
+AUFGABE: Schreibe den vollständigen Entwurf entlang des Plans.
+- Beginne mit der Kopfzeile genau so: "${params.identityLine}" – danach eine Leerzeile.
+- Danach reiner Fliesstext in Absätzen. Keine Überschriften im Text.
+- Umfang so, dass der Text sicher auf höchstens zwei DIN-A4-Seiten passt. Orientierung: etwa 450 bis 650 Wörter. Das ist KEINE Vorgabe der Hochschule, nur eine Hilfsgrösse.
+- Keine E-Mail-Adresse, keine Telefonnummer, keine Anschrift.
+- Tonalität: ${params.tone}
+- ${params.toneGuard}
+- "missing": Angaben, die du weggelassen hast, weil sie fehlen.
+Sprache: ${params.language === "en" ? "Englisch" : "Deutsch"}.
+
+${params.admissions}
+
+=== ARGUMENTATIONSPLAN ===
+${params.plan}
+
+${params.profile}
+
+${params.evidence}
+
+${params.interview}`;
+  return rawJson<{ body: string; missing: string[] }>(system, "Schreibe den Entwurf jetzt.", schema, 3000, "writing");
+}
+
+// Stufe F: Kritischer Gegenleser. Bewertet NUR, schreibt nicht um.
+export interface ReviewFinding {
+  dimension: string; score: number; justification: string; quote: string | null; suggestion: string | null;
+}
+export async function reviewMotivationDraft(params: {
+  admissions: string; evidence: string; body: string; dimensions: string; language: "de" | "en";
+}): Promise<{ findings: ReviewFinding[]; worstParagraphs: number[]; summary: string }> {
+  const schema = {
+    type: "object", additionalProperties: false, required: ["findings", "worstParagraphs", "summary"],
+    properties: {
+      findings: {
+        type: "array",
+        items: {
+          type: "object", additionalProperties: false,
+          required: ["dimension", "score", "justification", "quote", "suggestion"],
+          properties: {
+            dimension: { type: "string" }, score: { type: "integer" },
+            justification: { type: "string" },
+            quote: { type: ["string", "null"] }, suggestion: { type: ["string", "null"] }
+          }
+        }
+      },
+      worstParagraphs: { type: "array", items: { type: "integer" } },
+      summary: { type: "string" }
+    }
+  };
+  const system = `Du bist ein kritischer, erfahrener Zulassungsprüfer. Du liest ein Motivationsschreiben und bewertest es streng, aber fair.
+
+AUFGABE: Bewerte GENAU diese Dimensionen, jede mit 0 bis 10 Punkten:
+${params.dimensions}
+
+REGELN:
+- Schreibe den Text NICHT um. Du bewertest nur.
+- Belege jede Einschätzung an einer Stelle im Text ("quote", wörtliches Zitat aus dem Text, sonst null).
+- "suggestion": ein konkreter Verbesserungsvorschlag, der OHNE neue Tatsachen auskommt (sonst null).
+- Erfinde keine Schwächen, nur um eine Dimension zu füllen. Ist etwas gut, vergib eine hohe Punktzahl und sage, warum.
+- Prüfe insbesondere: Klingt es austauschbar? Werden Werte als Schlagwort behauptet statt durch Handlung gezeigt? Wird der Lebenslauf nacherzählt? Gibt es unbegründete Leadership-Behauptungen? Steht Geplantes als bereits Erlebtes da?
+- "worstParagraphs": Indizes (0-basiert, Absätze durch Leerzeilen getrennt) der Absätze, bei denen eine Überarbeitung am meisten bringt. Höchstens drei.
+- "summary": zwei bis drei Sätze Gesamturteil.
+Sprache: ${params.language === "en" ? "Englisch" : "Deutsch"}.
+
+${params.admissions}
+
+${params.evidence}`;
+  return rawJson(system, `Zu bewertender Text:\n\n${params.body}`, schema, 2600, "writing");
+}
+
+// Stufe H: Faktencheck gegen die Evidence Database.
+export interface FactClaim {
+  claim: string; status: "belegt" | "unbelegt" | "falsch_dargestellt"; note: string;
+}
+export async function factCheckMotivation(params: {
+  evidence: string; body: string; plannedTitles: string; language: "de" | "en";
+}): Promise<{ claims: FactClaim[]; verdict: string }> {
+  const schema = {
+    type: "object", additionalProperties: false, required: ["claims", "verdict"],
+    properties: {
+      claims: {
+        type: "array",
+        items: {
+          type: "object", additionalProperties: false, required: ["claim", "status", "note"],
+          properties: {
+            claim: { type: "string" },
+            status: { type: "string", enum: ["belegt", "unbelegt", "falsch_dargestellt"] },
+            note: { type: "string" }
+          }
+        }
+      },
+      verdict: { type: "string" }
+    }
+  };
+  const system = `Du prüfst Tatsachenbehauptungen. Du schreibst nichts um.
+
+AUFGABE: Gehe den Text Satz für Satz durch und sammle jede konkrete Tatsachenbehauptung über die Person (Tätigkeiten, Rollen, Ergebnisse, Zeiträume, Zahlen, Orte).
+Vergleiche jede mit den hinterlegten ERFAHRUNGEN:
+- "belegt": wird durch eine Erfahrung mit Status CONFIRMED oder USER_REPORTED gedeckt.
+- "unbelegt": findet sich dort nicht.
+- "falsch_dargestellt": existiert, wird aber anders dargestellt – vor allem ein Vorhaben mit Status PLANNED, das wie eine gemachte Erfahrung klingt.
+Allgemeine Aussagen über Interessen, Wünsche oder Gefühle sind KEINE Tatsachenbehauptungen; lass sie weg.
+"note": ein Satz, warum.
+"verdict": ein Satz Gesamturteil.
+Diese Vorhaben sind ausdrücklich nur GEPLANT: ${params.plannedTitles || "(keine)"}
+Sprache: ${params.language === "en" ? "Englisch" : "Deutsch"}.
+
+${params.evidence}`;
+  return rawJson(system, `Zu prüfender Text:\n\n${params.body}`, schema, 2400, "writing");
+}
+
+// Stufe G: gezielte Überarbeitung nur der schwachen Absätze.
+export async function reviseWeakParagraphs(params: {
+  rules: string; admissions: string; evidence: string; numberedBody: string;
+  weaknesses: string; tone: string; toneGuard: string; language: "de" | "en";
+}): Promise<{ changes: { index: number; paragraph: string; reason: string }[]; note: string | null }> {
+  const schema = {
+    type: "object", additionalProperties: false, required: ["changes", "note"],
+    properties: {
+      changes: {
+        type: "array",
+        items: {
+          type: "object", additionalProperties: false, required: ["index", "paragraph", "reason"],
+          properties: { index: { type: "integer" }, paragraph: { type: "string" }, reason: { type: "string" } }
+        }
+      },
+      note: { type: ["string", "null"] }
+    }
+  };
+  const system = `${params.rules}
+
+AUFGABE: Überarbeite NUR die unten benannten Schwachstellen.
+- Fasse ausschliesslich die genannten Absätze an. Alle anderen bleiben unverändert und gibst du nicht zurück.
+- Behebe genau den beschriebenen Mangel. Keine Rundum-Politur, keine neuen Tatsachen.
+- Lässt sich ein Mangel ohne neue Tatsachen nicht beheben, lasse den Absatz weg und erkläre es in "note".
+- Tonalität: ${params.tone}
+- ${params.toneGuard}
+Sprache: ${params.language === "en" ? "Englisch" : "Deutsch"}.
+
+${params.admissions}
+
+${params.evidence}
+
+=== ZU BEHEBENDE SCHWACHSTELLEN ===
+${params.weaknesses}`;
+  return rawJson(system, `Text mit nummerierten Absätzen:\n\n${params.numberedBody}`, schema, 2600, "writing");
+}
+
+// Stufe I + Produktfunktion H: Interviewfestigkeit und Vorbereitung.
+export interface InterviewProbe { question: string; basis: string; risk: "hoch" | "mittel" | "niedrig"; }
+export async function interviewReadiness(params: {
+  admissions: string; evidence: string; body: string; language: "de" | "en";
+}): Promise<{ probes: InterviewProbe[]; weakSpots: string[]; verdict: string }> {
+  const schema = {
+    type: "object", additionalProperties: false, required: ["probes", "weakSpots", "verdict"],
+    properties: {
+      probes: {
+        type: "array",
+        items: {
+          type: "object", additionalProperties: false, required: ["question", "basis", "risk"],
+          properties: {
+            question: { type: "string" }, basis: { type: "string" },
+            risk: { type: "string", enum: ["hoch", "mittel", "niedrig"] }
+          }
+        }
+      },
+      weakSpots: { type: "array", items: { type: "string" } },
+      verdict: { type: "string" }
+    }
+  };
+  const system = `Du bereitest auf ein Auswahlgespräch vor. Das Gespräch beruht auf Lebenslauf und Motivationsschreiben.
+
+AUFGABE:
+- "probes": 6 bis 10 Fragen, die ein Prüfer auf Grundlage GENAU DIESES Textes stellen würde. "basis" nennt die Textstelle oder Aussage, die die Frage auslöst. "risk" schätzt, wie schwer die Frage zu beantworten ist, wenn die Aussage dünn belegt ist.
+- "weakSpots": Aussagen im Text, die die Person im Gespräch vermutlich NICHT mit einem eigenen Beispiel untermauern könnte. Nur solche, die wirklich dünn sind.
+- "verdict": ein bis zwei Sätze, wie interviewfest der Text insgesamt ist.
+Erfinde keine Fragen zu Dingen, die nicht im Text stehen.
+Sprache: ${params.language === "en" ? "Englisch" : "Deutsch"}.
+
+${params.admissions}
+
+${params.evidence}`;
+  return rawJson(system, `Text:\n\n${params.body}`, schema, 2400, "writing");
+}
+
+// Phase 4: dynamische, kontextabhängige Rückfragen.
+export interface DynamicQuestion { key: string; question: string; why: string; targets: string | null; }
+export async function nextInterviewQuestions(params: {
+  admissions: string; evidence: string; profile: string; asked: string; language: "de" | "en";
+}): Promise<{ questions: DynamicQuestion[]; enough: boolean; reason: string }> {
+  const schema = {
+    type: "object", additionalProperties: false, required: ["questions", "enough", "reason"],
+    properties: {
+      questions: {
+        type: "array",
+        items: {
+          type: "object", additionalProperties: false, required: ["key", "question", "why", "targets"],
+          properties: {
+            key: { type: "string" }, question: { type: "string" },
+            why: { type: "string" }, targets: { type: ["string", "null"] }
+          }
+        }
+      },
+      enough: { type: "boolean" },
+      reason: { type: "string" }
+    }
+  };
+  const system = `Du führst ein kurzes, kluges Gespräch, um die Person hinter den Leistungen kennenzulernen.
+
+AUFGABE: Stelle EINE BIS DREI Fragen – nicht mehr.
+REGELN:
+- Frage NICHT nach Dingen, die bereits bekannt sind. Die bekannten Angaben stehen unten.
+- Frage nach konkreten Situationen, Entscheidungen und Folgen – nicht nach Eigenschaften. Statt "Bist du teamfähig?" lieber "Wann warst du in einem Team anderer Meinung, und was hast du gemacht?".
+- Stelle nur Fragen, deren Antwort den Text wahrscheinlich wesentlich besser macht. Nicht jede Information ist für das Schreiben relevant.
+- Ist eine Erfahrung bereits gut belegt, hake nicht weiter nach, sondern wende dich einer unbelegten Seite zu.
+- "key": kurzer, stabiler Schlüssel in Kleinbuchstaben mit Unterstrichen.
+- "why": ein Satz, warum diese Frage den Text verbessert.
+- "targets": der Titel der Erfahrung, auf die die Frage zielt, sonst null.
+- "enough": true, wenn genug Material für ein überzeugendes Schreiben vorliegt. Dann gib eine leere Fragenliste zurück.
+- "reason": ein Satz zum aktuellen Stand.
+Sprache: ${params.language === "en" ? "Englisch" : "Deutsch"}.
+
+${params.admissions}
+
+${params.profile}
+
+${params.evidence}
+
+=== BEREITS GESTELLTE FRAGEN (nicht wiederholen) ===
+${params.asked || "(noch keine)"}`;
+  return rawJson(system, "Welche Fragen stellst du jetzt?", schema, 1600, "writing");
+}
+
+// Phase 3: Erfahrungen aus vorhandenen Unterlagen vorschlagen.
+export async function extractEvidenceFromDocuments(params: {
+  documents: string; language: "de" | "en";
+}): Promise<{ items: any[]; note: string | null }> {
+  const schema = {
+    type: "object", additionalProperties: false, required: ["items", "note"],
+    properties: {
+      items: {
+        type: "array",
+        items: {
+          type: "object", additionalProperties: false,
+          required: ["title", "period", "role", "situation", "result", "status", "source"],
+          properties: {
+            title: { type: "string" }, period: { type: ["string", "null"] },
+            role: { type: ["string", "null"] }, situation: { type: ["string", "null"] },
+            result: { type: ["string", "null"] },
+            status: { type: "string", enum: ["CONFIRMED", "USER_REPORTED", "PLANNED", "INFERRED", "UNKNOWN"] },
+            source: { type: ["string", "null"] }
+          }
+        }
+      },
+      note: { type: ["string", "null"] }
+    }
+  };
+  const system = `Du liest Bewerbungsunterlagen und legst daraus Erfahrungs-Datensätze an.
+
+AUFGABE: Extrahiere die Erfahrungen, die in einem Motivationsschreiben relevant sein könnten.
+REGELN:
+- Übernimm NUR, was tatsächlich dort steht. Ergänze nichts.
+- "status" sorgfältig setzen:
+  * CONFIRMED, wenn die Unterlage es klar belegt (z. B. ein Zeugnis).
+  * USER_REPORTED, wenn es im Lebenslauf steht, aber nicht weiter belegt ist.
+  * PLANNED, wenn erkennbar ist, dass es noch bevorsteht (Formulierungen wie "geplant", "ab", ein Datum in der Zukunft, "Zusage für").
+  * INFERRED, wenn du es nur erschliesst. Dann KEINE Details ergänzen.
+- Felder, die die Unterlage nicht hergibt, bleiben null. Niemals ausschmücken.
+- "source": aus welcher Unterlage die Angabe stammt.
+- Höchstens 12 Einträge, die aussagekräftigsten zuerst.
+Sprache: ${params.language === "en" ? "Englisch" : "Deutsch"}.`;
+  return rawJson(system, params.documents, schema, 2800, "writing");
+}
