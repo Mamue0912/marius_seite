@@ -371,3 +371,28 @@ test("Szenario: geplante Berufserfahrung bleibt durchgehend als geplant kenntlic
   });
   assert.equal(checks.find((c) => c.id.startsWith("planned_"))?.status, "fehlt");
 });
+
+// ===================================================== Regression
+test("Die Speicher-Route akzeptiert jede angebotene Tonalität", async () => {
+  // Fehler aus der Praxis: Die Oberfläche bot eine Tonalität an, die die
+  // Route nicht kannte -> "Keine Änderung angegeben".
+  const fs = await import("node:fs");
+  const route = fs.readFileSync("app/api/motivation/letters/[id]/route.ts", "utf8");
+  for (const t of TONES) {
+    assert.ok(route.includes(`"${t.key}"`), `Die Route kennt die Tonalität "${t.key}" nicht`);
+  }
+});
+
+test("Ein PATCH ohne Änderung gilt nicht als Fehler", async () => {
+  const fs = await import("node:fs");
+  const route = fs.readFileSync("app/api/motivation/letters/[id]/route.ts", "utf8");
+  assert.ok(route.includes("unchanged: true"), "Ein No-Op muss freundlich beantwortet werden");
+  assert.ok(!route.includes('message: "Keine Änderung angegeben."'), "Die rote Meldung darf nicht mehr vorkommen");
+});
+
+test("Aktualisieren wirft den Nutzer nicht aus dem gewählten Schritt", async () => {
+  const fs = await import("node:fs");
+  const ui = fs.readFileSync("components/MotivationStudio.tsx", "utf8");
+  assert.ok(ui.includes("keepStage"), "Beim Aktualisieren muss der Schritt erhalten bleiben");
+  assert.ok(!/onChanged=\{\(\) => void loadAll\(\)\}/.test(ui), "Teilbereiche dürfen keinen Vollreload auslösen");
+});

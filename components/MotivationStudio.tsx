@@ -71,7 +71,7 @@ export default function MotivationStudio() {
     if (r.ok) setVersions(r.data.versions || []);
   }, []);
 
-  const openLetter = useCallback(async (id: string) => {
+  const openLetter = useCallback(async (id: string, opts?: { keepStage?: boolean }) => {
     const r = await api(`/api/motivation/letters/${id}`);
     if (!r.ok) { setLoadError(r.message); return; }
     setLetter(r.data.letter);
@@ -80,7 +80,9 @@ export default function MotivationStudio() {
     savedRef.current = r.data.letter.body || "";
     setExamples(r.data.examples || []);
     setCheck(r.data.letter.last_check || null);
-    setStage((r.data.letter.stage as Stage) || "entwurf");
+    // Beim blossen Aktualisieren darf der gerade gewaehlte Schritt NICHT
+    // zurueckspringen – sonst wirft es den Nutzer mitten in der Arbeit heraus.
+    if (!opts?.keepStage) setStage((r.data.letter.stage as Stage) || "entwurf");
     void loadExamples(id);
     void loadVersions(id);
   }, [loadExamples, loadVersions]);
@@ -99,7 +101,9 @@ export default function MotivationStudio() {
     if (l.ok) {
       const list = l.data.letters || [];
       setLetters(list);
-      if (list[0]) await openLetter(list[0].id);
+      const current = letterRef.current;
+      if (current) await openLetter(current, { keepStage: true });
+      else if (list[0]) await openLetter(list[0].id);
     } else setLoadError(l.message);
     setLoading(false);
   }, [openLetter]);
@@ -399,8 +403,8 @@ export default function MotivationStudio() {
                   onSaved={() => void loadExamples(letter.id)} onNext={() => setStage("bezug")}
                 />
               )}
-              {stage === "erfahrungen" && <EvidenceStep onChanged={() => void loadAll()} />}
-              {stage === "gespraech" && <InterviewStep letterId={letter.id} onChanged={() => void loadAll()} />}
+              {stage === "erfahrungen" && <EvidenceStep />}
+              {stage === "gespraech" && <InterviewStep letterId={letter.id} />}
               {stage === "bezug" && <ReferenceStep reqs={reqs} letter={letter} onPatch={patchLetter} onNext={() => setStage("gliederung")} />}
               {stage === "gliederung" && (
                 <OutlineStep
