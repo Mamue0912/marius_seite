@@ -328,3 +328,21 @@ test("Ausweichkette beginnt beim eingestellten Modell und hat keine Doppel", asy
   assert.equal(new Set(custom).size, custom.length);
   delete process.env.ANTHROPIC_MODEL_WRITING;
 });
+
+
+test("Opus 5 und Opus 5.5 stehen beide im geprüften Katalog", async () => {
+  const { MODEL_CATALOG } = await import("../lib/aiModels");
+  assert.ok(MODEL_CATALOG["claude-opus-5-5"], "Opus 5.5 muss bekannt sein");
+  assert.ok(MODEL_CATALOG["claude-opus-5"], "Opus 5 muss bekannt sein");
+  // Opus 5.5 ist laut offizieller Übersicht günstiger als Opus 5.
+  assert.ok(MODEL_CATALOG["claude-opus-5-5"].inputPerMTokUsd < MODEL_CATALOG["claude-opus-5"].inputPerMTokUsd);
+});
+
+test("Modelltest wertet Überlastung nicht als fehlendes Modell", async () => {
+  const { aiErrorInfo } = await import("../lib/anthropic");
+  process.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "test-key";
+  for (const e of [{ status: 429, message: "rate limit" }, { status: 529, message: "overloaded" }]) {
+    const c = aiErrorInfo(e).category;
+    assert.ok(c === "rate_limit" || c === "overloaded", `${c} darf kein Modellproblem sein`);
+  }
+});

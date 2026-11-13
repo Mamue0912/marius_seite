@@ -1677,8 +1677,16 @@ function SendModal({ app, data, accounts, sendEnabled, onClose, onSent, onDiag }
 // ============================ KI-Diagnose ============================
 function DiagModal({ onClose }: { onClose: () => void }) {
   const [s, setS] = useState<any>({ loading: true });
+  const [probe, setProbe] = useState<any>(null);
+  const [probing, setProbing] = useState(false);
   useEffect(() => { aj("/api/mail/ai-diagnostics", { timeoutMs: 15000 }).then((r) => setS(r.ok ? { loading: false, ...r.data } : { loading: false, error: true })); }, []);
-  const cat: Record<string, string> = { not_configured: "Nicht eingerichtet", auth: "Authentifizierung", rate_limit: "Rate-Limit", timeout: "Zeitüberschreitung", overloaded: "Überlastet", api_error: "API-Fehler" };
+  async function runProbe() {
+    setProbing(true); setProbe(null);
+    const r = await aj("/api/mail/ai-diagnostics", { method: "POST", timeoutMs: 90000 });
+    setProbing(false);
+    setProbe(r.ok ? r.data : { error: errText(r, "Der Modelltest ist fehlgeschlagen.") });
+  }
+  const cat: Record<string, string> = { not_configured: "Nicht eingerichtet", auth: "Authentifizierung", rate_limit: "Rate-Limit", timeout: "Zeitüberschreitung", overloaded: "Überlastet", api_error: "API-Fehler", model_unavailable: "Modell nicht verfügbar", bad_request: "Anfrage abgelehnt" };
   return (
     <div className="ac-modal-scrim" onClick={onClose}>
       <div className="ac-modal" onClick={(e) => e.stopPropagation()}>
@@ -1687,10 +1695,32 @@ function DiagModal({ onClose }: { onClose: () => void }) {
           {s.loading ? <div className="ac-empty"><span className="spin" /></div> : s.error ? <div className="ac-note bad">Diagnose nicht verfügbar.</div> : <>
             <div className="ac-field"><label>KI-Verbindung</label><div className="ac-status-line"><Icon name={s.configured ? "check" : "info"} size={15} />{s.configured ? "eingerichtet" : "nicht eingerichtet (ANTHROPIC_API_KEY fehlt)"}</div></div>
             <div className="ac-field"><label>Modell</label><div>{s.model || "—"}</div></div>
+            {s.lastServedModel && <div className="ac-field"><label>Zuletzt geantwortet</label><div>{s.lastServedModel}</div></div>}
+            {s.modelChain?.length > 1 && <div className="ac-field"><label>Ausweichkette</label><div style={{ fontSize: 12.5, color: "var(--muted)" }}>{s.modelChain.join(" → ")}</div></div>}
+
+            <div className="ac-field">
+              <label>Welche Modelle darf dieser Zugang nutzen?</label>
+              <button className="ac-btn" onClick={runProbe} disabled={probing || !s.configured}>
+                {probing ? <><span className="spin sm" /> Wird geprüft…</> : "Modelle jetzt testen"}
+              </button>
+              <div className="ac-hint">Je Modell ein winziger Testaufruf. Kostet praktisch nichts.</div>
+            </div>
+            {probe?.error && <div className="ac-note bad">{probe.error}</div>}
+            {probe?.results && (
+              <div className="ac-diag-list">
+                {probe.results.map((r: any) => (
+                  <div key={r.model} className={"ac-diag-row" + (r.usable ? "" : " bad")}>
+                    <span><Icon name={r.usable ? "check" : "info"} size={15} /></span>
+                    <span className="ac-diag-kind">{r.model}</span>
+                    <span className="ac-diag-meta">{r.usable ? "nutzbar" : (r.reason || "nicht nutzbar")}</span>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="ac-field"><label>Versand</label><div>{s.sendEnabled ? "aktiviert" : "deaktiviert"}</div></div>
             <div className="ac-label sm">Letzte KI-Anfragen</div>
             {(!s.events || !s.events.length) ? <div className="ac-mod-empty">Noch keine protokolliert. (Tabelle ai_events via schema_ai.sql.)</div> :
-              <div className="ac-diag-list">{s.events.map((e: any, i: number) => <div key={i} className={"ac-diag-row" + (e.ok ? "" : " bad")}><span><Icon name={e.ok ? "check" : "info"} size={15} /></span><span className="ac-diag-kind">{e.kind}</span><span className="ac-diag-meta">{new Date(e.created_at).toLocaleString("de-DE")} · {e.duration_ms != null ? Math.round(e.duration_ms / 100) / 10 + "s" : "—"}{e.error_category ? " · " + (cat[e.error_category] || e.error_category) : ""}</span></div>)}</div>}
+              <div className="ac-diag-list">{s.events.map((e: any, i: number) => <div key={i} className={"ac-diag-row" + (e.ok ? "" : " bad")}><span><Icon name={e.ok ? "check" : "info"} size={15} /></span><span className="ac-diag-kind">{e.kind}</span><span className="ac-diag-meta">{new Date(e.created_at).toLocaleString("de-DE")} · {e.duration_ms != null ? Math.round(e.duration_ms / 100) / 10 + "s" : "—"}{e.error_category ? " · " + (cat[String(e.error_category).split(":")[0]] || String(e.error_category).split(":")[0]) + (String(e.error_category).includes(":") ? ": " + String(e.error_category).split(":").slice(1).join(":").trim() : "") : ""}</span></div>)}</div>}
             <div className="ac-hint">Keine Schlüssel und keine vollständigen Inhalte werden gespeichert.</div>
           </>}
         </div>

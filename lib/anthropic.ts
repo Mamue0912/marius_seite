@@ -899,3 +899,30 @@ ${params.examples}`;
     system, `Text mit nummerierten Absätzen:\n\n${params.numberedBody}`, schema, 3000, "writing"
   );
 }
+
+// Prüft, welche Modelle dieser Zugang tatsächlich verwenden darf.
+// Minimaler Aufruf je Modell (1 Token), damit es nichts nennenswert kostet.
+export interface ModelProbe { model: string; usable: boolean; reason: string | null; }
+
+export async function probeModels(models: string[]): Promise<ModelProbe[]> {
+  if (!aiConfigured()) throw new Error("Fehlende Umgebungsvariable: ANTHROPIC_API_KEY");
+  const out: ModelProbe[] = [];
+  for (const model of models.slice(0, 8)) {
+    try {
+      await client().messages.create(
+        { model, max_tokens: 1, messages: [{ role: "user", content: "." }] } as any,
+        { timeout: 15000, maxRetries: 0 }
+      );
+      out.push({ model, usable: true, reason: null });
+    } catch (e) {
+      const info = aiErrorInfo(e);
+      // Überlastung/Ratenbegrenzung heißt NICHT, dass das Modell fehlt.
+      const usable = info.category === "rate_limit" || info.category === "overloaded";
+      out.push({
+        model, usable,
+        reason: usable ? `vorübergehend: ${info.category}` : (info.detail || info.message)
+      });
+    }
+  }
+  return out;
+}
