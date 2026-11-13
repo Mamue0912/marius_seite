@@ -1520,3 +1520,21 @@ a.cal-ev:hover { border-color: var(--line-strong); background: var(--mat); }
   .ac-tab { flex: 1; justify-content: center; padding: 10px 10px; font-size: 13px; }
   .ms-editor { min-height: 300px; }
 }
+
+/* ---- Entwurf: Hauptaktion, Quellen, Änderungswunsch ---- */
+.ac-btn.big { font-size: 15px; padding: 13px 22px; }
+.ms-srcinfo { margin: 12px 0; padding: 9px 13px; border-radius: var(--r-sm); font-size: 12.5px; line-height: 1.5;
+  background: var(--low-soft); border: 1px solid rgba(74,222,128,.28); color: #c9f7d8; }
+.ms-wish { margin-top: 20px; padding: 14px; border-radius: var(--r-sm); background: var(--mat-thin); border: 1px solid var(--accent-line); }
+.ms-wish-row { display: flex; gap: 8px; margin: 7px 0 4px; }
+.ms-wish-row input {
+  flex: 1; min-width: 0; background: var(--surface-2); color: var(--ink);
+  border: 1px solid var(--line-2); border-radius: var(--r-xs); padding: 10px 12px; font-size: 14px; font-family: inherit;
+}
+.ms-wish-row input:focus { outline: none; border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-soft); }
+.ms-changes { margin-top: 18px; }
+.ms-change { border: 1px solid var(--line-2); border-radius: var(--r-sm); padding: 12px 14px; margin-bottom: 12px; background: var(--mat-thin); }
+.ms-change.done { opacity: .55; }
+.ms-change-h { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; font-size: 13px; font-weight: 600; }
+.ms-change-r { font-weight: 400; color: var(--muted); font-size: 12px; }
+@media (max-width: 780px) { .ms-wish-row { flex-direction: column; } }

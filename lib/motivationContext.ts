@@ -99,3 +99,60 @@ export function plannedTerms(profile: PersonalProfile, examples: PersonalExample
   }
   return terms;
 }
+
+// ---------------------------------------------------------------------
+//  Vorhandene Unterlagen als Tatsachenquelle
+//
+//  Der Motivationsbereich nutzt dieselben Unterlagen wie der
+//  Bewerbungsbereich: bestätigte Fakten und die extrahierten Volltexte
+//  der hochgeladenen Dateien. Dadurch muss der Nutzer nichts doppelt
+//  eintragen.
+// ---------------------------------------------------------------------
+
+export interface SourceMaterial {
+  factsText: string;
+  documentsText: string;
+  factCount: number;
+  documents: { name: string; type: string | null }[];
+}
+
+const DOC_CHARS = 6000;   // je Dokument
+const TOTAL_CHARS = 20000; // insgesamt, schützt das Zeitlimit
+
+export async function loadSourceMaterial(userId: string): Promise<SourceMaterial> {
+  const admin = supabaseAdmin();
+
+  const { data: facts } = await admin
+    .from("app_document_facts")
+    .select("category,value")
+    .eq("user_id", userId).eq("status", "bestaetigt")
+    .order("category", { ascending: true });
+
+  const byCat: Record<string, string[]> = {};
+  for (const f of facts || []) (byCat[f.category] ||= []).push(f.value);
+  const factsText = Object.entries(byCat).map(([c, v]) => `- ${c}: ${v.join("; ")}`).join("\n");
+
+  const { data: docs } = await admin
+    .from("app_documents")
+    .select("name,doc_type,extracted_text,allowed_for_applications")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(12);
+
+  const usable = (docs || []).filter((d: any) => d.allowed_for_applications !== false && (d.extracted_text || "").trim());
+  const parts: string[] = [];
+  let budget = TOTAL_CHARS;
+  for (const d of usable) {
+    if (budget <= 0) break;
+    const text = String(d.extracted_text).trim().slice(0, Math.min(DOC_CHARS, budget));
+    budget -= text.length;
+    parts.push(`[${d.doc_type || "Unterlage"}] ${d.name}\n${text}`);
+  }
+
+  return {
+    factsText,
+    documentsText: parts.join("\n\n---\n\n"),
+    factCount: (facts || []).length,
+    documents: usable.map((d: any) => ({ name: d.name, type: d.doc_type }))
+  };
+}
